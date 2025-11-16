@@ -1,4 +1,4 @@
-#include "string.h"
+#include "lib/string.h"
 
 int strlen(const char *str) {
     int len = 0;
@@ -36,6 +36,33 @@ char *strcpy(char *dest, const char *src) {
 
 char *strncpy(char *dest, const char *src, size_t n) {
     char *ret = dest;
+    while (n && (*src)) {
+        *dest++ = *src++;
+        n--;
+    }
+    if (n) {
+        *dest = '\0';
+    }
+    return ret;
+}
+
+char *strcat(char *dest, const char *src) {
+    char *ret = dest;
+    while (*dest) {
+        dest++;
+    }
+    while (*src) {
+        *dest++ = *src++;
+    }
+    *dest = '\0';
+    return ret;
+}
+
+char *strncat(char *dest, const char *src, size_t n) {
+    char *ret = dest;
+    while (*dest) {
+        dest++;
+    }
     while (n && (*src)) {
         *dest++ = *src++;
         n--;

@@ -1,7 +1,6 @@
 #pragma once
 
-//#include <stdint.h>
-
+#define KORAOS_VERSION "0.1"
 
 #ifdef __cplusplus
 extern "C" {
