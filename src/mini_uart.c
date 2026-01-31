@@ -89,8 +89,13 @@ void uart_init(void) {
     // Set baud rate to 115200
     // Baud rate = system_clock / (8 * (baudrate_reg + 1))
     // For 250MHz system clock: 250000000 / (8 * 115200) = 270
+#if RPI_VERSION == 4
+    REGS_AUX->mu_baud_rate = 541;   // 500 MHz core / 115200 baud
+#elif RPI_VERSION == 3
+    REGS_AUX->mu_baud_rate = 270;   // 250 MHz core / 115200 baud
+#else
     REGS_AUX->mu_baud_rate = 270;
-    
+#endif    
     // Configure GPIO pins 14 and 15 for Mini UART (Alt5)
     uint32_t selector = REGS_GPIO->func_select[1];
     selector &= ~((7 << 12) | (7 << 15));  // Clear pins 14 and 15

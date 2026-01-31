@@ -4,7 +4,7 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
 
 ## Project Snapshot
 - **Target**: Bare-metal Raspberry Pi kernel (Pi 3 via QEMU raspi3b, Pi 4 hardware)
-- **Current Capabilities**: Boot flow and UART console bring-up
+- **Current Capabilities**: Boot flow and UART console bring-up verified on QEMU and real hardware
 - **Toolchain**: LLVM/Clang cross-compilation managed by CMake (`./build.sh`), legacy Makefile retained for compatibility
 
 ## Where To Look
@@ -26,4 +26,3 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
 - Keep ARM system register definitions, exception vectors, and interrupt bring-up work in sync with the roadmap before adding new subsystems.
 
 If you uncover missing instructions or new best practices, update this handbook alongside the relevant docs so future agents stay aligned.
-

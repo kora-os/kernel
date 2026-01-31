@@ -1,6 +1,6 @@
 # KoraOS
 
-KoraOS is a bare-metal Raspberry Pi kernel written in C with a small assembly shim. The project targets the aarch64 architecture, focuses on UART bring-up, and uses LLVM/Clang together with CMake for a modern cross-compilation workflow.
+KoraOS is a bare-metal Raspberry Pi kernel written in C with a small assembly shim. The project targets the aarch64 architecture, focuses on UART bring-up, and uses LLVM/Clang together with CMake for a modern cross-compilation workflow. The current kernel boots in QEMU (raspi3b) and on Raspberry Pi 4 hardware.
 
 ## Quick Start
 
@@ -28,4 +28,3 @@ This generates a Mini-UART-aware image and copies it, along with `config.txt`, t
 - `docs/developer-guide.md` – Toolchain requirements, build configurations, QEMU workflow, and Raspberry Pi deployment instructions.
 
 Keep documentation in `docs/` current as the project evolves. Avoid placing temporary notes or todo lists there; use issue trackers or other channels for work-in-progress planning.
-

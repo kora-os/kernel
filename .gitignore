@@ -1,9 +1,11 @@
 project_notes/
 
-# Generated build directories
+# Generated build directories and files
 build/
 build-*/
 cmake-build*/
+bootfs/
+test.img.dmg
 
 # CMake-generated files (for accidental in-source builds)
 CMakeCache.txt
@@ -30,3 +32,6 @@ Makefile
 # Tooling caches
 .cache/
 .clangd/
+
+# MacOS trash
+.DS_Store

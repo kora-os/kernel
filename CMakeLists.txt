@@ -22,9 +22,9 @@ set(LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/lib")
 set(INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(LINKER_SCRIPT "${SRC_DIR}/linker.ld")
 
-# Gather sources from main src and src/lib to make sure lib sources are linked in
-file(GLOB KERNEL_C_SOURCES "${SRC_DIR}/*.c")
-file(GLOB KERNEL_ASM_SOURCES "${SRC_DIR}/*.S" "${SRC_DIR}/*.s")
+# Gather sources from src tree (including subdirectories) and src/lib
+file(GLOB_RECURSE KERNEL_C_SOURCES "${SRC_DIR}/*.c")
+file(GLOB_RECURSE KERNEL_ASM_SOURCES "${SRC_DIR}/*.S" "${SRC_DIR}/*.s")
 file(GLOB LIB_C_SOURCES "${LIB_DIR}/*.c")
 file(GLOB LIB_ASM_SOURCES "${LIB_DIR}/*.S" "${LIB_DIR}/*.s")
 
@@ -186,4 +186,3 @@ message(STATUS "Boot mount directory: ${BOOTMNT}")
 message(STATUS "Compiler: ${CMAKE_C_COMPILER}")
 message(STATUS "Linker script: ${LINKER_SCRIPT}")
 message(STATUS "Kernel variants enabled: ${enabled_variants_str}")
-

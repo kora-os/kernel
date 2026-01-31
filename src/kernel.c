@@ -4,6 +4,7 @@
 #include "lib/string.h"
 #include "mini_uart.h"
 #include "utils.h"
+#include "video/console_fb.h"
 
 void putc(void *p, char c) {
   if (c == '\n') {
@@ -19,6 +20,12 @@ void kernel_main(void) {
   uart_putc('\n');
 
   init_printf(NULL, putc);
+
+  fb_console_t fb_console;
+  if (fb_console_init(&fb_console, 1024, 768, 32)) {
+    fb_console_write(&fb_console, "KoraOS\n");
+    fb_console_write(&fb_console, "Hello from framebuffer console.\n");
+  }
 
 #if RPI_VERSION == 4
 #if QEMU_TESTING
