@@ -1,7 +1,6 @@
 #include "console.h"
 #include "lib/printf.h"
 #include "lib/stdlib.h"
-#include "lib/string.h"
 #include "mini_uart.h"
 #include "utils.h"
 #include "video/console_fb.h"
