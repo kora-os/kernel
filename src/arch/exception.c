@@ -3,6 +3,7 @@
 #include "arch/trapframe.h"
 #include "common.h"
 #include "lib/printf.h"
+#include "sys/syscall.h"
 
 extern char vectors[];
 
@@ -57,7 +58,7 @@ void handle_sync_el1(uint64_t esr, uint64_t far, struct trapframe *tf) {
 void handle_sync_el0(uint64_t esr, uint64_t far, struct trapframe *tf) {
     uint64_t ec = ESR_EC(esr);
     if (ec == ESR_EC_SVC64) {
-        // syscall dispatch added in the syscall step
+        syscall_handle(tf);
         return;
     }
     printf("\n*** User fault (EL0) ***\n");
