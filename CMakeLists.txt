@@ -46,6 +46,7 @@ set(C_FLAGS
     -Wall
     -mgeneral-regs-only
     -DRPI_VERSION=${RPI_VERSION}
+    -DPRINTF_LONG_SUPPORT
 )
 
 # Assembly flags

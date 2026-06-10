@@ -1,3 +1,4 @@
+#include "arch/exception.h"
 #include "console.h"
 #include "lib/printf.h"
 #include "lib/stdlib.h"
@@ -19,6 +20,9 @@ void kernel_main(void) {
   uart_putc('\n');
 
   init_printf(NULL, putc);
+
+  // Install EL1 exception vectors before doing anything that could trap.
+  exception_init();
 
   fb_console_t fb_console;
   if (fb_console_init(&fb_console, 1024, 768, 32)) {
