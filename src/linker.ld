@@ -10,7 +10,13 @@ SECTIONS {
         *(.text .text.*)
         *(.rodata .rodata.*)
     }
-    
+
+    /* Round the executable region up to a 2MB boundary so the MMU can map it
+       as a distinct block: code is read-only+executable (must not be
+       EL0-writable), while writable data lives in the following block(s). */
+    . = ALIGN(0x200000);
+    text_end = .;
+
     .data : {
         *(.data .data.*)
     }
