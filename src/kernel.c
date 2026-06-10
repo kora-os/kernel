@@ -1,5 +1,7 @@
 #include "arch/exception.h"
 #include "console.h"
+#include "mm/frame_alloc.h"
+#include "mm/mmu.h"
 #include "lib/printf.h"
 #include "lib/stdlib.h"
 #include "mini_uart.h"
@@ -23,6 +25,11 @@ void kernel_main(void) {
 
   // Install EL1 exception vectors before doing anything that could trap.
   exception_init();
+
+  // Enable the MMU with a flat, fully-permissive identity map, then bring up
+  // the physical page allocator for later user-stack allocation.
+  mmu_init();
+  frame_alloc_init();
 
   fb_console_t fb_console;
   if (fb_console_init(&fb_console, 1024, 768, 32)) {
