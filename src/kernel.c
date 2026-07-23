@@ -4,6 +4,7 @@
 #include "mm/frame_alloc.h"
 #include "mm/mmu.h"
 #include "proc/task.h"
+#include "user/embedded.h"
 #include "lib/printf.h"
 #include "lib/stdlib.h"
 #include "mini_uart.h"
@@ -54,6 +55,14 @@ void kernel_main(void) {
 #endif
 
   printf("Current EL: %d\n", get_el());
+
+  // Report the embedded user programs. The ELF loader that actually runs these
+  // (instead of the in-.text hello.S below) arrives in the next step.
+  printf("Embedded user programs: %d\n", (int)user_program_count());
+  for (size_t i = 0; i < user_program_count(); i++) {
+    const user_program_t *p = user_program_at(i);
+    printf("  %s: %d bytes\n", p->name, (int)user_program_size(p));
+  }
 
   // Launch the first user program in EL0.
   extern char user_hello_start[];
