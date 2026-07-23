@@ -70,6 +70,9 @@ set(USER_LINK_FLAGS
     -Wl,--pack-dyn-relocs=none
     -Wl,-z,norelro
     -Wl,-z,noexecstack
+    # Pack segments on 4 KB instead of the default 64 KB boundaries, so the
+    # loaded image spans a handful of pages rather than tens of them.
+    -Wl,-z,max-page-size=4096
 )
 
 set(USER_PROGRAM_NAMES "")
