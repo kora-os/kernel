@@ -5,6 +5,7 @@
 #include "mm/mmu.h"
 #include "proc/task.h"
 #include "user/embedded.h"
+#include "user/elf.h"
 #include "lib/printf.h"
 #include "lib/stdlib.h"
 #include "mini_uart.h"
@@ -56,27 +57,33 @@ void kernel_main(void) {
 
   printf("Current EL: %d\n", get_el());
 
-  // Report the embedded user programs. The ELF loader that actually runs these
-  // (instead of the in-.text hello.S below) arrives in the next step.
-  printf("Embedded user programs: %d\n", (int)user_program_count());
-  for (size_t i = 0; i < user_program_count(); i++) {
-    const user_program_t *p = user_program_at(i);
-    printf("  %s: %d bytes\n", p->name, (int)user_program_size(p));
+  // Load the first user program from its embedded PIE ELF image and run it in
+  // EL0.
+  const user_program_t *prog = user_program_find("hello");
+  if (prog == NULL) {
+    printf("No embedded 'hello' program found\n");
+  } else {
+    struct loaded_prog lp;
+    int rc = elf_load(prog->start, user_program_size(prog), &lp);
+    if (rc != 0) {
+      printf("elf_load('%s') failed: %d\n", prog->name, rc);
+    } else {
+      void *ustack = frame_alloc();
+      task_t hello = {
+          .entry = lp.entry,
+          .user_sp = (uint64_t)ustack + PAGE_SIZE,
+          .state = TASK_RUNNABLE,
+          .exit_code = 0,
+      };
+      printf("Launching '%s': entry=0x%lx sp=0x%lx (%d image pages)\n",
+             prog->name, hello.entry, hello.user_sp, (int)lp.image_pages);
+      task_run(&hello);
+      printf("User task '%s' exited with code %d\n", prog->name,
+             hello.exit_code);
+      frame_free_pages(lp.image, lp.image_pages);
+      frame_free(ustack);
+    }
   }
-
-  // Launch the first user program in EL0.
-  extern char user_hello_start[];
-  void *ustack = frame_alloc();
-  task_t hello = {
-      .entry = (uint64_t)user_hello_start,
-      .user_sp = (uint64_t)ustack + PAGE_SIZE,
-      .state = TASK_RUNNABLE,
-      .exit_code = 0,
-  };
-  printf("Launching user task: entry=0x%lx sp=0x%lx\n", hello.entry,
-         hello.user_sp);
-  task_run(&hello);
-  printf("User task exited with code %d\n", hello.exit_code);
 
   console_init();
   console_run();
