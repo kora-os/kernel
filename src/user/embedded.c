@@ -5,9 +5,12 @@
 // program's PIE ELF into the kernel's read-only data.
 extern const unsigned char _user_hello_start[];
 extern const unsigned char _user_hello_end[];
+extern const unsigned char _user_init_start[];
+extern const unsigned char _user_init_end[];
 
 static const user_program_t programs[] = {
     {"hello", _user_hello_start, _user_hello_end},
+    {"init", _user_init_start, _user_init_end},
 };
 
 size_t user_program_count(void) {
