@@ -99,6 +99,7 @@ function(add_user_program NAME)
 endfunction()
 
 add_user_program(hello "${USER_DIR}/hello.c")
+add_user_program(init "${USER_DIR}/init.c")
 
 # Generate assembly that .incbin's each program's ELF into read-only data,
 # exposing _user_<name>_start/_end symbols consumed by src/user/embedded.c.
