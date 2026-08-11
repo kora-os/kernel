@@ -1,50 +1,46 @@
-// EL0 entry/exit for KoraOS' single-task model.
+// EL0 entry/exit for KoraOS.
 //
 // enter_user() saves the kernel's callee-saved register context (a setjmp-like
-// snapshot) and erets down to EL0. kernel_return() restores that snapshot so
-// the exit syscall can unwind out of EL0 straight back to enter_user()'s
-// caller, abandoning the trap frame on the kernel stack.
-
-.section .bss
-.align 4
-kernel_ctx:
-    .skip 104               // x19..x30 (12) + sp = 13 * 8
+// snapshot) into a caller-provided buffer and erets down to EL0. Because the
+// buffer belongs to the task rather than being a single global, spawns can
+// nest: a parent suspended inside its spawn syscall keeps its own snapshot
+// while the child runs. kernel_return() restores a given snapshot, unwinding
+// out of EL0 straight back to the matching enter_user() caller and abandoning
+// the trap frame on the kernel stack.
+//
+// The buffer is 13 * 8 = 104 bytes: x19..x30 (12) followed by sp.
 
 .section .text
 
 .global enter_user
+// void enter_user(uint64_t entry /*x0*/, uint64_t user_sp /*x1*/,
+//                 uint64_t *kctx /*x2*/)
 enter_user:
-    // x0 = task_t* ; task_t layout: entry @0, user_sp @8
-    adrp x1, kernel_ctx
-    add  x1, x1, :lo12:kernel_ctx
-    mov  x2, sp
-    stp  x19, x20, [x1, #0]
-    stp  x21, x22, [x1, #16]
-    stp  x23, x24, [x1, #32]
-    stp  x25, x26, [x1, #48]
-    stp  x27, x28, [x1, #64]
-    stp  x29, x30, [x1, #80]
-    str  x2,       [x1, #96]
+    stp  x19, x20, [x2, #0]
+    stp  x21, x22, [x2, #16]
+    stp  x23, x24, [x2, #32]
+    stp  x25, x26, [x2, #48]
+    stp  x27, x28, [x2, #64]
+    stp  x29, x30, [x2, #80]
+    mov  x3, sp
+    str  x3,       [x2, #96]
 
-    ldr  x2, [x0, #0]       // entry
-    ldr  x3, [x0, #8]       // user_sp
-    msr  elr_el1, x2        // return address for eret
-    msr  sp_el0,  x3        // user stack
-    msr  spsr_el1, xzr      // EL0t, all interrupts unmasked
-    mov  x0, #0
+    msr  elr_el1, x0           // entry -> eret return address
+    msr  sp_el0,  x1           // user stack top
+    msr  spsr_el1, xzr         // EL0t, all interrupts unmasked
+    mov  x0, #0                // EL0 starts with x0 = 0
     isb
     eret
 
 .global kernel_return
+// void kernel_return(uint64_t *kctx /*x0*/)
 kernel_return:
-    adrp x1, kernel_ctx
-    add  x1, x1, :lo12:kernel_ctx
-    ldp  x19, x20, [x1, #0]
-    ldp  x21, x22, [x1, #16]
-    ldp  x23, x24, [x1, #32]
-    ldp  x25, x26, [x1, #48]
-    ldp  x27, x28, [x1, #64]
-    ldp  x29, x30, [x1, #80]
-    ldr  x2,       [x1, #96]
+    ldp  x19, x20, [x0, #0]
+    ldp  x21, x22, [x0, #16]
+    ldp  x23, x24, [x0, #32]
+    ldp  x25, x26, [x0, #48]
+    ldp  x27, x28, [x0, #64]
+    ldp  x29, x30, [x0, #80]
+    ldr  x2,       [x0, #96]
     mov  sp, x2
-    ret                     // return into enter_user()'s caller (task_run)
+    ret                        // return into enter_user()'s caller

@@ -4,8 +4,6 @@
 #include "mm/frame_alloc.h"
 #include "mm/mmu.h"
 #include "proc/task.h"
-#include "user/embedded.h"
-#include "user/elf.h"
 #include "lib/printf.h"
 #include "lib/stdlib.h"
 #include "mini_uart.h"
@@ -57,33 +55,12 @@ void kernel_main(void) {
 
   printf("Current EL: %d\n", get_el());
 
-  // Load the first user program from its embedded PIE ELF image and run it in
-  // EL0.
-  const user_program_t *prog = user_program_find("hello");
-  if (prog == NULL) {
-    printf("No embedded 'hello' program found\n");
-  } else {
-    struct loaded_prog lp;
-    int rc = elf_load(prog->start, user_program_size(prog), &lp);
-    if (rc != 0) {
-      printf("elf_load('%s') failed: %d\n", prog->name, rc);
-    } else {
-      void *ustack = frame_alloc();
-      task_t hello = {
-          .entry = lp.entry,
-          .user_sp = (uint64_t)ustack + PAGE_SIZE,
-          .state = TASK_RUNNABLE,
-          .exit_code = 0,
-      };
-      printf("Launching '%s': entry=0x%lx sp=0x%lx (%d image pages)\n",
-             prog->name, hello.entry, hello.user_sp, (int)lp.image_pages);
-      task_run(&hello);
-      printf("User task '%s' exited with code %d\n", prog->name,
-             hello.exit_code);
-      frame_free_pages(lp.image, lp.image_pages);
-      frame_free(ustack);
-    }
-  }
+  // Start the first user program. init spawns further tasks itself, exercising
+  // the cooperative, nesting process model.
+  int pid = task_spawn("init");
+  int code = task_wait(pid);  // reap init (its parent is the kernel: current==NULL)
+  printf("init (pid %d) exited with code %d\n", pid, code);
+  task_reap_all();  // release any of init's children it left unreaped
 
   console_init();
   console_run();
