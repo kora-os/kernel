@@ -34,6 +34,15 @@ void syscall_handle(struct trapframe *tf) {
     case SYS_exit:
         task_exit((int)a0);  // does not return
         break;
+    case SYS_spawn:
+        ret = task_spawn((const char *)a0);
+        break;
+    case SYS_wait:
+        ret = task_wait((int)a0);
+        break;
+    case SYS_getpid:
+        ret = task_getpid();
+        break;
     default:
         ret = -1;
         break;

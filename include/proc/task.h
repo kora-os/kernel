@@ -2,32 +2,59 @@
 
 #include "common.h"
 
+// Cooperative, one-at-a-time process model. Tasks nest: spawning a program
+// suspends the caller and runs the child to completion in EL0, then resumes the
+// caller. A finished task becomes a zombie -- its image and stack stay allocated
+// so its exit code (and its distinct load address) remain valid -- until it is
+// reaped by task_wait() or by task_reap_all().
+
+#define MAX_TASKS 8
+#define TASK_KCTX_WORDS 13  // x19..x30 (12) + sp; see src/arch/entry.S
+
 typedef enum {
-    TASK_RUNNABLE,
-    TASK_EXITED,
+    TASK_UNUSED = 0,  // free table slot
+    TASK_RUNNABLE,    // created / running
+    TASK_EXITED,      // finished but not yet reaped (memory still held)
 } task_state_t;
 
-// Minimal single-task control block. The first two fields (entry, user_sp)
-// are read directly by enter_user in src/arch/entry.S at offsets 0 and 8 --
-// keep them first.
 typedef struct task {
-    uint64_t entry;       // EL0 entry point
-    uint64_t user_sp;     // EL0 stack top
+    int pid;                          // >0 when in use, 0 when UNUSED
     task_state_t state;
     int exit_code;
+    struct task *parent;              // who spawned this task (NULL for init)
+    uint64_t entry;                   // EL0 entry point
+    uint64_t user_sp;                 // EL0 stack top
+    void *image;                      // loaded ELF region (for reclaim)
+    size_t image_pages;
+    void *stack;                      // user stack region (for reclaim)
+    uint64_t kctx[TASK_KCTX_WORDS];   // kernel context saved by enter_user
 } task_t;
 
-// Run a task: enters EL0 and returns here only when the task calls exit().
-void task_run(task_t *t);
+// Load the named embedded program, create a task, and run it to completion in
+// EL0 (the caller is suspended until it exits). Returns the new pid, or -1 on
+// failure. The task lingers as an unreaped zombie until task_wait() collects it.
+int task_spawn(const char *name);
 
-// The task currently executing in EL0 (NULL if none).
+// Reap an exited child of the current task by pid: free its memory and return
+// its exit code. Returns -1 if there is no matching exited child.
+int task_wait(int pid);
+
+// pid of the currently running task (0 if none).
+int task_getpid(void);
+
+// The currently running task, or NULL if none.
 task_t *task_current(void);
 
-// Mark the current task exited and return control to the kernel (no return).
-void task_exit(int code);
+// Mark the current task exited and unwind back to whoever ran it (no return).
+void task_exit(int code) __attribute__((noreturn));
+
+// Release every task-table slot and its held memory. The kernel calls this to
+// tear down after the top-level task and any descendants finish.
+void task_reap_all(void);
 
 // --- implemented in src/arch/entry.S ---
-// Save kernel context, drop to EL0 at t->entry with SP_EL0 = t->user_sp.
-void enter_user(task_t *t);
-// Restore the kernel context saved by enter_user (used to unwind out of EL0).
-void kernel_return(void) __attribute__((noreturn));
+// Save the kernel's callee-saved context into kctx, then drop to EL0 at entry
+// with SP_EL0 = user_sp.
+void enter_user(uint64_t entry, uint64_t user_sp, uint64_t *kctx);
+// Restore a context saved by enter_user (unwinds out of EL0 to its caller).
+void kernel_return(uint64_t *kctx) __attribute__((noreturn));

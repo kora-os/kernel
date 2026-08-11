@@ -20,12 +20,17 @@ SECTIONS {
     .data : {
         *(.data .data.*)
     }
-    
+
+    /* The early BSS-clear loop in boot.S zeroes 8 bytes at a time, so both
+       bounds must be 8-byte aligned (16 for headroom); otherwise the first
+       store faults on an unaligned address. */
+    . = ALIGN(16);
     __bss_start = .;
     .bss : {
         *(.bss .bss.*)
         *(COMMON)
     }
+    . = ALIGN(16);
     __bss_end = .;
     __bss_size = __bss_end - __bss_start;
     
