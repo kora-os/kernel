@@ -24,6 +24,11 @@ static task_t *task_alloc(void) {
             t->image = NULL;
             t->image_pages = 0;
             t->stack = NULL;
+            t->heap = NULL;
+            t->heap_pages = 0;
+            t->heap_base = 0;
+            t->heap_brk = 0;
+            t->heap_end = 0;
             return t;
         }
     }
@@ -39,6 +44,10 @@ static void task_free(task_t *t) {
     if (t->stack != NULL) {
         frame_free(t->stack);
         t->stack = NULL;
+    }
+    if (t->heap != NULL) {
+        frame_free_pages(t->heap, t->heap_pages);
+        t->heap = NULL;
     }
     t->pid = 0;
     t->state = TASK_UNUSED;
