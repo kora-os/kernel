@@ -16,6 +16,7 @@ void putc(void *p, char c) {
   }
 
   uart_putc(c);
+  screen_putc(c);  // mirror kernel output to the framebuffer screen (if active)
 }
 
 void kernel_main(void) {
@@ -33,8 +34,11 @@ void kernel_main(void) {
   mmu_init();
   frame_alloc_init();
 
-  fb_console_t fb_console;
+  // Persist the screen console for the lifetime of the kernel and make it the
+  // active screen, so printf output and the write/fb_info syscalls reach it.
+  static fb_console_t fb_console;
   if (fb_console_init(&fb_console, 1024, 768, 32)) {
+    fb_console_make_active(&fb_console);
     fb_console_write(&fb_console, "KoraOS\n");
     fb_console_write(&fb_console, "Hello from framebuffer console.\n");
   }

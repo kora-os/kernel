@@ -9,7 +9,8 @@
 // reaped by task_wait() or by task_reap_all().
 
 #define MAX_TASKS 8
-#define TASK_KCTX_WORDS 13  // x19..x30 (12) + sp; see src/arch/entry.S
+#define TASK_KCTX_WORDS 13   // x19..x30 (12) + sp; see src/arch/entry.S
+#define USER_HEAP_PAGES 16   // 64 KB per-task heap, allocated lazily on first sbrk
 
 typedef enum {
     TASK_UNUSED = 0,  // free table slot
@@ -27,6 +28,11 @@ typedef struct task {
     void *image;                      // loaded ELF region (for reclaim)
     size_t image_pages;
     void *stack;                      // user stack region (for reclaim)
+    void *heap;                       // heap region, or NULL until first sbrk
+    size_t heap_pages;
+    uint64_t heap_base;               // heap bounds; brk moves within [base, end]
+    uint64_t heap_brk;
+    uint64_t heap_end;
     uint64_t kctx[TASK_KCTX_WORDS];   // kernel context saved by enter_user
 } task_t;
 
