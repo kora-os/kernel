@@ -87,3 +87,20 @@ void fb_console_clear(fb_console_t *console) {
     console->cursor_y = 0;
     framebuffer_clear(&console->fb, console->bg_color);
 }
+
+// The console the kernel and syscalls treat as "the screen".
+static fb_console_t *active_console;
+
+void fb_console_make_active(fb_console_t *console) {
+    active_console = console;
+}
+
+void screen_putc(char c) {
+    if (active_console) {
+        fb_console_draw_char(active_console, c);
+    }
+}
+
+const framebuffer_info_t *screen_framebuffer(void) {
+    return active_console ? &active_console->fb : NULL;
+}
