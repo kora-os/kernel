@@ -31,10 +31,55 @@ void *sbrk(long increment);
 
 /* Process control */
 void exit(int status) __attribute__((noreturn));
-int spawn(const char *name);
+int spawn(const char *name, int argc, char *const argv[]);
 int wait(int pid);
 int getpid(void);
 void yield(void);
 
 /* Graphics */
 int fb_info(struct fb_info *out);
+
+/* Small freestanding conveniences shared by the demo programs. */
+static inline size_t kstrlen(const char *s) {
+    size_t n = 0;
+    while (s[n]) {
+        n++;
+    }
+    return n;
+}
+
+static inline int kstreq(const char *a, const char *b) {
+    while (*a && *a == *b) {
+        a++;
+        b++;
+    }
+    return *a == *b;
+}
+
+static inline void kputs(const char *s) {
+    write(1, s, kstrlen(s));
+}
+
+static inline void kput_int(long v) {
+    if (v < 0) {
+        write(1, "-", 1);
+        v = -v;
+    }
+    unsigned long u = (unsigned long)v;
+    if (u == 0) {
+        write(1, "0", 1);
+        return;
+    }
+    char buf[24];
+    int i = 0;
+    while (u > 0) {
+        buf[i++] = (char)('0' + (u % 10));
+        u /= 10;
+    }
+    char out[24];
+    int j = 0;
+    while (i > 0) {
+        out[j++] = buf[--i];
+    }
+    write(1, out, (size_t)j);
+}

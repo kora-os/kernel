@@ -81,7 +81,7 @@ int main(void) {
     }
 
     // Process model: spawn a child.
-    spawn("hello");
+    spawn("hello", 0, 0);
 
     // Keyboard: echo one typed line.
     puts_("init: type a line and press enter: ");
