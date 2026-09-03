@@ -122,6 +122,20 @@ static long sys_sbrk(long increment) {
     return (long)old;
 }
 
+// spawn(name, argc, argv): load and run an embedded program with arguments.
+static long sys_spawn(const char *name, int argc, char *const argv[]) {
+    if (!uptr_ok((uint64_t)name, 1)) {
+        return -1;
+    }
+    if (argc < 0) {
+        return -1;
+    }
+    if (argc > 0 && !uptr_ok((uint64_t)argv, (uint64_t)argc * sizeof(char *))) {
+        return -1;
+    }
+    return task_spawn(name, argc, argv);
+}
+
 // fb_info(out): report the active screen's framebuffer geometry and address so
 // a user program can draw straight into it (flat identity map).
 static long sys_fb_info(struct fb_info *out) {
@@ -161,7 +175,7 @@ void syscall_handle(struct trapframe *tf) {
         ret = sys_sbrk((long)a0);
         break;
     case SYS_spawn:
-        ret = task_spawn((const char *)a0);
+        ret = sys_spawn((const char *)a0, (int)a1, (char *const *)a2);
         break;
     case SYS_wait:
         ret = task_wait((int)a0);
