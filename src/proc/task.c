@@ -29,6 +29,8 @@ static task_t *task_alloc(void) {
             t->heap_base = 0;
             t->heap_brk = 0;
             t->heap_end = 0;
+            t->arg0 = 0;
+            t->arg1 = 0;
             return t;
         }
     }
@@ -57,14 +59,70 @@ static void task_free(task_t *t) {
 static void task_run(task_t *t) {
     task_t *prev = current;
     current = t;
-    enter_user(t->entry, t->user_sp, t->kctx);  // returns here when t exits
+    enter_user(t->entry, t->user_sp, t->kctx, t->arg0, t->arg1);  // returns on exit
     current = prev;
 }
 
-int task_spawn(const char *name) {
+static size_t cstr_len(const char *s) {
+    size_t n = 0;
+    while (s[n]) {
+        n++;
+    }
+    return n;
+}
+
+static void copy_bytes(void *dst, const void *src, size_t n) {
+    uint8_t *d = dst;
+    const uint8_t *s = src;
+    for (size_t i = 0; i < n; i++) {
+        d[i] = s[i];
+    }
+}
+
+// Lay out argc argument strings and a NULL-terminated argv[] array at the top of
+// a task's stack, so the program can be entered as main(argc, argv). On success
+// writes the new 16-byte-aligned stack pointer and the address of the argv array
+// (both in the task's address space) and returns true; returns false if the
+// arguments do not fit in the stack page.
+static bool build_args(void *stack, int argc, char *const argv[],
+                       uint64_t *out_sp, uint64_t *out_argv) {
+    uint64_t base = (uint64_t)stack;
+    uint64_t p = base + PAGE_SIZE;
+    uint64_t str_addr[MAX_ARGS];
+
+    for (int i = 0; i < argc; i++) {
+        size_t len = cstr_len(argv[i]) + 1;
+        if (p < base + len) {
+            return false;
+        }
+        p -= len;
+        copy_bytes((void *)p, argv[i], len);
+        str_addr[i] = p;
+    }
+
+    // argv[]: argc + 1 pointers (NULL-terminated), 16-byte aligned.
+    p &= ~(uint64_t)15;
+    uint64_t need = (uint64_t)(argc + 1) * sizeof(uint64_t);
+    if (p < base + need + 16) {
+        return false;
+    }
+    p -= need;
+    p &= ~(uint64_t)15;
+    uint64_t *arr = (uint64_t *)p;
+    for (int i = 0; i < argc; i++) {
+        arr[i] = str_addr[i];
+    }
+    arr[argc] = 0;
+
+    *out_argv = p;
+    *out_sp = p - 16;  // leave a small gap below argv[]; stays 16-aligned
+    return true;
+}
+
+int task_spawn(const char *name, int argc, char *const argv[]) {
     const user_program_t *prog = user_program_find(name);
     if (prog == NULL) {
-        printf("spawn: no program named '%s'\n", name);
+        // Expected case (e.g. a mistyped shell command); let the caller report it.
         return -1;
     }
 
@@ -94,7 +152,22 @@ int task_spawn(const char *name) {
     t->image = lp.image;
     t->image_pages = lp.image_pages;
     t->stack = stack;
-    t->user_sp = (uint64_t)stack + PAGE_SIZE;
+
+    uint64_t sp = (uint64_t)stack + PAGE_SIZE;
+    uint64_t argv_child = 0;
+    if (argc > MAX_ARGS) {
+        argc = MAX_ARGS;
+    }
+    if (argc > 0) {
+        if (!build_args(stack, argc, argv, &sp, &argv_child)) {
+            printf("spawn: arguments too large for '%s'\n", name);
+            task_free(t);  // releases the image and stack we just took
+            return -1;
+        }
+    }
+    t->user_sp = sp;
+    t->arg0 = (uint64_t)argc;
+    t->arg1 = argv_child;
 
     printf("  [pid %d] run '%s': entry=0x%lx sp=0x%lx (%d image pages)\n",
            t->pid, name, t->entry, t->user_sp, (int)t->image_pages);

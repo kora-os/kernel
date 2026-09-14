@@ -11,6 +11,7 @@
 #define MAX_TASKS 8
 #define TASK_KCTX_WORDS 13   // x19..x30 (12) + sp; see src/arch/entry.S
 #define USER_HEAP_PAGES 16   // 64 KB per-task heap, allocated lazily on first sbrk
+#define MAX_ARGS 16          // most argv entries a spawned program may receive
 
 typedef enum {
     TASK_UNUSED = 0,  // free table slot
@@ -33,13 +34,18 @@ typedef struct task {
     uint64_t heap_base;               // heap bounds; brk moves within [base, end]
     uint64_t heap_brk;
     uint64_t heap_end;
+    uint64_t arg0;                    // EL0 entry x0 (argc)
+    uint64_t arg1;                    // EL0 entry x1 (argv, in the task's stack)
     uint64_t kctx[TASK_KCTX_WORDS];   // kernel context saved by enter_user
 } task_t;
 
 // Load the named embedded program, create a task, and run it to completion in
-// EL0 (the caller is suspended until it exits). Returns the new pid, or -1 on
-// failure. The task lingers as an unreaped zombie until task_wait() collects it.
-int task_spawn(const char *name);
+// EL0 (the caller is suspended until it exits). argv holds argc string pointers
+// (readable in the caller's address space); they are copied onto the child's
+// stack and delivered as main(argc, argv). Pass argc == 0 for no arguments.
+// Returns the new pid, or -1 on failure. The task lingers as an unreaped zombie
+// until task_wait() collects it.
+int task_spawn(const char *name, int argc, char *const argv[]);
 
 // Reap an exited child of the current task by pid: free its memory and return
 // its exit code. Returns -1 if there is no matching exited child.
@@ -60,7 +66,8 @@ void task_reap_all(void);
 
 // --- implemented in src/arch/entry.S ---
 // Save the kernel's callee-saved context into kctx, then drop to EL0 at entry
-// with SP_EL0 = user_sp.
-void enter_user(uint64_t entry, uint64_t user_sp, uint64_t *kctx);
+// with SP_EL0 = user_sp and x0/x1 = argc/argv.
+void enter_user(uint64_t entry, uint64_t user_sp, uint64_t *kctx, uint64_t argc,
+                uint64_t argv);
 // Restore a context saved by enter_user (unwinds out of EL0 to its caller).
 void kernel_return(uint64_t *kctx) __attribute__((noreturn));
