@@ -14,7 +14,8 @@
 
 .global enter_user
 // void enter_user(uint64_t entry /*x0*/, uint64_t user_sp /*x1*/,
-//                 uint64_t *kctx /*x2*/)
+//                 uint64_t *kctx /*x2*/, uint64_t argc /*x3*/,
+//                 uint64_t argv /*x4*/)
 enter_user:
     stp  x19, x20, [x2, #0]
     stp  x21, x22, [x2, #16]
@@ -22,13 +23,14 @@ enter_user:
     stp  x25, x26, [x2, #48]
     stp  x27, x28, [x2, #64]
     stp  x29, x30, [x2, #80]
-    mov  x3, sp
-    str  x3,       [x2, #96]
+    mov  x5, sp
+    str  x5,       [x2, #96]
 
     msr  elr_el1, x0           // entry -> eret return address
     msr  sp_el0,  x1           // user stack top
     msr  spsr_el1, xzr         // EL0t, all interrupts unmasked
-    mov  x0, #0                // EL0 starts with x0 = 0
+    mov  x0, x3                // EL0 x0 = argc
+    mov  x1, x4                // EL0 x1 = argv
     isb
     eret
 

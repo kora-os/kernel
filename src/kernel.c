@@ -59,12 +59,12 @@ void kernel_main(void) {
 
   printf("Current EL: %d\n", get_el());
 
-  // Start the first user program. init spawns further tasks itself, exercising
-  // the cooperative, nesting process model.
-  int pid = task_spawn("init");
-  int code = task_wait(pid);  // reap init (its parent is the kernel: current==NULL)
-  printf("init (pid %d) exited with code %d\n", pid, code);
-  task_reap_all();  // release any of init's children it left unreaped
+  // Start the interactive shell as the first user program. It spawns further
+  // programs itself, exercising the cooperative, nesting process model.
+  int pid = task_spawn("shell", 0, 0);
+  int code = task_wait(pid);  // reap the shell (its parent is the kernel)
+  printf("shell (pid %d) exited with code %d\n", pid, code);
+  task_reap_all();  // release anything the shell left unreaped
 
   console_init();
   console_run();
