@@ -1,5 +1,6 @@
 #include "arch/exception.h"
 #include "console.h"
+#include "fs/blkdev.h"
 #include "mm.h"
 #include "mm/frame_alloc.h"
 #include "mm/mmu.h"
@@ -19,6 +20,23 @@ void putc(void *p, char c) {
   screen_putc(c);  // mirror kernel output to the framebuffer screen (if active)
 }
 
+// TEMP (Step 1): smoke-test the ramdisk block device by reading sector 0 of the
+// embedded FAT32 image and checking the BPB. Remove once the FAT32 driver lands.
+static void blkdev_selftest(void) {
+  uint8_t sec[BLK_SECTOR_SIZE];
+  int rc = blk_read(0, 1, sec);
+  if (rc != 0) {
+    printf("blkdev: sector 0 read failed: %d\n", rc);
+    return;
+  }
+  uint16_t sig = (uint16_t)(sec[510] | (sec[511] << 8));
+  printf("blkdev: %u sectors, boot sig 0x%x, OEM '", blk_sector_count(), sig);
+  for (int i = 3; i < 11; i++) {
+    putc(NULL, (char)sec[i]);
+  }
+  printf("'\n");
+}
+
 void kernel_main(void) {
   uart_init();
   uart_putc('K');
@@ -33,6 +51,10 @@ void kernel_main(void) {
   // the physical page allocator for later user-stack allocation.
   mmu_init();
   frame_alloc_init();
+
+  // Bring up the ramdisk block device (embedded FAT32 image).
+  blkdev_init();
+  blkdev_selftest();  // TEMP (Step 1)
 
   // Persist the screen console for the lifetime of the kernel and make it the
   // active screen, so printf output and the write/fb_info syscalls reach it.
