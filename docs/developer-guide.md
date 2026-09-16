@@ -125,6 +125,7 @@ List the files on the boot volume to ensure `kernel8-hw.img` is present, eject t
 ## Further Documentation
 
 - [filesystem.md](filesystem.md) – the read-only FAT32 filesystem, the ramdisk, and how the image is built and embedded.
+- [how-userland-works.md](how-userland-works.md) – what happens when a program is loaded, where it lives in memory, how processes coexist, and the (deliberate) lack of memory protection.
 - [syscalls.md](syscalls.md) – the full system-call ABI.
 - [writing-userland-programs.md](writing-userland-programs.md) – how to write, build, and run a userland program (no compiler or libc on the device yet).
 
