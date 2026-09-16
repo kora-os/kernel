@@ -22,6 +22,11 @@ SYSCALL wait,    SYS_WAIT
 SYSCALL getpid,  SYS_GETPID
 SYSCALL yield,   SYS_YIELD
 SYSCALL fb_info, SYS_FB_INFO
+SYSCALL open,    SYS_OPEN
+SYSCALL close,   SYS_CLOSE
+SYSCALL lseek,   SYS_LSEEK
+SYSCALL readdir, SYS_READDIR
+SYSCALL stat,    SYS_STAT
 
 // exit() never returns; if the kernel ever did return here, spin rather than
 // running off into whatever follows.

@@ -18,3 +18,8 @@
 #define SYS_GETPID  6
 #define SYS_YIELD   7
 #define SYS_FB_INFO 8
+#define SYS_OPEN    9
+#define SYS_CLOSE   10
+#define SYS_LSEEK   11
+#define SYS_READDIR 12
+#define SYS_STAT    13

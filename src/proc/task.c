@@ -31,6 +31,9 @@ static task_t *task_alloc(void) {
             t->heap_end = 0;
             t->arg0 = 0;
             t->arg1 = 0;
+            for (int f = 0; f < MAX_OPEN_FILES; f++) {
+                t->files[f].used = false;
+            }
             return t;
         }
     }
