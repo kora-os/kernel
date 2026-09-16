@@ -80,7 +80,7 @@ and addressable at the same time** (there is no address-space switch between
 tasks). Distinct tasks simply occupy distinct regions of the one pool. `yield`
 currently does nothing — there is nothing to switch to.
 
-## Memory model — and why you must be careful
+## Memory model — no protection, by design
 
 The MMU ([`src/mm/mmu.c`](../src/mm/mmu.c)) installs a **flat identity map of the
 low 4 GB** with 2 MB blocks: **virtual address == physical address**,
@@ -100,21 +100,31 @@ The only hardware-enforced protections are:
   a program loaded into normal RAM runs at EL0 but the *kernel* cannot execute
   it — and why the kernel's own code lives in the separate read-only code block.
 
-**Everything else is wide open, by design.** In particular:
+**Everything else is wide open, on purpose.** In particular:
 
-> ⚠️ **There is no memory protection between programs, or between a program and
-> the kernel.** Any EL0 program can read and write *all* of normal RAM: its own
+> **There is no memory protection between programs, or between a program and the
+> kernel.** Any EL0 program can read and write *all* of normal RAM: its own
 > image, every other process's image/stack/heap, the kernel's data, stack, and
 > heap, and even the MMU's own page tables. Device memory (peripherals) is
 > reachable from EL0 too. There are no per-process address spaces, no guard
 > pages, and no `NULL`-page trap.
 
-This is a deliberate simplification — it keeps the kernel small and lets a
-program (say, `gfxdemo`) write straight to the framebuffer address that
-`fb_info` hands back. The cost is that a buggy or hostile program can corrupt
-anything in the system. Treat every userland program as fully trusted, and when
-one misbehaves, remember that the damage is not contained. :)
+This is not a limitation on the way to something stricter — **it is the model,
+and it is meant to stay that way.** KoraOS is built in the spirit of the home
+computers of the 1970s–90s: the Amiga, the Atari ST, the early Macintosh, the
+DOS-era PC — machines with no MMU-enforced protection, where the whole system
+was open to whoever was sitting in front of it. Nothing here is walled off from
+you either. From a plain user program you can read and write kernel memory,
+patch a running system call, poke a peripheral, or scribble over the page
+tables — because that is exactly the kind of play the system is for.
 
-Proper isolation (per-process page tables, a user/kernel split, guard pages)
-would be a future milestone; nothing in the current design precludes it, since
-the identity map is just the simplest possible starting point.
+The intended audience is the **user/developer** (to borrow Terry Davis'
+phrase): someone who wants to *play* with the machine, understand it end to end,
+and change it while it runs — not someone who needs a hardened OS to sandbox
+untrusted apps. KoraOS is not trying to compete with Linux or a "professional"
+OS; it deliberately sits in that older, opener space.
+
+The flip side is the obvious one, and it is part of the fun: a single stray
+pointer can take the whole system down. When that happens, you reboot and try
+again — think of it as an Amiga guru meditation. Have fun, and keep a finger
+near the reset button. :)
