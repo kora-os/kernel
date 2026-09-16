@@ -1,6 +1,7 @@
 #pragma once
 
 #include "common.h"
+#include "fs/fat32.h"
 
 // Cooperative, one-at-a-time process model. Tasks nest: spawning a program
 // suspends the caller and runs the child to completion in EL0, then resumes the
@@ -12,6 +13,16 @@
 #define TASK_KCTX_WORDS 13   // x19..x30 (12) + sp; see src/arch/entry.S
 #define USER_HEAP_PAGES 16   // 64 KB per-task heap, allocated lazily on first sbrk
 #define MAX_ARGS 16          // most argv entries a spawned program may receive
+#define MAX_OPEN_FILES 16    // open file/directory handles per task
+#define FD_BASE 3            // fds 0/1/2 are the console; real files start here
+
+// One open file or directory handle in a task's descriptor table. The FAT32
+// handle is a plain value cursor (no external resource), so closing just frees
+// the slot.
+typedef struct {
+    bool used;
+    fat32_file_t file;
+} open_file_t;
 
 typedef enum {
     TASK_UNUSED = 0,  // free table slot
@@ -36,6 +47,7 @@ typedef struct task {
     uint64_t heap_end;
     uint64_t arg0;                    // EL0 entry x0 (argc)
     uint64_t arg1;                    // EL0 entry x1 (argv, in the task's stack)
+    open_file_t files[MAX_OPEN_FILES];  // per-task fd table (indexed fd - FD_BASE)
     uint64_t kctx[TASK_KCTX_WORDS];   // kernel context saved by enter_user
 } task_t;
 

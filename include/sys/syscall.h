@@ -16,6 +16,11 @@
 #define SYS_getpid 6
 #define SYS_yield  7
 #define SYS_fb_info 8
+#define SYS_open    9
+#define SYS_close   10
+#define SYS_lseek   11
+#define SYS_readdir 12
+#define SYS_stat    13
 
 // Dispatch a syscall described by a trap frame from EL0. The return value is
 // written back into the frame's x0.

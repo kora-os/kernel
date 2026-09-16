@@ -22,9 +22,40 @@ struct fb_info {
     unsigned int bpp;     /* bits per pixel */
 };
 
+/* Filesystem. Paths are absolute; names are UTF-8. The kernel mirrors these
+ * struct layouts in src/sys/syscall.c -- keep them in sync. */
+#define O_RDONLY 0
+
+#define SEEK_SET 0
+#define SEEK_CUR 1
+#define SEEK_END 2
+
+/* Max name length in UTF-8 bytes incl. NUL (255 UTF-16 units * 3); must match
+ * the kernel's FAT32_NAME_MAX + 1. */
+#define DIRENT_NAME_MAX 766
+
+struct dirent {
+    unsigned long size;
+    int is_dir;
+    char name[DIRENT_NAME_MAX];
+};
+
+struct stat {
+    unsigned long size;
+    int is_dir;
+};
+
 /* Console / I/O */
 ssize_t write(int fd, const void *buf, size_t len);
 ssize_t read(int fd, void *buf, size_t len);
+
+/* Files: open() takes O_RDONLY (files and directories); read() serves file fds,
+ * readdir() serves directory fds. */
+int open(const char *path, int flags);
+int close(int fd);
+long lseek(int fd, long offset, int whence);
+int readdir(int fd, struct dirent *out);   /* 1 = entry, 0 = end, <0 = error */
+int stat(const char *path, struct stat *out);
 
 /* Memory */
 void *sbrk(long increment);
