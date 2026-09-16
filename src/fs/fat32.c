@@ -115,36 +115,88 @@ static long chain_read(uint32_t first_cluster, uint32_t pos, void *buf,
 
 // --- long filename (VFAT) decoding -----------------------------------------
 
-// Byte offsets of the 13 UCS-2 characters within a 32-byte LFN entry.
+// An LFN holds at most 20 entries of 13 UTF-16 code units.
+#define FAT32_LFN_MAX_UNITS 260
+
+// Byte offsets of the 13 UTF-16 code units within a 32-byte LFN entry.
 static const uint8_t lfn_off[13] = {1, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30};
 
-// Fold one LFN entry's characters into `name` at their sequenced position. The
-// entry carrying the 0x40 bit is the last part physically but starts the name,
-// so we (re)zero the buffer there. UCS-2 is narrowed to ASCII; anything above
-// 0x7f becomes '?'. Checksums are not verified (well-formed volumes only).
-static void lfn_collect(const uint8_t *ent, char *name) {
-    uint8_t seq = ent[0];
-    if (seq & 0x40) {
-        for (int i = 0; i <= FAT32_NAME_MAX; i++) {
-            name[i] = 0;
-        }
+// Copy one LFN entry's 13 UTF-16 code units into `units` at their sequenced
+// position. Entries appear in reverse order (highest ordinal first); the entry
+// carrying the 0x40 bit is physically first and its ordinal is the total entry
+// count, so it fixes how many code units the name occupies. Returns that count
+// (unchanged for the non-terminal entries). Checksums are not verified.
+static uint32_t lfn_collect(const uint8_t *ent, uint16_t *units, uint32_t nunits) {
+    uint32_t ord = ent[0] & 0x1F;
+    if (ord == 0 || ord * 13 > FAT32_LFN_MAX_UNITS) {
+        return nunits;  // malformed ordinal; ignore this entry
     }
-    uint32_t ord = seq & 0x1F;
-    if (ord == 0) {
-        return;
+    if (ent[0] & 0x40) {
+        nunits = ord * 13;
     }
     uint32_t base = (ord - 1) * 13;
-    for (int k = 0; k < 13; k++) {
-        uint32_t gi = base + (uint32_t)k;
-        if (gi >= FAT32_NAME_MAX) {
+    for (uint32_t k = 0; k < 13; k++) {
+        units[base + k] = (uint16_t)rd16(ent + lfn_off[k]);
+    }
+    return nunits;
+}
+
+// Decode `n` little-endian UTF-16 code units (possibly with surrogate pairs) to
+// a NUL-terminated UTF-8 string in `out` (capacity `cap`, including the NUL).
+// Stops at a 0x0000 unit (the LFN terminator) or when the buffer is full. Lone
+// surrogates decode to U+FFFD.
+static void utf16_to_utf8(const uint16_t *units, uint32_t n, char *out,
+                          uint32_t cap) {
+    uint32_t o = 0;
+    for (uint32_t i = 0; i < n; i++) {
+        uint32_t cp = units[i];
+        if (cp == 0x0000) {
             break;
         }
-        uint16_t ch = (uint16_t)rd16(ent + lfn_off[k]);
-        if (ch == 0x0000 || ch == 0xFFFF) {
-            continue;
+        if (cp >= 0xD800 && cp <= 0xDBFF) {  // high surrogate
+            uint32_t lo = (i + 1 < n) ? units[i + 1] : 0;
+            if (lo >= 0xDC00 && lo <= 0xDFFF) {
+                cp = 0x10000 + ((cp - 0xD800) << 10) + (lo - 0xDC00);
+                i++;
+            } else {
+                cp = 0xFFFD;  // unpaired high surrogate
+            }
+        } else if (cp >= 0xDC00 && cp <= 0xDFFF) {
+            cp = 0xFFFD;  // unpaired low surrogate
         }
-        name[gi] = (ch < 0x80) ? (char)ch : '?';
+
+        uint32_t need = cp < 0x80 ? 1 : cp < 0x800 ? 2 : cp < 0x10000 ? 3 : 4;
+        if (o + need + 1 > cap) {
+            break;  // no room for this char plus the NUL
+        }
+        if (cp < 0x80) {
+            out[o++] = (char)cp;
+        } else if (cp < 0x800) {
+            out[o++] = (char)(0xC0 | (cp >> 6));
+            out[o++] = (char)(0x80 | (cp & 0x3F));
+        } else if (cp < 0x10000) {
+            out[o++] = (char)(0xE0 | (cp >> 12));
+            out[o++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+            out[o++] = (char)(0x80 | (cp & 0x3F));
+        } else {
+            out[o++] = (char)(0xF0 | (cp >> 18));
+            out[o++] = (char)(0x80 | ((cp >> 12) & 0x3F));
+            out[o++] = (char)(0x80 | ((cp >> 6) & 0x3F));
+            out[o++] = (char)(0x80 | (cp & 0x3F));
+        }
     }
+    out[o] = 0;
+}
+
+// Map one 8.3 short-name byte: lower-case ASCII, and replace any non-ASCII byte
+// with '?'. Short names are stored in an OEM code page, not Unicode; decoding
+// that is out of scope, and a raw >= 0x80 byte would be invalid UTF-8. Names
+// that actually need non-ASCII characters carry an LFN, which we decode fully.
+static char short_byte(uint8_t b) {
+    if (b >= 0x80) {
+        return '?';
+    }
+    return to_lower((char)b);
 }
 
 // Build a name from an 8.3 short-directory entry: "NAME    EXT" -> "name.ext",
@@ -155,7 +207,7 @@ static void name_from_83(const uint8_t *ent, char *out) {
         if (ent[i] == ' ') {
             break;
         }
-        out[o++] = to_lower((char)ent[i]);
+        out[o++] = short_byte(ent[i]);
     }
     if (ent[8] != ' ') {
         out[o++] = '.';
@@ -163,7 +215,7 @@ static void name_from_83(const uint8_t *ent, char *out) {
             if (ent[i] == ' ') {
                 break;
             }
-            out[o++] = to_lower((char)ent[i]);
+            out[o++] = short_byte(ent[i]);
         }
     }
     out[o] = 0;
@@ -205,7 +257,8 @@ int fat32_readdir(fat32_file_t *dir, fat32_dirent_t *out) {
         return FS_ERR_NOTDIR;
     }
     uint8_t ent[32];
-    char lfn[FAT32_NAME_MAX + 1];
+    uint16_t units[FAT32_LFN_MAX_UNITS];
+    uint32_t nunits = 0;
     bool have_lfn = false;
 
     for (;;) {
@@ -224,25 +277,28 @@ int fat32_readdir(fat32_file_t *dir, fat32_dirent_t *out) {
         }
         if (first == 0xE5) {
             have_lfn = false;  // deleted
+            nunits = 0;
             continue;
         }
         uint8_t attr = ent[11];
         if ((attr & 0x0F) == 0x0F) {
-            lfn_collect(ent, lfn);
+            nunits = lfn_collect(ent, units, nunits);
             have_lfn = true;
             continue;
         }
         if (attr & 0x08) {
             have_lfn = false;  // volume label
+            nunits = 0;
             continue;
         }
         if (first == '.') {
             have_lfn = false;  // "." or ".."
+            nunits = 0;
             continue;
         }
 
         if (have_lfn) {
-            memcpy(out->name, lfn, FAT32_NAME_MAX + 1);
+            utf16_to_utf8(units, nunits, out->name, FAT32_NAME_MAX + 1);
         } else {
             name_from_83(ent, out->name);
         }

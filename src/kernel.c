@@ -50,10 +50,16 @@ static void fat32_selftest(void) {
     printf("fat32: mount failed: %d\n", rc);
     return;
   }
-  fat32_file_t dir;
-  if (fat32_opendir("/", &dir) == 0) {
+  // List a couple of directories. Names are UTF-8; the Unicode names under
+  // /docs render correctly over UART (the framebuffer's ASCII font shows '?').
+  const char *dirs[] = {"/", "/docs"};
+  for (int i = 0; i < 2; i++) {
+    fat32_file_t dir;
+    if (fat32_opendir(dirs[i], &dir) != 0) {
+      continue;
+    }
     fat32_dirent_t de;
-    printf("fat32: root directory:\n");
+    printf("fat32: %s directory:\n", dirs[i]);
     while (fat32_readdir(&dir, &de) == 1) {
       printf("  %s%s (%u bytes)\n", de.name, de.is_dir ? "/" : "", de.size);
     }

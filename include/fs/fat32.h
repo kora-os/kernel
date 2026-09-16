@@ -6,8 +6,17 @@
 // a single mounted volume, absolute paths, directory traversal with VFAT long
 // filenames (LFN), file reads, and stat. No write support, no VFS -- just
 // enough to read files (and later, load programs) off the embedded ramdisk.
+//
+// Names are returned as NUL-terminated UTF-8. On-disk LFN names are UTF-16, so
+// the driver decodes UTF-16 (including surrogate pairs) to UTF-8 -- the right
+// interface encoding for a byte-string / C-string ABI, and lossless versus the
+// UTF-16 source. A consumer that cannot render a glyph (e.g. the kernel's ASCII
+// framebuffer console) substitutes at draw time; the name itself stays intact.
 
-#define FAT32_NAME_MAX 255
+// Maximum name length in UTF-8 bytes: an LFN holds up to 255 UTF-16 code units,
+// which encode to at most 3 UTF-8 bytes each (surrogate pairs are 2 units -> 4
+// bytes, i.e. fewer bytes per unit), so 255 * 3 bounds it.
+#define FAT32_NAME_MAX 765
 
 // Negative error codes, following the ELF_ERR_* convention.
 #define FS_ERR_IO       (-1)  // block read failed

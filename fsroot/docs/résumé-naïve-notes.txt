@@ -1,0 +1,1 @@
+A long, accented name forces an LFN, exercising 2-byte UTF-8 decode.
