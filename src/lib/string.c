@@ -1,5 +1,43 @@
 #include "lib/string.h"
 
+// Clang's loop-idiom pass will not rewrite the byte loops below into calls to
+// the very function being compiled, so these definitions are safe from
+// self-recursion even though other code's loops compile down to calls here.
+void *memcpy(void *dest, const void *src, size_t n) {
+    uint8_t *d = dest;
+    const uint8_t *s = src;
+    for (size_t i = 0; i < n; i++) {
+        d[i] = s[i];
+    }
+    return dest;
+}
+
+void *memmove(void *dest, const void *src, size_t n) {
+    uint8_t *d = dest;
+    const uint8_t *s = src;
+    if (d == s || n == 0) {
+        return dest;
+    }
+    if (d < s) {
+        for (size_t i = 0; i < n; i++) {
+            d[i] = s[i];
+        }
+    } else {
+        for (size_t i = n; i > 0; i--) {
+            d[i - 1] = s[i - 1];
+        }
+    }
+    return dest;
+}
+
+void *memset(void *dest, int c, size_t n) {
+    uint8_t *d = dest;
+    for (size_t i = 0; i < n; i++) {
+        d[i] = (uint8_t)c;
+    }
+    return dest;
+}
+
 int strlen(const char *str) {
     int len = 0;
     while (*str++) {

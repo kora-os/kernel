@@ -1,0 +1,1 @@
+A file whose name is Japanese: 3-byte UTF-8 characters.

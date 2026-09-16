@@ -39,7 +39,14 @@ static void fb_console_draw_char(fb_console_t *console, char c) {
         y0 = 0;
     }
 
-    const uint8_t *glyph = font8x8_basic[(uint8_t)c];
+    // The bitmap font only covers ASCII (0-127). UTF-8 byte streams (e.g. a
+    // filename with non-ASCII characters) carry bytes >= 128; render those as
+    // '?' rather than indexing past the 128-glyph table.
+    uint8_t glyph_index = (uint8_t)c;
+    if (glyph_index >= 128) {
+        glyph_index = '?';
+    }
+    const uint8_t *glyph = font8x8_basic[glyph_index];
     for (uint32_t row = 0; row < FONT_HEIGHT; row++) {
         uint8_t bits = glyph[row];
         for (uint32_t col = 0; col < FONT_WIDTH; col++) {
