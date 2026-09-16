@@ -10,6 +10,8 @@ KoraOS is built with the LLVM toolchain while targeting `aarch64-none-elf`. The 
 
 - LLVM/Clang (including `clang`, `ld.lld`, and `llvm-objcopy`)
 - CMake 3.20 or newer
+- [mtools](https://www.gnu.org/software/mtools/) (`mformat`, `mcopy`) — used to
+  build the embedded FAT32 filesystem image; the build fails without it
 - QEMU (only for virtualization workflows)
 - Optional: GNU Make (the legacy Makefile is still functional)
 
@@ -18,7 +20,7 @@ KoraOS is built with the LLVM toolchain while targeting `aarch64-none-elf`. The 
 macOS (Homebrew):
 
 ```bash
-brew install llvm cmake qemu
+brew install llvm cmake qemu mtools
 echo 'export PATH="/opt/homebrew/opt/llvm/bin:$PATH"' >> ~/.zprofile
 ```
 
@@ -26,7 +28,7 @@ Ubuntu/Debian:
 
 ```bash
 sudo apt update
-sudo apt install clang lld llvm llvm-objcopy cmake qemu-system-aarch64
+sudo apt install clang lld llvm llvm-objcopy cmake qemu-system-aarch64 mtools
 ```
 
 After installation, confirm the tools are available:
@@ -65,6 +67,7 @@ Expected outputs (in `build/` by default):
 - `kernel8.elf` and `kernel8.img` – ELF and binary images for QEMU.
 - `compile_commands.json` – compilation database for clangd and other tooling.
 - `boot/kernel8-qemu.img` – QEMU-ready image copied to a local boot staging folder alongside `config.txt`.
+- `fs/koraos.img` – the FAT32 filesystem image that is embedded into the kernel (see [filesystem.md](filesystem.md)).
 
 Manual CMake flow:
 
@@ -118,4 +121,10 @@ List the files on the boot volume to ensure `kernel8-hw.img` is present, eject t
 ## Legacy Makefile
 
 `make` still produces a bootable kernel, but the CMake flow is the source of truth and the only way to refresh `compile_commands.json`. Use Make only if you need compatibility with existing tooling.
+
+## Further Documentation
+
+- [filesystem.md](filesystem.md) – the read-only FAT32 filesystem, the ramdisk, and how the image is built and embedded.
+- [syscalls.md](syscalls.md) – the full system-call ABI.
+- [writing-userland-programs.md](writing-userland-programs.md) – how to write, build, and run a userland program (no compiler or libc on the device yet).
 
