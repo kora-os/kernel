@@ -1,6 +1,6 @@
 #include "proc/task.h"
 #include "user/elf.h"
-#include "user/embedded.h"
+#include "fs/fat32.h"
 #include "mm.h"
 #include "mm/frame_alloc.h"
 #include "lib/printf.h"
@@ -122,17 +122,72 @@ static bool build_args(void *stack, int argc, char *const argv[],
     return true;
 }
 
-int task_spawn(const char *name, int argc, char *const argv[]) {
-    const user_program_t *prog = user_program_find(name);
-    if (prog == NULL) {
-        // Expected case (e.g. a mistyped shell command); let the caller report it.
+// Resolve a program name to a filesystem path: an absolute path is used as-is,
+// a bare name is looked up under /bin. Returns false if it would not fit.
+static bool resolve_program_path(const char *name, char *out, size_t cap) {
+    size_t o = 0;
+    if (name[0] != '/') {
+        const char *prefix = "/bin/";
+        for (size_t i = 0; prefix[i] != '\0'; i++) {
+            if (o + 1 >= cap) {
+                return false;
+            }
+            out[o++] = prefix[i];
+        }
+    }
+    for (size_t i = 0; name[i] != '\0'; i++) {
+        if (o + 1 >= cap) {
+            return false;
+        }
+        out[o++] = name[i];
+    }
+    out[o] = '\0';
+    return true;
+}
+
+// Read a program off the filesystem and load it into memory via elf_load. The
+// file is read into a scratch buffer, which elf_load copies out of, so the
+// buffer is freed before returning. Returns 0, or -1 on any failure (a missing
+// file is reported silently so the caller -- e.g. the shell -- can react).
+static int load_program(const char *name, struct loaded_prog *lp) {
+    char path[128];
+    if (!resolve_program_path(name, path, sizeof(path))) {
+        return -1;
+    }
+    fat32_file_t f;
+    if (fat32_open(path, &f) != 0 || f.size == 0) {
         return -1;
     }
 
-    struct loaded_prog lp;
-    int rc = elf_load(prog->start, user_program_size(prog), &lp);
+    size_t npages = ((size_t)f.size + PAGE_SIZE - 1) / PAGE_SIZE;
+    uint8_t *buf = frame_alloc_pages(npages);
+    if (buf == NULL) {
+        printf("spawn: out of memory reading '%s'\n", path);
+        return -1;
+    }
+    uint32_t got = 0;
+    while (got < f.size) {
+        long n = fat32_read(&f, buf + got, f.size - got);
+        if (n <= 0) {
+            frame_free_pages(buf, npages);
+            printf("spawn: read('%s') failed\n", path);
+            return -1;
+        }
+        got += (uint32_t)n;
+    }
+
+    int rc = elf_load(buf, f.size, lp);
+    frame_free_pages(buf, npages);
     if (rc != 0) {
-        printf("spawn: elf_load('%s') failed: %d\n", name, rc);
+        printf("spawn: elf_load('%s') failed: %d\n", path, rc);
+        return -1;
+    }
+    return 0;
+}
+
+int task_spawn(const char *name, int argc, char *const argv[]) {
+    struct loaded_prog lp;
+    if (load_program(name, &lp) != 0) {
         return -1;
     }
 
