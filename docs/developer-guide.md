@@ -10,7 +10,7 @@ KoraOS is built with the LLVM toolchain while targeting `aarch64-none-elf`. The 
 
 - LLVM/Clang (including `clang`, `ld.lld`, and `llvm-objcopy`)
 - CMake 3.20 or newer
-- [mtools](https://www.gnu.org/software/mtools/) (`mformat`, `mcopy`) — used to
+- [mtools](https://www.gnu.org/software/mtools/) (`mformat`, `mcopy`), used to
   build the embedded FAT32 filesystem image; the build fails without it
 - QEMU (only for virtualization workflows)
 - Optional: GNU Make (the legacy Makefile is still functional)

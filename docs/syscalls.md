@@ -36,32 +36,32 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
 
 ## Notes per call
 
-- **`write`** — only `fd` 1 (stdout) and 2 (stderr) are valid; both go to the
+- **`write`**: only `fd` 1 (stdout) and 2 (stderr) are valid; both go to the
   console (UART + framebuffer).
-- **`read`** — `fd` 0 reads a line from the console (echoed, backspace honoured,
+- **`read`**: `fd` 0 reads a line from the console (echoed, backspace honoured,
   returns at newline or when the buffer fills). `fd ≥ 3` reads from an open file.
-- **`sbrk`** — grows (or shrinks) the caller's heap, allocated lazily on first
+- **`sbrk`**: grows (or shrinks) the caller's heap, allocated lazily on first
   use; returns the previous break so `sbrk(0)` reads the current break.
-- **`spawn`** — the process model is **cooperative and nesting**: `spawn` loads
+- **`spawn`**: the process model is **cooperative and nesting**: `spawn` loads
   the program and runs it to completion in EL0 while the caller is suspended,
   then returns the (now-exited) child's pid. Call `wait(pid)` afterwards to reap
   it and collect its exit code. `name` is resolved to a filesystem path: a bare
   name is looked up under `/bin`, an absolute path is used as-is (see
   [filesystem.md](filesystem.md)). `argv` entries are copied onto the child's
   stack and delivered as `main(argc, argv)`.
-- **`open`** — `flags` must be `O_RDONLY` (the filesystem is read-only). Works on
+- **`open`**: `flags` must be `O_RDONLY` (the filesystem is read-only). Works on
   both files and directories; the resulting fd is used with `read` (files) or
   `readdir` (directories). fds 0/1/2 are the console; real files start at 3.
-- **`lseek`** — `whence` is `SEEK_SET` / `SEEK_CUR` / `SEEK_END`; the new offset
+- **`lseek`**: `whence` is `SEEK_SET` / `SEEK_CUR` / `SEEK_END`; the new offset
   must land within `[0, size]`. Not valid on directory fds.
-- **`readdir`** — returns one entry per call from a directory fd. Skips deleted
+- **`readdir`**: returns one entry per call from a directory fd. Skips deleted
   entries, the volume label, and `.` / `..`. `name` is UTF-8.
-- **`stat`** — reports size and whether the path is a directory.
+- **`stat`**: reports size and whether the path is a directory.
 
 ## Structs and constants
 
 From [`user/libk/koraos.h`](../user/libk/koraos.h) (mirrored kernel-side in
-`src/sys/syscall.c` — keep the layouts identical):
+`src/sys/syscall.c`, keep the layouts identical):
 
 ```c
 #define O_RDONLY 0

@@ -70,7 +70,7 @@ runtime (`crt0.S` + `syscall.S`) into a standalone **position-independent** ELF
 The linker is told to emit classic `DT_RELA` relocations
 (`--pack-dyn-relocs=none`), because the kernel's ELF loader
 ([`src/user/elf.c`](../src/user/elf.c)) only handles `ET_DYN` images with
-`R_AARCH64_RELATIVE` relocations — no dynamic linking, no other reloc types.
+`R_AARCH64_RELATIVE` relocations, no dynamic linking, no other reloc types.
 
 Build as usual (`mtools` is required so the FS image can be assembled):
 
@@ -112,4 +112,4 @@ a program with `open` / `read` / `close`.
 - `argv` is capped at 16 entries.
 - No preemption: a long-running program blocks its parent (the shell) until it
   exits. Return from `main` (or call `exit`) to give control back.
-- The filesystem is **read-only** — a program cannot create or modify files yet.
+- The filesystem is **read-only**, a program cannot create or modify files yet.

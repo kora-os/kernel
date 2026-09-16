@@ -1,8 +1,8 @@
 # KoraOS
 
-KoraOS is a bare-metal Raspberry Pi kernel written in C with a small assembly shim. The project targets the aarch64 architecture and uses LLVM/Clang together with CMake for a modern cross-compilation workflow. It boots in QEMU (raspi3b) and on Raspberry Pi 4 hardware, drops to EL0, and runs userland programs — an interactive shell and utilities — loaded from an embedded read-only FAT32 filesystem.
+KoraOS is a bare-metal Raspberry Pi kernel written in C with a small assembly shim. The project targets the aarch64 architecture and uses LLVM/Clang together with CMake for a modern cross-compilation workflow. It boots in QEMU (raspi3b) and on Raspberry Pi 4 hardware, drops to EL0, and runs userland programs (an interactive shell and utilities) loaded from an embedded read-only FAT32 filesystem.
 
-**New here? Read the [Manifesto](MANIFESTO.md)** for what KoraOS is and why it exists — a home computer for the user/developer, in the spirit of the machines you could `PEEK` and `POKE` to your heart's content.
+**New here? Read the [Manifesto](MANIFESTO.md)** for what KoraOS is and why it exists: a home computer for the user/developer, in the spirit of the machines you could `PEEK` and `POKE` to your heart's content.
 
 ## Quick Start
 
