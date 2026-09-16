@@ -27,6 +27,7 @@ Options:
   -o, --output FILE  Output image path (default: build/fs/koraos.img)
   --size SIZE_MB     Image size in MiB (default: 2)
   --volume LABEL     FAT32 volume label (default: KORAOS)
+  --bindir DIR       Install DIR/*.elf into /bin (suffix stripped)
   -h, --help         Show this message
 EOF
 }
@@ -37,6 +38,7 @@ fsroot_dir="$script_dir/fsroot"
 image_path="$script_dir/build/fs/koraos.img"
 size_mb=2
 volume_label="KORAOS"
+bindir=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -52,6 +54,9 @@ while [[ $# -gt 0 ]]; do
   --volume)
     shift; [[ $# -gt 0 ]] || { echo "Missing value for --volume" >&2; exit 1; }
     volume_label="$1" ;;
+  --bindir)
+    shift; [[ $# -gt 0 ]] || { echo "Missing value for --bindir" >&2; exit 1; }
+    bindir="$1" ;;
   -h | --help)
     usage; exit 0 ;;
   *)
@@ -82,6 +87,17 @@ if [[ -d "$fsroot_dir" ]] && [[ -n "$(ls -A "$fsroot_dir" 2>/dev/null)" ]]; then
   mcopy -s -Q -i "$image_path" "$fsroot_dir"/* ::/
 else
   echo "Note: $fsroot_dir is empty or missing; image will contain no files."
+fi
+
+# Install userland ELFs into /bin, stripping the .elf suffix so programs are
+# spawned by bare name (e.g. build/user/shell.elf -> /bin/shell).
+if [[ -n "$bindir" ]] && compgen -G "$bindir/*.elf" >/dev/null; then
+  echo "Installing programs from $bindir into /bin"
+  mmd -i "$image_path" ::/bin 2>/dev/null || true
+  for elf in "$bindir"/*.elf; do
+    stem=$(basename "$elf" .elf)
+    mcopy -Q -i "$image_path" "$elf" "::/bin/$stem"
+  done
 fi
 
 echo "Contents:"

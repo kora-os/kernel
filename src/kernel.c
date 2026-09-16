@@ -69,12 +69,17 @@ void kernel_main(void) {
 
   printf("Current EL: %d\n", get_el());
 
-  // Start the interactive shell as the first user program. It spawns further
-  // programs itself, exercising the cooperative, nesting process model.
-  int pid = task_spawn("shell", 0, 0);
-  int code = task_wait(pid);  // reap the shell (its parent is the kernel)
-  printf("shell (pid %d) exited with code %d\n", pid, code);
-  task_reap_all();  // release anything the shell left unreaped
+  // Start /bin/init as the first (and only) user program the kernel launches.
+  // init owns userland policy from here: it spawns the shell, which spawns
+  // further programs -- all loaded from the filesystem.
+  int pid = task_spawn("init", 0, 0);
+  if (pid < 0) {
+    printf("kernel: failed to load /bin/init\n");
+  } else {
+    int code = task_wait(pid);  // reap init (its parent is the kernel)
+    printf("init (pid %d) exited with code %d\n", pid, code);
+  }
+  task_reap_all();  // release anything left unreaped
 
   console_init();
   console_run();
