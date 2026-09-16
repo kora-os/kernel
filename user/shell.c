@@ -32,8 +32,10 @@ static void help(void) {
     kputs("KoraOS shell commands:\n");
     kputs("  help            show this text\n");
     kputs("  exit            leave the shell\n");
+    kputs("  ls [path]       list a directory (default /)\n");
+    kputs("  cat <path>...   print file contents\n");
     kputs("  <program> [args...]  run an embedded program\n");
-    kputs("available programs: hello, init, echo, gfxdemo\n");
+    kputs("available programs: hello, init, echo, gfxdemo, ls, cat\n");
 }
 
 int main(void) {
