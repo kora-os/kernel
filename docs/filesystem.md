@@ -2,7 +2,7 @@
 
 KoraOS has a **read-only FAT32 filesystem**. It is what the kernel uses to find
 and load userland programs: the kernel boots `/bin/init`, which starts
-`/bin/shell`, which loads `/bin/ls`, `/bin/cat`, and the rest — all as
+`/bin/shell`, which loads `/bin/ls`, `/bin/cat`, and the rest, all as
 independent binaries read from the filesystem, not embedded in the kernel image.
 
 ## Where the disk comes from
@@ -17,7 +17,7 @@ create-fs-image.sh  ──(mtools)──▶  build/fs/koraos.img  ──(.incbin
 ```
 
 - [`create-fs-image.sh`](../create-fs-image.sh) formats a bare FAT32 volume
-  (BPB at LBA 0, no MBR/partition table — the simplest thing to parse) and
+  (BPB at LBA 0, no MBR/partition table, the simplest thing to parse) and
   populates it. It requires **mtools** (`mformat`, `mcopy`); see the
   [developer guide](developer-guide.md).
 - Everything under [`fsroot/`](../fsroot) is mirrored into the image root.
@@ -46,23 +46,23 @@ QEMU and real hardware with no extra media or QEMU flags.
 
 Each layer has a clean seam:
 
-- **Block device** ([`include/fs/blkdev.h`](../include/fs/blkdev.h)) — a
+- **Block device** ([`include/fs/blkdev.h`](../include/fs/blkdev.h)), a
   `blkdev_t` with a `read` function pointer over 512-byte sectors. The only
   backend today is the in-memory ramdisk; a real SD/eMMC driver can register
   itself here later **without any change to the FAT32 code above**.
-- **FAT32** ([`include/fs/fat32.h`](../include/fs/fat32.h)) — a single mounted
+- **FAT32** ([`include/fs/fat32.h`](../include/fs/fat32.h)), a single mounted
   volume, absolute paths, directory traversal, file reads, and stat. No VFS.
-- **File syscalls + per-task fd table** — see [syscalls.md](syscalls.md).
+- **File syscalls + per-task fd table**, see [syscalls.md](syscalls.md).
 
 ## FAT32 details
 
-- **Mount** parses the BPB at sector 0 (bytes/sector — must be 512 —,
+- **Mount** parses the BPB at sector 0 (bytes/sector, which must be 512,
   sectors/cluster, reserved sectors, number of FATs, `FATSz32`, `RootClus`) and
   caches the geometry.
 - **Cluster chains** are followed through the FAT with a one-sector FAT cache.
 - **Long filenames (LFN/VFAT)** are decoded from their on-disk **UTF-16** to
   **UTF-8**, including surrogate pairs. UTF-8 is used everywhere names cross the
-  syscall boundary — it is lossless versus the UTF-16 source and keeps the whole
+  syscall boundary, it is lossless versus the UTF-16 source and keeps the whole
   byte-string / C-string userland (argv, the shell, `write`) working unchanged.
   Names can be up to 255 UTF-16 code units, i.e. up to 765 UTF-8 bytes.
 - **8.3 short names** are an OEM code page, which the driver does not decode:
@@ -84,7 +84,7 @@ Each layer has a clean seam:
 ## Limitations and deferred work
 
 - **Read-only.** No create, write, append, delete, or directory modification.
-- **Ramdisk only.** No SD/eMMC driver — the disk is baked into the kernel. A
+- **Ramdisk only.** No SD/eMMC driver, the disk is baked into the kernel. A
   real driver drops in under the `blkdev_t` seam.
 - **No partition table.** The image is a bare FAT32 volume; MBR/GPT parsing is
   not implemented.
