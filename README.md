@@ -27,6 +27,7 @@ This generates a Mini-UART-aware image and copies it, along with `config.txt`, t
 
 - `docs/developer-guide.md` – Toolchain requirements, build configurations, QEMU workflow, and Raspberry Pi deployment instructions.
 - `docs/filesystem.md` – The read-only FAT32 filesystem, the embedded ramdisk, and how the image is built.
+- `docs/how-userland-works.md` – How a program is loaded and placed in memory, how processes coexist, and the (deliberate) lack of memory protection.
 - `docs/syscalls.md` – The system-call ABI.
 - `docs/writing-userland-programs.md` – How to write, build, and run a userland program.
 
