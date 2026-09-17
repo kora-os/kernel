@@ -33,6 +33,16 @@ clear_bss:
     b clear_bss
 
 bss_cleared:
+    // Enable EL1 access to the FP/SIMD (NEON) unit. The KoraOS kernel is built
+    // -mgeneral-regs-only and never touches FP itself, but the vendored Circle
+    // USB code is not, and clang may emit NEON there; without this, the first
+    // such instruction would trap. FP state is not context-switched: nothing
+    // else uses FP, so there is no register file to save.
+    mrs x0, cpacr_el1
+    orr x0, x0, #(3 << 20)      // FPEN = 0b11: do not trap FP/SIMD at EL0/EL1
+    msr cpacr_el1, x0
+    isb
+
     // Jump to kernel main
     bl kernel_main
     // If kernel_main returns, hang

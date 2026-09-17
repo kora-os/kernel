@@ -38,6 +38,15 @@ allocator, and console to Circle's `CInterruptSystem` / `CTimer` / memory /
 excluded: the Pi 4 xHCI/PCIe path (added with Pi 4 bring-up), gadget mode, and
 the net/sound/graphics/filesystem/scheduler subsystems.
 
+## Build configuration
+
+The `circle_usb` CMake library compiles this tree together with the KoraOS
+bridge adapters in `src/circle/` (`-DAARCH=64 -DRASPPI=3 -DSTDLIB_SUPPORT=0`).
+Circle's USB device factory is built keyboard-only via `-DEXCLUDE_USB_*` for
+every other class (mouse, gamepads, storage, audio, net, serial, printer,
+bluetooth, midi, touchscreen), so their drivers need not be vendored. No
+vendored source file is edited in place.
+
 ## Updating the pin
 
 Re-vendor from a new `kora-os/circle` commit by re-running the closure and copy,

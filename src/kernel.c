@@ -2,6 +2,7 @@
 #include "arch/exception.h"
 #include "arch/irq.h"
 #include "arch/systick.h"
+#include "circle_env.h"
 #include "console.h"
 #include "fs/blkdev.h"
 #include "fs/fat32.h"
@@ -54,6 +55,11 @@ void kernel_main(void) {
   irq_init();
   systick_init(100);
   irq_enable();
+
+  // Construct the vendored Circle USB stack on the KoraOS HAL bridge. In 3b-ii
+  // this only constructs the host controller (no enumeration yet); Pi 3
+  // bring-up in 3c calls Initialize() and needs real hardware.
+  circle_usb_init();
 
   // Bring up the ramdisk block device (embedded FAT32 image) and mount it so
   // the file syscalls have a filesystem to serve.

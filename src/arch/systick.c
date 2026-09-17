@@ -12,6 +12,7 @@
 static volatile uint64_t g_ticks;
 static uint64_t g_interval;  // timer ticks between interrupts
 static uint64_t g_deadline;  // absolute CNTPCT value of the next tick
+static void (*g_tick_hook)(void);
 
 static inline uint64_t read_cntpct(void) {
     uint64_t v;
@@ -34,6 +35,13 @@ static void systick_isr(void *ctx) {
     // interrupt latency (re-arming a relative TVAL would lose each overshoot).
     g_deadline += g_interval;
     write_cntp_cval(g_deadline);
+    if (g_tick_hook != NULL) {
+        g_tick_hook();
+    }
+}
+
+void systick_set_tick_hook(void (*hook)(void)) {
+    g_tick_hook = hook;
 }
 
 void systick_init(unsigned hz) {
