@@ -1,5 +1,7 @@
 #include "arch/cxx.h"
 #include "arch/exception.h"
+#include "arch/irq.h"
+#include "arch/systick.h"
 #include "console.h"
 #include "fs/blkdev.h"
 #include "fs/fat32.h"
@@ -45,6 +47,13 @@ void kernel_main(void) {
   // ctors, virtual dispatch, operator new via the frame allocator). This is
   // scaffolding for the Circle USB stack; remove once real C++ drivers land.
   cxx_selftest();
+
+  // Bring up KoraOS's interrupt controller, start the 100 Hz system tick, and
+  // unmask IRQs. This is KoraOS's own interrupt layer; the vendored USB stack
+  // is bridged onto it in a later step.
+  irq_init();
+  systick_init(100);
+  irq_enable();
 
   // Bring up the ramdisk block device (embedded FAT32 image) and mount it so
   // the file syscalls have a filesystem to serve.
