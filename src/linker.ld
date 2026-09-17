@@ -9,6 +9,17 @@ SECTIONS {
         *boot*.obj(.text .text.*)
         *(.text .text.*)
         *(.rodata .rodata.*)
+
+        /* C++ global constructors. The kernel is a fixed-address (non-PIE)
+           image, so these are absolute function pointers resolved at link time;
+           cxx_init() walks [__init_array_start, __init_array_end) at boot. They
+           live in the read-only code region, which is fine: they are only read,
+           once, during early init. */
+        . = ALIGN(8);
+        __init_array_start = .;
+        KEEP(*(SORT_BY_INIT_PRIORITY(.init_array.*)))
+        KEEP(*(.init_array))
+        __init_array_end = .;
     }
 
     /* Round the executable region up to a 2MB boundary so the MMU can map it

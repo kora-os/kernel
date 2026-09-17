@@ -1,3 +1,4 @@
+#include "arch/cxx.h"
 #include "arch/exception.h"
 #include "console.h"
 #include "fs/blkdev.h"
@@ -28,6 +29,10 @@ void kernel_main(void) {
 
   init_printf(NULL, putc);
 
+  // Run C++ global constructors now that printf is available. (Constructors
+  // must not allocate yet: the frame allocator is brought up further down.)
+  cxx_init();
+
   // Install EL1 exception vectors before doing anything that could trap.
   exception_init();
 
@@ -35,6 +40,11 @@ void kernel_main(void) {
   // the physical page allocator for later user-stack allocation.
   mmu_init();
   frame_alloc_init();
+
+  // Prove the freestanding C++ toolchain and runtime work end to end (static
+  // ctors, virtual dispatch, operator new via the frame allocator). This is
+  // scaffolding for the Circle USB stack; remove once real C++ drivers land.
+  cxx_selftest();
 
   // Bring up the ramdisk block device (embedded FAT32 image) and mount it so
   // the file syscalls have a filesystem to serve.
