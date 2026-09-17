@@ -119,16 +119,27 @@ el0_sync:
     bl  handle_sync_el0
     kernel_exit
 
+// IRQ from the kernel (EL1h) or from userland (EL0): save context, dispatch
+// through the interrupt controller, restore. Interrupts stay masked (PSTATE.I
+// set on entry) for the duration, so handlers do not nest.
+el1h_irq:
+    kernel_entry
+    bl  handle_irq
+    kernel_exit
+
+el0_irq:
+    kernel_entry
+    bl  handle_irq
+    kernel_exit
+
 // --- Invalid / unexpected entries (numbered by vector index) ---
 
 el1t_sync:    handle_invalid 0
 el1t_irq:     handle_invalid 1
 el1t_fiq:     handle_invalid 2
 el1t_error:   handle_invalid 3
-el1h_irq:     handle_invalid 5
 el1h_fiq:     handle_invalid 6
 el1h_error:   handle_invalid 7
-el0_irq:      handle_invalid 9
 el0_fiq:      handle_invalid 10
 el0_error:    handle_invalid 11
 el0_32_sync:  handle_invalid 12
