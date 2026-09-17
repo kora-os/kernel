@@ -3,7 +3,7 @@ cmake_minimum_required(VERSION 3.20)
 # Set the toolchain file before project()
 set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_SOURCE_DIR}/cmake/aarch64-toolchain.cmake" CACHE PATH "Toolchain file")
 
-project(KoraOS C ASM)
+project(KoraOS C CXX ASM)
 
 # Enable compile_commands.json generation for clangd
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
@@ -22,13 +22,16 @@ set(LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/lib")
 set(INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(LINKER_SCRIPT "${SRC_DIR}/linker.ld")
 
-# Gather sources from src tree (including subdirectories) and src/lib
+# Gather sources from src tree (including subdirectories) and src/lib. C++ lives
+# alongside C (e.g. src/cxx/ and, later, the vendored Circle USB stack); the
+# kernel and its C++ share one flat image.
 file(GLOB_RECURSE KERNEL_C_SOURCES "${SRC_DIR}/*.c")
+file(GLOB_RECURSE KERNEL_CXX_SOURCES "${SRC_DIR}/*.cpp" "${SRC_DIR}/*.cc" "${SRC_DIR}/*.cxx")
 file(GLOB_RECURSE KERNEL_ASM_SOURCES "${SRC_DIR}/*.S" "${SRC_DIR}/*.s")
 file(GLOB LIB_C_SOURCES "${LIB_DIR}/*.c")
 file(GLOB LIB_ASM_SOURCES "${LIB_DIR}/*.S" "${LIB_DIR}/*.s")
 
-set(KERNEL_SOURCES ${KERNEL_C_SOURCES} ${KERNEL_ASM_SOURCES} ${LIB_C_SOURCES} ${LIB_ASM_SOURCES})
+set(KERNEL_SOURCES ${KERNEL_C_SOURCES} ${KERNEL_CXX_SOURCES} ${KERNEL_ASM_SOURCES} ${LIB_C_SOURCES} ${LIB_ASM_SOURCES})
 
 # ---------------------------------------------------------------------------
 # User programs: standalone position-independent ELF executables built with the
@@ -162,6 +165,22 @@ set(C_FLAGS
     -DPRINTF_LONG_SUPPORT
 )
 
+# C++-specific flags. Freestanding kernel C++: no exceptions, no RTTI, no
+# thread-safe local-static guards (the kernel is single-threaded here), and
+# integer-only codegen like the C side. Static-object destructors are routed to
+# the __cxa_atexit stub in src/cxx/ and never run (the kernel does not exit).
+set(CXX_FLAGS
+    ${COMMON_FLAGS}
+    -Wall
+    -mgeneral-regs-only
+    -std=c++20
+    -nostdinc++
+    -fno-exceptions
+    -fno-rtti
+    -fno-threadsafe-statics
+    -DPRINTF_LONG_SUPPORT
+)
+
 # Assembly flags
 set(ASM_FLAGS
     ${COMMON_FLAGS}
@@ -213,6 +232,7 @@ function(add_kernel_variant VARIANT)
 
     target_compile_options(${target} PRIVATE
         $<$<COMPILE_LANGUAGE:C>:${C_FLAGS}>
+        $<$<COMPILE_LANGUAGE:CXX>:${CXX_FLAGS}>
         $<$<COMPILE_LANGUAGE:ASM>:${ASM_FLAGS}>
     )
 
