@@ -8,23 +8,16 @@
 #include <circle/memory.h>
 
 #include "mm.h"
+#include "mm/coherent.h"
 #include "mm/frame_alloc.h"
 
 extern "C" void tfp_printf(const char *fmt, ...);
 
-// Coherent pages requested by slot (e.g. the property-mailbox buffer). Backed by
-// ordinary frame-allocator pages here; buffers shared with the VideoCore are
-// kept coherent by explicit cache maintenance around the transfer (real-hardware
-// concern handled in the Pi 3 bring-up).
+// Coherent pages requested by slot (e.g. the property-mailbox buffer the
+// VideoCore reads). Backed by the MMU's Normal non-cacheable pool so no cache
+// maintenance is needed, matching Circle's assumption for these buffers.
 uintptr CMemorySystem::GetCoherentPage(unsigned nSlot) {
-    static void *slots[64];
-    if (nSlot >= 64) {
-        return 0;
-    }
-    if (slots[nSlot] == 0) {
-        slots[nSlot] = frame_alloc();
-    }
-    return (uintptr)slots[nSlot];
+    return (uintptr)coherent_page(nSlot);
 }
 
 extern "C" {

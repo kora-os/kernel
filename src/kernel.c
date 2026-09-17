@@ -56,10 +56,14 @@ void kernel_main(void) {
   systick_init(100);
   irq_enable();
 
-  // Construct the vendored Circle USB stack on the KoraOS HAL bridge. In 3b-ii
-  // this only constructs the host controller (no enumeration yet); Pi 3
-  // bring-up in 3c calls Initialize() and needs real hardware.
-  circle_usb_init();
+  // Bring up the vendored Circle USB stack on the KoraOS HAL bridge. Enumeration
+  // talks to real USB hardware, which QEMU's raspi3b does not emulate, so only
+  // the hardware build initializes and scans for a keyboard.
+#ifdef QEMU_TESTING
+  circle_usb_init(0);
+#else
+  circle_usb_init(1);
+#endif
 
   // Bring up the ramdisk block device (embedded FAT32 image) and mount it so
   // the file syscalls have a filesystem to serve.

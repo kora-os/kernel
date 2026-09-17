@@ -77,10 +77,12 @@
 
 #define MAIR_IDX_NORMAL        0
 #define MAIR_IDX_DEVICE        1
+#define MAIR_IDX_NORMAL_NC     2   // Normal, non-cacheable (coherent DMA)
 
 #define MAIR_VALUE \
     ((MAIR_NORMAL_WB    << (8 * MAIR_IDX_NORMAL)) | \
-     (MAIR_DEVICE_nGnRnE << (8 * MAIR_IDX_DEVICE)))
+     (MAIR_DEVICE_nGnRnE << (8 * MAIR_IDX_DEVICE)) | \
+     (MAIR_NORMAL_NC    << (8 * MAIR_IDX_NORMAL_NC)))
 
 // -------------------------------------------------------------------------
 // TCR_EL1 - Translation Control Register
@@ -136,3 +138,9 @@
 // Device MMIO: read/write for EL1 and EL0.
 #define MMU_DEVICE_BLOCK_FLAGS \
     (PD_BLOCK | PD_AF | PD_AP_EL1RW_EL0RW | PD_ATTR_IDX(MAIR_IDX_DEVICE))
+
+// Coherent DMA: Normal non-cacheable RAM, read/write for EL1 and EL0. Used for
+// buffers a bus master (e.g. the VideoCore mailbox) reads/writes without the CPU
+// doing cache maintenance. Shareability is ignored for non-cacheable memory.
+#define MMU_COHERENT_BLOCK_FLAGS \
+    (PD_BLOCK | PD_AF | PD_AP_EL1RW_EL0RW | PD_ATTR_IDX(MAIR_IDX_NORMAL_NC))
