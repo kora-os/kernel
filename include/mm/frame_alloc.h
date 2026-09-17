@@ -2,6 +2,10 @@
 
 #include "common.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 // Physical 4 KB page allocator for the reserved low-memory pool that begins
 // just past the kernel image (_end) and runs for a fixed window. Backed by a
 // bitmap, so pages can be freed and reused -- enough to back user program
@@ -24,3 +28,7 @@ void frame_free(void *page);
 // (pass the same pointer and count). Freeing something not from the pool, or a
 // mismatched range, is ignored.
 void frame_free_pages(void *pages, size_t count);
+
+#ifdef __cplusplus
+}
+#endif

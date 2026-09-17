@@ -20,6 +20,11 @@ void systick_init(unsigned hz);
 // Ticks elapsed since systick_init().
 uint64_t systick_count(void);
 
+// Register a callback invoked from the tick ISR on every tick (or NULL to
+// clear). Used by the Circle CTimer adapter to poll kernel timers; a future
+// scheduler can use it too. Runs in interrupt context with IRQs masked.
+void systick_set_tick_hook(void (*hook)(void));
+
 #ifdef __cplusplus
 }
 #endif

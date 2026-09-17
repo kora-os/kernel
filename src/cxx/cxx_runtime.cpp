@@ -60,7 +60,32 @@ void *operator new[](size_t size) {
     return operator new(size);
 }
 
+// Over-aligned new (C++17). Circle requests these for some USB structures. The
+// frame-allocator backing already returns page-aligned storage and we hand back
+// a 16-byte-aligned pointer, which satisfies typical alignments; larger explicit
+// alignments are not yet honoured exactly (revisit for DMA-descriptor alignment
+// in Pi 3 bring-up).
+namespace std {
+enum class align_val_t : size_t {};
+}
+
+void *operator new(size_t size, std::align_val_t) {
+    return operator new(size);
+}
+
+void *operator new[](size_t size, std::align_val_t) {
+    return operator new(size);
+}
+
 #pragma clang diagnostic pop
+
+void operator delete(void *ptr, std::align_val_t) noexcept {
+    operator delete(ptr);
+}
+
+void operator delete[](void *ptr, std::align_val_t) noexcept {
+    operator delete(ptr);
+}
 
 void operator delete(void *ptr) noexcept {
     if (ptr == nullptr) {
