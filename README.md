@@ -35,3 +35,14 @@ This generates a Mini-UART-aware image and copies it, along with `config.txt`, t
 - `docs/writing-userland-programs.md` – How to write, build, and run a userland program.
 
 Keep documentation in `docs/` current as the project evolves. Avoid placing temporary notes or todo lists there; use issue trackers or other channels for work-in-progress planning.
+
+## License
+
+KoraOS is free software: you can redistribute it and/or modify it under the terms
+of the GNU General Public License as published by the Free Software Foundation,
+either version 3 of the License, or (at your option) any later version. See
+[`LICENSE`](LICENSE) for the full text.
+
+Third-party code we incorporate (notably the [Circle](https://github.com/rsta2/circle)
+USB stack) and the people who wrote it are credited in [`CREDITS.md`](CREDITS.md).
+Each imported file also keeps its own original license header.
