@@ -28,6 +28,10 @@ set(LINKER_SCRIPT "${SRC_DIR}/linker.ld")
 file(GLOB_RECURSE KERNEL_C_SOURCES "${SRC_DIR}/*.c")
 file(GLOB_RECURSE KERNEL_CXX_SOURCES "${SRC_DIR}/*.cpp" "${SRC_DIR}/*.cc" "${SRC_DIR}/*.cxx")
 file(GLOB_RECURSE KERNEL_ASM_SOURCES "${SRC_DIR}/*.S" "${SRC_DIR}/*.s")
+# The Circle HAL-bridge adapters (src/circle) need Circle's headers and build
+# flags, so they are compiled into the circle_usb library below, not with the
+# kernel's own C++ flags.
+list(FILTER KERNEL_CXX_SOURCES EXCLUDE REGEX "/circle/")
 file(GLOB LIB_C_SOURCES "${LIB_DIR}/*.c")
 file(GLOB LIB_ASM_SOURCES "${LIB_DIR}/*.S" "${LIB_DIR}/*.s")
 
@@ -321,8 +325,12 @@ list(JOIN enabled_variants ", " enabled_variants_str)
 # ---------------------------------------------------------------------------
 set(CIRCLE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/circle")
 file(GLOB_RECURSE CIRCLE_SOURCES "${CIRCLE_DIR}/lib/*.cpp")
-add_library(circle_usb STATIC ${CIRCLE_SOURCES})
-target_include_directories(circle_usb PRIVATE "${CIRCLE_DIR}/include")
+# KoraOS HAL-bridge adapters (CInterruptSystem/CTimer/CLogger/memory backed by
+# KoraOS) are compiled together with the vendored code so they share Circle's
+# include path and build flags while also seeing KoraOS headers.
+file(GLOB CIRCLE_BRIDGE_SOURCES "${SRC_DIR}/circle/*.cpp")
+add_library(circle_usb STATIC ${CIRCLE_SOURCES} ${CIRCLE_BRIDGE_SOURCES})
+target_include_directories(circle_usb PRIVATE "${CIRCLE_DIR}/include" "${INCLUDE_DIR}")
 target_compile_options(circle_usb PRIVATE
     --target=aarch64-none-elf
     -mcpu=cortex-a72
@@ -344,9 +352,30 @@ target_compile_options(circle_usb PRIVATE
     # No C standard library underneath Circle here; this also strips CString's
     # floating-point %f path, so the kernel stays integer-only (-mgeneral-regs-only).
     -DSTDLIB_SUPPORT=0
+    # Build only the HID keyboard device driver from Circle's USB device factory;
+    # every other class (mouse, gamepads, storage, audio, net, ...) is excluded so
+    # we do not have to vendor those drivers and their dependencies.
+    -DEXCLUDE_USB_AUDIO
+    -DEXCLUDE_USB_BLUETOOTH
+    -DEXCLUDE_USB_GAMEPAD
+    -DEXCLUDE_USB_MIDI
+    -DEXCLUDE_USB_MOUSE
+    -DEXCLUDE_USB_NET
+    -DEXCLUDE_USB_PRINTER
+    -DEXCLUDE_USB_SERIAL
+    -DEXCLUDE_USB_STORAGE
+    -DEXCLUDE_USB_TOUCHSCREEN
     # Vendored third-party code: do not enforce KoraOS's warning policy on it.
     -Wno-everything
 )
+
+# Link the Circle USB library (vendored stack + KoraOS bridge) into every kernel
+# variant. It references KoraOS symbols (irq_connect, the timer helpers, the
+# frame allocator, printf) which are provided by the kernel objects at link time.
+get_property(_circle_link_targets GLOBAL PROPERTY KERNEL_VARIANT_TARGETS)
+foreach(_t ${_circle_link_targets})
+    target_link_libraries(${_t} PRIVATE circle_usb)
+endforeach()
 
 # Print configuration
 message(STATUS "Building for Raspberry Pi ${RPI_VERSION}")
