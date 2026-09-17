@@ -311,8 +311,42 @@ if(BUILD_HW_VARIANT)
 endif()
 list(JOIN enabled_variants ", " enabled_variants_str)
 
-# Create boot directory ahead of time for user convenience
-file(MAKE_DIRECTORY ${CMAKE_BINARY_DIR}/boot)
+# ---------------------------------------------------------------------------
+# Vendored Circle USB stack (third_party/circle, pinned fork kora-os/circle).
+# Step 3b-i compiles the vendored subset into a static library to prove it
+# builds under KoraOS's toolchain. It is NOT yet linked into the kernel: the
+# KoraOS HAL-bridge adapters (CInterruptSystem/CTimer/CLogger/memory) that
+# resolve its externals land in step 3b-ii. A static archive does not resolve
+# external symbols, so unimplemented adapters are fine at this stage.
+# ---------------------------------------------------------------------------
+set(CIRCLE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/circle")
+file(GLOB_RECURSE CIRCLE_SOURCES "${CIRCLE_DIR}/lib/*.cpp")
+add_library(circle_usb STATIC ${CIRCLE_SOURCES})
+target_include_directories(circle_usb PRIVATE "${CIRCLE_DIR}/include")
+target_compile_options(circle_usb PRIVATE
+    --target=aarch64-none-elf
+    -mcpu=cortex-a72
+    -ffreestanding
+    -nostdlib
+    -fno-builtin
+    -fno-stack-protector
+    # NOTE: unlike the rest of the kernel, Circle is NOT built -mgeneral-regs-only:
+    # CString unconditionally compiles a floating-point %f path, and clang may
+    # emit NEON elsewhere. EL1 FP/NEON access must be enabled before any Circle
+    # code runs (done in 3b-ii); the USB paths themselves never format floats.
+    -nostdinc++
+    -fno-exceptions
+    -fno-rtti
+    -fno-threadsafe-statics
+    -std=c++17
+    -DAARCH=64
+    -DRASPPI=3
+    # No C standard library underneath Circle here; this also strips CString's
+    # floating-point %f path, so the kernel stays integer-only (-mgeneral-regs-only).
+    -DSTDLIB_SUPPORT=0
+    # Vendored third-party code: do not enforce KoraOS's warning policy on it.
+    -Wno-everything
+)
 
 # Print configuration
 message(STATUS "Building for Raspberry Pi ${RPI_VERSION}")
