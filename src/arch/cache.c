@@ -50,3 +50,30 @@ void dcache_invalidate(void *addr, size_t size) {
 void dcache_clean_invalidate(const void *addr, size_t size) {
     dcache_range((uintptr_t)addr, size, OP_CLEAN_INVALIDATE);
 }
+
+void icache_sync_range(const void *addr, size_t size) {
+    if (size == 0) {
+        return;
+    }
+    uint64_t ctr;
+    asm volatile("mrs %0, ctr_el0" : "=r"(ctr));
+    // CTR_EL0: DminLine [19:16], IminLine [3:0] = log2 words (word = 4 bytes).
+    size_t dline = (size_t)(4u << ((ctr >> 16) & 0xF));
+    size_t iline = (size_t)(4u << (ctr & 0xF));
+    uintptr_t start = (uintptr_t)addr;
+    uintptr_t end = start + size;
+
+    // Clean data cache to the point of unification so the writes reach where the
+    // instruction fetch will look.
+    for (uintptr_t a = start & ~(uintptr_t)(dline - 1); a < end; a += dline) {
+        asm volatile("dc cvau, %0" ::"r"(a) : "memory");
+    }
+    asm volatile("dsb ish" ::: "memory");
+
+    // Invalidate the instruction cache over the range, then synchronize.
+    for (uintptr_t a = start & ~(uintptr_t)(iline - 1); a < end; a += iline) {
+        asm volatile("ic ivau, %0" ::"r"(a) : "memory");
+    }
+    asm volatile("dsb ish" ::: "memory");
+    asm volatile("isb");
+}

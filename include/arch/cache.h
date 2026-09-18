@@ -29,6 +29,14 @@ void dcache_invalidate(void *addr, size_t size);
 // Clean then invalidate lines covering the range.
 void dcache_clean_invalidate(const void *addr, size_t size);
 
+// Make instructions written to memory as data visible to instruction fetch:
+// clean the D-cache to the point of unification over the range, then invalidate
+// the I-cache over it (with the necessary barriers). Call this after loading or
+// modifying code (e.g. an ELF into RAM) before executing it, or a CPU may fetch
+// stale/garbage instructions -- which faults as an "unknown" exception at the
+// first instruction on cores with less forgiving caches (e.g. Cortex-A72).
+void icache_sync_range(const void *addr, size_t size);
+
 #ifdef __cplusplus
 }
 #endif
