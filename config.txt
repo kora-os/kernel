@@ -1,6 +1,17 @@
+# KoraOS boot configuration.
+#
+# One SD card serves both Raspberry Pi 3 and Pi 4: the GPU firmware detects the
+# board and loads the matching kernel image. Both kernel8-rpi3.img and
+# kernel8-rpi4.img can live on the same card without conflicting.
+
 arm_64bit=1
 uart_2ndstage=1
 dtoverlay=miniuart-bt
 
+[pi3]
+kernel=kernel8-rpi3.img
+
 [pi4]
 kernel=kernel8-rpi4.img
+
+[all]

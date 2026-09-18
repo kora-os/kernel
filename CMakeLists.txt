@@ -22,6 +22,20 @@ set(LIB_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src/lib")
 set(INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include")
 set(LINKER_SCRIPT "${SRC_DIR}/linker.ld")
 
+# Raspberry Pi GPU boot firmware + device trees (third-party, see firmware/).
+# Staged next to the kernel on hardware boot partitions. bootcode.bin/start.elf/
+# fixup.dat boot the Pi 3; start4.elf/fixup4.dat boot the Pi 4 (which has no
+# bootcode.bin). Both DTBs ship so one card serves either board.
+set(BOOT_FIRMWARE_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/firmware/bootcode.bin"
+    "${CMAKE_CURRENT_SOURCE_DIR}/firmware/start.elf"
+    "${CMAKE_CURRENT_SOURCE_DIR}/firmware/fixup.dat"
+    "${CMAKE_CURRENT_SOURCE_DIR}/firmware/start4.elf"
+    "${CMAKE_CURRENT_SOURCE_DIR}/firmware/fixup4.dat"
+    "${CMAKE_CURRENT_SOURCE_DIR}/firmware/bcm2710-rpi-3-b.dtb"
+    "${CMAKE_CURRENT_SOURCE_DIR}/firmware/bcm2711-rpi-4-b.dtb"
+)
+
 # Gather sources from src tree (including subdirectories) and src/lib. C++ lives
 # alongside C (e.g. src/cxx/ and, later, the vendored Circle USB stack); the
 # kernel and its C++ share one flat image.
@@ -265,6 +279,15 @@ function(add_kernel_variant VARIANT)
         COMMENT "Copying ${KVAR_IMAGE_NAME} to local boot directory (${KVAR_BOOT_IMAGE_NAME})"
     )
 
+    # For hardware builds, also stage the GPU boot firmware and device trees next
+    # to the kernel so the boot partition is complete and serves both boards.
+    if(NOT KVAR_QEMU)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy ${BOOT_FIRMWARE_FILES} ${CMAKE_BINARY_DIR}/boot/
+            COMMENT "Staging Raspberry Pi boot firmware into local boot directory"
+        )
+    endif()
+
     add_custom_target(install_${VARIANT}
         COMMAND ${CMAKE_COMMAND} -E make_directory ${BOOTMNT}
         COMMAND ${CMAKE_COMMAND} -E copy ${image_path} ${BOOTMNT}/${KVAR_BOOT_IMAGE_NAME}
@@ -272,6 +295,15 @@ function(add_kernel_variant VARIANT)
         DEPENDS ${target}
         COMMENT "Copying ${KVAR_IMAGE_NAME} to boot mount: ${BOOTMNT}"
     )
+
+    # Hardware install also delivers the firmware and device trees (idempotent, so
+    # installing the Pi 3 and Pi 4 builds in turn populates one card for both).
+    if(NOT KVAR_QEMU)
+        add_custom_command(TARGET install_${VARIANT} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E copy ${BOOT_FIRMWARE_FILES} ${BOOTMNT}/
+            COMMENT "Copying Raspberry Pi boot firmware to boot mount: ${BOOTMNT}"
+        )
+    endif()
 
     set_property(GLOBAL APPEND PROPERTY KERNEL_VARIANT_TARGETS ${target})
     set_property(GLOBAL APPEND PROPERTY KERNEL_INSTALL_TARGETS install_${VARIANT})
