@@ -1,14 +1,23 @@
 # KoraOS boot configuration.
 #
-# One SD card serves both Raspberry Pi 3 and Pi 4: the GPU firmware detects the
-# board and loads the matching kernel image. Both kernel8-rpi3.img and
-# kernel8-rpi4.img can live on the same card without conflicting.
+# One SD card serves both Raspberry Pi 3 and Pi 4: the firmware detects the board
+# and loads the matching kernel image.
+#
+# Serial console: KoraOS drives the mini-UART (UART1) on GPIO14/15 (see
+# src/mini_uart.c). The mini-UART's baud is derived from the VPU core clock, and
+# the kernel's divisor assumes a fixed 250 MHz on the Pi 3. The Pi 3 otherwise
+# boots the core at 400 MHz and scales to 250 MHz only at idle, so the baud drifts
+# and the boot log garbles. core_freq=250 pins it, keeping 115200 stable the whole
+# time. (enable_uart=1 alone does NOT pin the clock to 250 -- core_freq=250 does.)
+# Do NOT use dtoverlay=miniuart-bt: that routes the PL011, not the mini-UART, to
+# GPIO14/15, which the kernel does not drive.
 
 arm_64bit=1
+enable_uart=1
 uart_2ndstage=1
-dtoverlay=miniuart-bt
 
 [pi3]
+core_freq=250
 kernel=kernel8-rpi3.img
 
 [pi4]
