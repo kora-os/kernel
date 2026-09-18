@@ -28,6 +28,16 @@ USPi (<https://github.com/rsta2/uspi>), the C USB library carved out of Circle,
 was evaluated first. We chose Circle because, unlike USPi, it supports the
 Raspberry Pi 4's xHCI controller, letting a single stack serve both boards.
 
+## Raspberry Pi boot firmware
+
+- **Files:** the GPU boot firmware and device trees in [`firmware/`](firmware/)
+  (`bootcode.bin`, `start*.elf`, `fixup*.dat`, `*.dtb`).
+- **Source:** <https://github.com/raspberrypi/firmware> (pinned; see
+  `firmware/README.md`).
+- **License:** Raspberry Pi / Broadcom firmware license (`firmware/LICENCE.broadcom`).
+- These are loaded by the SoC before KoraOS and are not linked into it (mere
+  aggregation), so they do not affect KoraOS's licensing.
+
 ## The GPLv3 choice
 
 KoraOS is GPLv3-or-later on purpose: it is an open experiment in the spirit of

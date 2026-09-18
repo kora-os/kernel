@@ -18,12 +18,32 @@ You need LLVM/Clang, CMake 3.20+, [mtools](https://www.gnu.org/software/mtools/)
 
 ## Building for Hardware
 
+Set `RPI_VERSION` to the target board (`3` or `4`) and point `BOOTMNT` at your
+mounted SD card boot partition:
+
 ```bash
-BOOTMNT=/Volumes/BOOT ./build.sh --hw --release
+# Raspberry Pi 3
+RPI_VERSION=3 BOOTMNT=/Volumes/BOOT ./build.sh --hw --release
 cmake --build build --target install_hw
 ```
 
-This generates a Mini-UART-aware image and copies it, along with `config.txt`, to your mounted SD card partition (`BOOTMNT`). Safely eject the volume before inserting it into the Raspberry Pi.
+`install_hw` copies the kernel image (`kernel8-rpi<N>.img`), `config.txt`, the GPU
+boot firmware, and the device trees (all from [`firmware/`](firmware/)) to
+`BOOTMNT`, giving a complete, bootable partition. Safely eject the volume before
+inserting it into the Raspberry Pi.
+
+**One card for both boards.** `config.txt` selects the kernel per detected board,
+and the install is additive, so building each board in turn populates a single
+card that boots on either:
+
+```bash
+RPI_VERSION=3 BOOTMNT=/Volumes/BOOT ./build.sh --hw --release && cmake --build build --target install_hw
+RPI_VERSION=4 BOOTMNT=/Volumes/BOOT ./build.sh --hw --release && cmake --build build --target install_hw
+```
+
+The boot firmware in `firmware/` is Raspberry Pi's own (closed-source, pinned; see
+[`firmware/README.md`](firmware/README.md)); it is loaded by the SoC before the
+kernel and is not part of KoraOS.
 
 ## Documentation
 

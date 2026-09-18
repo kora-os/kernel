@@ -29,6 +29,11 @@ Makefile
 *.bin
 *.map
 
+# ...but keep the vendored Raspberry Pi GPU boot firmware (see firmware/README.md)
+!firmware/start.elf
+!firmware/start4.elf
+!firmware/bootcode.bin
+
 # Tooling caches
 .cache/
 .clangd/
