@@ -7,6 +7,21 @@
 // End of the executable (code) region, 2 MB aligned by the linker script.
 extern char text_end[];
 
+// Coherent (Normal non-cacheable) pool for bus-master buffers such as the
+// VideoCore mailbox. 2 MB aligned and 2 MB sized so it occupies exactly one MMU
+// block, which build_identity_map() maps non-cacheable.
+#define COHERENT_POOL_SIZE 0x200000
+static uint8_t coherent_pool[COHERENT_POOL_SIZE]
+    __attribute__((aligned(COHERENT_POOL_SIZE)));
+
+void *coherent_page(unsigned slot) {
+    uint64_t offset = (uint64_t)slot * PAGE_SIZE;
+    if (offset + PAGE_SIZE > COHERENT_POOL_SIZE) {
+        return NULL;
+    }
+    return coherent_pool + offset;
+}
+
 // Translation tables for a 48-bit VA space covering the low 4 GB with 2 MB
 // blocks: one L0 (512 GB/entry), one L1 (1 GB/entry, 4 entries used) and four
 // L2 tables (2 MB/entry). Statically reserved in BSS, 4 KB aligned.
@@ -35,6 +50,8 @@ static void build_identity_map(void) {
                 flags = MMU_DEVICE_BLOCK_FLAGS;       // peripherals / MMIO
             } else if (addr < code_end) {
                 flags = MMU_CODE_BLOCK_FLAGS;         // kernel + user text
+            } else if (addr == (uint64_t)coherent_pool) {
+                flags = MMU_COHERENT_BLOCK_FLAGS;     // Normal non-cacheable pool
             } else {
                 flags = MMU_NORMAL_BLOCK_FLAGS;       // general RAM, EL0+EL1 RW
             }
