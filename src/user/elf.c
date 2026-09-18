@@ -1,4 +1,5 @@
 #include "user/elf.h"
+#include "arch/cache.h"
 #include "mm.h"
 #include "mm/frame_alloc.h"
 #include "lib/printf.h"
@@ -154,6 +155,11 @@ int elf_load(const void *data, size_t len, struct loaded_prog *out) {
             return rc;
         }
     }
+
+    // The program was written (and relocated) through the data cache; make it
+    // visible to instruction fetch before it runs at EL0, or the CPU may execute
+    // stale/garbage instructions (faults at the entry point on the Cortex-A72).
+    icache_sync_range(region, (size_t)pages * PAGE_SIZE);
 
     out->entry = eh->e_entry + bias;
     out->image = region;
