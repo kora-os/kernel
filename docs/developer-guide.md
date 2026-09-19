@@ -87,6 +87,14 @@ After building the QEMU variant, launch the emulator:
 
 The script boots `build/kernel8.img` on the `raspi3b` machine, connects the UART to your terminal, and hides the graphical display. Provide additional QEMU flags by appending them to the command (for example `./run-qemu.sh -s -S` to wait for a debugger).
 
+To also open the framebuffer window, run with `KORA_QEMU_FB=1 ./run-qemu.sh`.
+
+> **Keyboard input goes to the terminal, not the framebuffer window.** The kernel
+> reads input only from the serial UART, which QEMU wires to the terminal you
+> launched from. The framebuffer window is output-only — there is no USB/HID
+> keyboard driver yet — so the shell echoes to both the terminal and the window,
+> but you must *type into the terminal*.
+
 Quit QEMU with `Ctrl-A X`. If you need automated smoke tests, pipe input to the script (e.g. `echo "test" | timeout 2 ./run-qemu.sh`).
 
 ## Building for Raspberry Pi Hardware

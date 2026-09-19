@@ -15,6 +15,11 @@ echo ""
 QEMU_DISPLAY_ARGS=("-display" "none")
 if [ "${KORA_QEMU_FB:-0}" = "1" ]; then
   QEMU_DISPLAY_ARGS=("-display" "cocoa")
+  # The kernel reads keyboard input only from the serial UART, which QEMU wires
+  # to this terminal. The framebuffer window is output-only (there is no USB/HID
+  # keyboard driver yet), so type into THIS TERMINAL, not the QEMU window.
+  echo "Framebuffer window is display-only: type into this terminal, not the window."
+  echo ""
 fi
 
 exec qemu-system-aarch64 \
