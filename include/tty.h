@@ -5,8 +5,8 @@
 
 // The user-facing terminal: what user programs read on fd 0 and write on fd 1/2.
 // Output goes to the framebuffer screen; input comes from the USB keyboard, with
-// the UART as a fallback. Kernel diagnostics (printf, console_log) stay on the
-// UART and never appear here.
+// the UART as a fallback (see tty_serial_init). Kernel diagnostics (printf,
+// console_log) stay on the UART and never appear here.
 //
 // Under QEMU (no USB keyboard, usually no visible screen), or when no screen is
 // up, output is mirrored to the UART so the shell stays usable over serial.
@@ -15,11 +15,20 @@
 extern "C" {
 #endif
 
+// Serial input: the UART is shared by the kernel debug console (console.c) and,
+// as a fallback keyboard, this terminal; Ctrl-T switches between them. By
+// default it is the debug console on hardware and the terminal under QEMU.
+// tty_serial_init() hooks the UART receive interrupt; tty_poll_serial() drains
+// and routes pending bytes and is safe to call from any context.
+void tty_serial_init(void);
+void tty_poll_serial(void);
+
 // Write one character to the terminal.
 void tty_putc(char c);
 
-// Block until an input byte arrives from the keyboard or the UART. Must be
-// called with IRQs masked (from a syscall); IRQs are opened only while waiting.
+// Block until an input byte arrives from the keyboard or the UART (when routed
+// here). Must be called with IRQs masked (from a syscall); IRQs are opened only
+// while waiting.
 char tty_getc(void);
 
 // Queue a byte of keyboard input. Called from IRQ context by the USB keyboard

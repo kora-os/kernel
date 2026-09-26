@@ -1,5 +1,6 @@
 #pragma once
 
+#include "arch/irq.h"
 #include "common.h"
 
 void uart_init(void);
@@ -9,4 +10,7 @@ unsigned char uart_getc(void);
 int uart_rx_ready(void);
 
 void uart_puts(const char *str);
-int uart_readline(char *buffer, int max_len);
+
+// Route the UART's receive interrupt to `handler`, which must drain the RX FIFO
+// (reading the data clears the interrupt).
+void uart_rx_irq_enable(irq_handler_t handler);
