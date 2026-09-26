@@ -9,6 +9,11 @@
 // USB transfer buffers do NOT use this: the DWC2 driver does its own cache
 // maintenance on ordinary cached memory.
 
+// Slot for KoraOS's own property-mailbox buffer (video/framebuffer.c). Circle
+// reserves slots 0..67 and 128..1023 (circle/memory.h COHERENT_SLOT_*); 68..127
+// are free.
+#define COHERENT_SLOT_KORA_MAILBOX 127
+
 #ifdef __cplusplus
 extern "C" {
 #endif

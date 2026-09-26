@@ -5,11 +5,9 @@ static inline uint32_t arm_to_bus(uintptr_t addr) {
 #ifdef QEMU_TESTING
     return (uint32_t)addr;
 #else
-#if RPI_VERSION == 4
-    return (uint32_t)(addr + 0xC0000000u);
-#else
-    return (uint32_t)(addr + 0x40000000u);
-#endif
+    // The VideoCore's uncached alias (Pi 2/3/4). The 0x4 alias would route its
+    // accesses through the VC L2, which the ARM does not see.
+    return (uint32_t)(addr | 0xC0000000u);
 #endif
 }
 
@@ -28,6 +26,9 @@ int mailbox_call(uint8_t channel, volatile uint32_t *buffer) {
     if (timeout == 0) {
         return 0;
     }
+    // The buffer is Normal (non-cacheable) memory: make sure its writes have
+    // landed before the VideoCore is told to read it.
+    asm volatile("dsb sy" ::: "memory");
     REGS_MAILBOX->write = request;
 
     timeout = 0x100000;
@@ -40,6 +41,7 @@ int mailbox_call(uint8_t channel, volatile uint32_t *buffer) {
         }
         uint32_t response = REGS_MAILBOX->read;
         if (response == request) {
+            asm volatile("dsb sy" ::: "memory");  // read the reply after it lands
             return buffer[1] == 0x80000000;
         }
     }
