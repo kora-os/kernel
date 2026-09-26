@@ -401,6 +401,11 @@ target_compile_options(circle_usb PRIVATE
     -Wno-everything
 )
 
+# USB keyboard layout, one of Circle's keymaps (lib/input/keymap_*.h). Circle
+# itself defaults to DE; KoraOS defaults to US. Change with -DKORAOS_KEYMAP=IT.
+set(KORAOS_KEYMAP "US" CACHE STRING "USB keyboard layout: US, UK, DE, FR, IT, ES or DV")
+target_compile_definitions(circle_usb PRIVATE DEFAULT_KEYMAP="${KORAOS_KEYMAP}")
+
 # Link the Circle USB library (vendored stack + KoraOS bridge) into every kernel
 # variant. It references KoraOS symbols (irq_connect, the timer helpers, the
 # frame allocator, printf) which are provided by the kernel objects at link time.
