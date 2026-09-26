@@ -1,4 +1,5 @@
 #include "mm/mmu.h"
+#include "arch/cache.h"
 #include "arch/sysregs.h"
 #include "common.h"
 #include "mm.h"
@@ -90,4 +91,47 @@ void mmu_init(void) {
     sctlr |= SCTLR_MMU_ENABLED | SCTLR_D_CACHE | SCTLR_I_CACHE;
     asm volatile("msr sctlr_el1, %0" ::"r"(sctlr));
     asm volatile("isb");
+}
+
+void mmu_map_coherent(uintptr_t base, size_t size) {
+    if (size == 0) {
+        return;
+    }
+    uint64_t start = (uint64_t)base & ~(uint64_t)(SECTION_SIZE - 1);
+    uint64_t end = ((uint64_t)base + size + SECTION_SIZE - 1) &
+                   ~(uint64_t)(SECTION_SIZE - 1);
+    if (end > ((uint64_t)GIB_COVERED << 30)) {
+        end = (uint64_t)GIB_COVERED << 30;
+    }
+
+    // Nothing (an IRQ handler included) may touch these blocks while their
+    // entries are briefly invalid below.
+    uint64_t daif;
+    asm volatile("mrs %0, daif" : "=r"(daif));
+    asm volatile("msr daifset, #2" ::: "memory");
+
+    // Write back and drop anything cached while the range was mapped
+    // cacheable, so no dirty line is evicted over it later.
+    dcache_clean_invalidate((const void *)start, end - start);
+
+    for (uint64_t addr = start; addr < end; addr += SECTION_SIZE) {
+        if (addr >= PBASE) {
+            break;  // already Device memory
+        }
+        uint64_t *entry = &l2_tables[addr >> 30][(addr >> 21) & (ENTRIES_PER_TABLE - 1)];
+        // Break-before-make: a live mapping's cacheability may only change via
+        // an invalid entry and a TLB flush.
+        *entry = 0;
+        asm volatile("dsb ishst" ::: "memory");
+        asm volatile("tlbi vaae1, %0" ::"r"(addr >> PAGE_SHIFT) : "memory");
+        asm volatile("dsb ish" ::: "memory");
+        *entry = addr | MMU_COHERENT_BLOCK_FLAGS;
+    }
+    asm volatile("dsb ish" ::: "memory");
+    asm volatile("isb");
+
+    // Lines speculatively filled through the old mapping before the switch.
+    dcache_clean_invalidate((const void *)start, end - start);
+
+    asm volatile("msr daif, %0" ::"r"(daif) : "memory");
 }
