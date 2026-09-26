@@ -1,5 +1,7 @@
 #include "video/framebuffer.h"
 #include "drivers/mailbox.h"
+#include "mm/coherent.h"
+#include "mm/mmu.h"
 
 #define TAG_SET_PHYS_WH 0x00048003
 #define TAG_SET_VIRT_WH 0x00048004
@@ -11,8 +13,6 @@
 
 #define PIXEL_ORDER_RGB 0
 #define PIXEL_ORDER_BGR 1
-
-static volatile uint32_t framebuffer_mailbox[256] __attribute__((aligned(16)));
 
 static uint32_t bus_to_phys(uint32_t addr) {
 #ifdef QEMU_TESTING
@@ -26,6 +26,11 @@ int framebuffer_init(framebuffer_info_t *fb, uint32_t width, uint32_t height, ui
     if (!fb) {
         return 0;
     }
+
+    // The VideoCore reads and writes this buffer behind the ARM's caches, so it
+    // lives in the non-cacheable coherent pool.
+    volatile uint32_t *framebuffer_mailbox =
+        (volatile uint32_t *)coherent_page(COHERENT_SLOT_KORA_MAILBOX);
 
     int idx = 0;
     framebuffer_mailbox[idx++] = 0; // total size filled later
@@ -87,6 +92,10 @@ int framebuffer_init(framebuffer_info_t *fb, uint32_t width, uint32_t height, ui
     fb->depth = depth;
     fb->pitch = pitch;
     fb->buffer = (uint8_t *)(uintptr_t)bus_to_phys(fb_addr);
+
+    // The display scans the framebuffer out of RAM, so pixel writes must not
+    // sit in the D-cache: remap it non-cacheable.
+    mmu_map_coherent((uintptr_t)fb->buffer, fb_size);
 
     return 1;
 }

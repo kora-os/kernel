@@ -76,7 +76,12 @@ void kernel_main(void) {
   // Persist the screen console for the lifetime of the kernel and make it the
   // active screen, so printf output and the write/fb_info syscalls reach it.
   static fb_console_t fb_console;
-  if (fb_console_init(&fb_console, 1024, 768, 32)) {
+  if (!fb_console_init(&fb_console, 1024, 768, 32)) {
+    printf("video: framebuffer init failed (no HDMI output)\n");
+  } else {
+    printf("video: framebuffer %ux%ux%u pitch %u at 0x%lx\n", fb_console.fb.width,
+           fb_console.fb.height, fb_console.fb.depth, fb_console.fb.pitch,
+           (unsigned long)(uintptr_t)fb_console.fb.buffer);
     fb_console_make_active(&fb_console);
     fb_console_write(&fb_console, "KoraOS\n");
     fb_console_write(&fb_console, "Hello from framebuffer console.\n");
