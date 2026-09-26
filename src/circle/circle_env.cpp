@@ -14,14 +14,19 @@
 #include <circle/usb/usbhcidevice.h>
 #include <circle/usb/usbkeyboard.h>
 
+#include "tty.h"
+
 extern "C" void tfp_printf(const char *fmt, ...);
 
 namespace {
 
-// Cooked keystrokes from the USB keyboard. Step 3c just echoes them to the
-// console over UART; wiring them into read(fd 0) is the final milestone step.
+// Cooked keystrokes from the USB keyboard (IRQ context) feed the tty input
+// queue that read(fd 0) waits on. Multi-byte strings are escape sequences for
+// arrows, function keys and the like, which nothing consumes yet: drop them.
 void key_pressed_handler(const char *pString) {
-    tfp_printf("%s", pString);
+    if (pString[0] != '\0' && pString[1] == '\0') {
+        tty_input_push(pString[0]);
+    }
 }
 
 }  // namespace
@@ -63,5 +68,5 @@ void circle_usb_init(int enumerate) {
     }
 
     pKeyboard->RegisterKeyPressedHandler(key_pressed_handler);
-    tfp_printf("circle: USB keyboard ready -- type to see keys over UART\n");
+    tfp_printf("circle: USB keyboard ready -- input goes to the screen terminal\n");
 }

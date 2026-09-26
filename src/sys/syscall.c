@@ -1,11 +1,10 @@
 #include "sys/syscall.h"
-#include "arch/irq.h"
 #include "arch/trapframe.h"
 #include "common.h"
 #include "fs/fat32.h"
 #include "lib/string.h"
-#include "mini_uart.h"
 #include "proc/task.h"
+#include "tty.h"
 #include "mm.h"
 #include "mm/frame_alloc.h"
 #include "video/console_fb.h"
@@ -57,17 +56,7 @@ static bool uptr_ok(uint64_t addr, uint64_t len) {
     return true;
 }
 
-// Emit one character to every attached console: the UART (translating LF to
-// CR+LF) and the framebuffer screen.
-static void con_putc(char c) {
-    if (c == '\n') {
-        uart_putc('\r');
-    }
-    uart_putc((unsigned char)c);
-    screen_putc(c);
-}
-
-// write(fd, buf, len): fd 1 (stdout) and 2 (stderr) go to the console.
+// write(fd, buf, len): fd 1 (stdout) and 2 (stderr) go to the terminal.
 static long sys_write(int fd, const char *buf, uint64_t len) {
     if (fd != 1 && fd != 2) {
         return -1;
@@ -76,7 +65,7 @@ static long sys_write(int fd, const char *buf, uint64_t len) {
         return -1;
     }
     for (uint64_t i = 0; i < len; i++) {
-        con_putc(buf[i]);
+        tty_putc(buf[i]);
     }
     return (long)len;
 }
@@ -92,39 +81,30 @@ static open_file_t *fd_lookup(int fd) {
     return of->used ? of : NULL;
 }
 
-// Wait for one UART byte with IRQs unmasked. Syscalls run with PSTATE.I set
-// (exception entry masks IRQs), so without this every device interrupt -- USB
-// keyboard polling, the systick and its kernel timers -- would stall for as long
-// as the shell sits waiting for input. Only this idle wait is opened up: IRQ
-// handlers (the Circle USB stack) allocate from the frame allocator, which the
-// rest of the syscall path also uses without locking.
-static unsigned char console_wait_byte(void) {
-    irq_enable();
-    unsigned char c = uart_getc();
-    irq_disable();
-    return c;
-}
-
-// Read a line from the UART, echoing as it goes and honouring backspace.
-// Returns at a newline or when the buffer fills.
+// Read a line from the terminal, echoing as it goes and honouring backspace.
+// Returns at a newline or when the buffer fills. Other control bytes (and the
+// escape sequences a serial terminal sends for arrow keys) are not echoed.
 static long read_console_line(char *buf, uint64_t len) {
     uint64_t i = 0;
     while (i < len) {
-        unsigned char c = console_wait_byte();
+        char c = tty_getc();
         if (c == '\r') {
             c = '\n';
         }
-        if (c == 0x7f || c == 0x08) {  // delete / backspace
+        if (c == 0x7f || c == '\b') {  // delete / backspace
             if (i > 0) {
                 i--;
-                uart_putc('\b');
-                uart_putc(' ');
-                uart_putc('\b');
+                tty_putc('\b');
+                tty_putc(' ');
+                tty_putc('\b');
             }
             continue;
         }
-        con_putc((char)c);  // echo
-        buf[i++] = (char)c;
+        if (c != '\n' && (c < 0x20 || c > 0x7e)) {
+            continue;
+        }
+        tty_putc(c);  // echo
+        buf[i++] = c;
         if (c == '\n') {
             break;
         }
