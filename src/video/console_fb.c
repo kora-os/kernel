@@ -22,6 +22,12 @@ static void fb_console_draw_char(fb_console_t *console, char c) {
         console->cursor_x = 0;
         return;
     }
+    if (c == '\b') {
+        if (console->cursor_x >= FONT_WIDTH) {
+            console->cursor_x -= FONT_WIDTH;
+        }
+        return;
+    }
 
     uint32_t x0 = console->cursor_x;
     uint32_t y0 = console->cursor_y;
