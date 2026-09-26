@@ -6,13 +6,15 @@
 #include "tty.h"
 
 #include "arch/irq.h"
+#include "console.h"
 #include "mini_uart.h"
 #include "video/console_fb.h"
 
-// Keyboard input queue. Single producer (the USB keyboard IRQ path) and single
-// consumer (tty_getc) on one core, so volatile indices plus compiler barriers
-// are enough: the producer publishes a byte before advancing head, and the
-// consumer reads it before advancing tail.
+// Input queue. Every producer (the USB keyboard IRQ path, and serial input
+// routed here) runs with IRQs masked on one core, so pushes never interleave;
+// the single consumer is tty_getc. Volatile indices plus compiler barriers are
+// enough: a producer publishes a byte before advancing head, and the consumer
+// reads it before advancing tail.
 #define INPUT_QUEUE_SIZE 256  // power of two
 
 static char input_queue[INPUT_QUEUE_SIZE];
@@ -40,6 +42,54 @@ static int input_pop(char *c) {
     return 1;
 }
 
+// Serial input routing. The UART belongs either to the kernel debug console
+// (console.c) or, as a fallback keyboard, to this terminal; Ctrl-T switches.
+#define SERIAL_SWITCH_KEY 0x14  // Ctrl-T
+
+#ifdef QEMU_TESTING
+static bool serial_to_tty = true;   // no USB keyboard: the UART drives the shell
+#else
+static bool serial_to_tty = false;  // the UART is the kernel debug console
+#endif
+
+static void announce_serial_route(void) {
+    if (serial_to_tty) {
+        uart_puts("\n[serial -> screen terminal; Ctrl-T for the kernel console]\n");
+    } else {
+        uart_puts("\n[serial -> kernel console; Ctrl-T for the screen terminal]\n");
+        console_prompt();
+    }
+}
+
+void tty_poll_serial(void) {
+    // Masked so the UART interrupt and the idle-loop poll never both drain.
+    uint64_t daif;
+    asm volatile("mrs %0, daif" : "=r"(daif));
+    asm volatile("msr daifset, #2" ::: "memory");
+    while (uart_rx_ready()) {
+        char c = (char)uart_getc();
+        if (c == SERIAL_SWITCH_KEY) {
+            serial_to_tty = !serial_to_tty;
+            announce_serial_route();
+        } else if (serial_to_tty) {
+            tty_input_push(c);
+        } else {
+            console_input(c);
+        }
+    }
+    asm volatile("msr daif, %0" ::"r"(daif) : "memory");
+}
+
+static void serial_isr(void *ctx) {
+    (void)ctx;
+    tty_poll_serial();
+}
+
+void tty_serial_init(void) {
+    announce_serial_route();
+    uart_rx_irq_enable(serial_isr);
+}
+
 char tty_getc(void) {
     // Syscalls run with PSTATE.I set (exception entry masks IRQs), so without
     // this window the keyboard, SOF and systick interrupts would all stall for
@@ -49,11 +99,11 @@ char tty_getc(void) {
     irq_enable();
     char c;
     for (;;) {
+        // Also polled here, not only from the UART interrupt: on boards where
+        // IRQs are not wired up yet (Pi 4, until its GIC is), this is the only
+        // way serial input arrives.
+        tty_poll_serial();
         if (input_pop(&c)) {
-            break;
-        }
-        if (uart_rx_ready()) {
-            c = (char)uart_getc();
             break;
         }
     }
