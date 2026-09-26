@@ -1,4 +1,5 @@
 #include "sys/syscall.h"
+#include "arch/irq.h"
 #include "arch/trapframe.h"
 #include "common.h"
 #include "fs/fat32.h"
@@ -91,12 +92,25 @@ static open_file_t *fd_lookup(int fd) {
     return of->used ? of : NULL;
 }
 
+// Wait for one UART byte with IRQs unmasked. Syscalls run with PSTATE.I set
+// (exception entry masks IRQs), so without this every device interrupt -- USB
+// keyboard polling, the systick and its kernel timers -- would stall for as long
+// as the shell sits waiting for input. Only this idle wait is opened up: IRQ
+// handlers (the Circle USB stack) allocate from the frame allocator, which the
+// rest of the syscall path also uses without locking.
+static unsigned char console_wait_byte(void) {
+    irq_enable();
+    unsigned char c = uart_getc();
+    irq_disable();
+    return c;
+}
+
 // Read a line from the UART, echoing as it goes and honouring backspace.
 // Returns at a newline or when the buffer fills.
 static long read_console_line(char *buf, uint64_t len) {
     uint64_t i = 0;
     while (i < len) {
-        unsigned char c = uart_getc();
+        unsigned char c = console_wait_byte();
         if (c == '\r') {
             c = '\n';
         }
