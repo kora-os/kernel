@@ -66,6 +66,10 @@ unsigned char uart_getc(void) {
     return (unsigned char)(REGS_PL011->dr & 0xFF);
 }
 
+int uart_rx_ready(void) {
+    return !(REGS_PL011->fr & (1 << 4));  // RX FIFO not empty
+}
+
 #else
 // Use Mini UART for real hardware
 #include "peripherals/aux.h"
@@ -131,6 +135,10 @@ unsigned char uart_getc(void) {
     
     // Read and return the character
     return (unsigned char)(REGS_AUX->mu_io & 0xFF);
+}
+
+int uart_rx_ready(void) {
+    return REGS_AUX->mu_lsr & (1 << 0);  // LSR data ready
 }
 #endif
 

@@ -116,7 +116,9 @@ cmake --build build --target install_hw
 
 ### Verifying the Image
 
-List the files on the boot volume to ensure `kernel8-hw.img` is present, eject the volume safely, and boot the Raspberry Pi. The kernel prints `K` on the serial console and echoes characters received over UART.
+List the files on the boot volume to ensure `kernel8-hw.img` is present, eject the volume safely, and boot the Raspberry Pi. The kernel prints `K` on the serial console, followed by its boot log.
+
+On hardware the serial console and the user console are separate. The UART carries the kernel's diagnostic log (`printf`, `console_log`); the shell runs on the HDMI screen and reads the USB keyboard (Pi 3 for now). The UART is still accepted as a fallback input, but what you type there is echoed on the screen, not on the serial line. Under QEMU, which has no USB keyboard, the shell is mirrored to the UART as before. The keyboard layout defaults to US; pick another of Circle's keymaps at configure time with `-DKORAOS_KEYMAP=IT` (or UK, DE, FR, ES, DV).
 
 ## Legacy Makefile
 

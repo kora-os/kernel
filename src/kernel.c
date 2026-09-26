@@ -21,8 +21,7 @@ void putc(void *p, char c) {
     uart_putc('\r');
   }
 
-  uart_putc(c);
-  screen_putc(c);  // mirror kernel output to the framebuffer screen (if active)
+  uart_putc(c);  // kernel log is UART-only; the screen belongs to the tty
 }
 
 void kernel_main(void) {
