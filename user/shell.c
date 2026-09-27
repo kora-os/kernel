@@ -35,7 +35,7 @@ static void help(void) {
     kputs("  ls [path]       list a directory (default /)\n");
     kputs("  cat <path>...   print file contents\n");
     kputs("  <program> [args...]  run a program from /bin\n");
-    kputs("programs in /bin: hello, echo, gfxdemo, ls, cat (try 'ls /bin')\n");
+    kputs("programs in /bin: hello, echo, gfxdemo, termdemo, ls, cat (try 'ls /bin')\n");
 }
 
 int main(void) {
