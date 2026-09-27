@@ -2,16 +2,16 @@
 
 Once upon a time, you switched on your home computer and, in an instant, you
 were *there*. A blue screen with an `OK` prompt. A black screen with a blinking
-`>`. Maybe, if you were lucky, a command line inside a window.
+cursor beside `>`. Maybe, if you were lucky, a command line inside a window.
 
-No boot wizard. No login. No updates. Just you and the machine.
+It was just you and the machine: no boot wizards, no passwords, no login screens.
 
 You could start writing a program in BASIC. You could load another one. You
 could drop in a game and just play. And when you were done, you switched it off.
-That was the whole contract.
+That was the idea.
 
-There was no Internet. To play a game you bought it, borrowed it from a friend,
-or typed it in yourself, line by line, character by character, from a listing
+There was no Internet so, unless you played a game you bought or borrowed from a friend,
+you had to type it in yourself, line by line, character by character, from a listing
 printed in a magazine. Two pages of code that, after an evening of squinting,
 finally gave you a clumsy version of Space Invaders. Nothing special. A rougher
 take on a game that was already pretty simple.
@@ -19,15 +19,14 @@ take on a game that was already pretty simple.
 But you had *coded* it. And chasing the bugs (almost always a typo, or two lines
 swapped around) felt like something that was yours.
 
-Then you started to experiment. Draw a circle. Write your own Hangman. You
+Then you started to experiment: draw a circle, write your own Hangman. You
 learned by talking to friends, by reading magazines, and, best of all, by typing
 commands with random values just to see what would happen.
 
 `PEEK` and `POKE` were the magic words: read any byte in memory, write any byte
 anywhere. Put the wrong value in the wrong place and you might discover how to
-change the border color. Or, far more likely, freeze the whole machine. No
-matter. You
-[turned it off and on again](https://media.tenor.com/rcOgStvkF7MAAAAC/it-crowd-chris-o-dowd.gif),
+change the border color. Or, far more likely, freeze the whole machine.
+It didn't matter. You ![turned it off and on again](https://media.tenor.com/rcOgStvkF7MAAAAC/it-crowd-chris-o-dowd.gif),
 and started over.
 
 ## What KoraOS is
@@ -44,7 +43,7 @@ is both at once. Someone who doesn't want another Linux clone, but a machine to
 *play* with. To experiment. To `PEEK` and `POKE` everywhere, watch what happens,
 and, when it all falls over, turn it off and on again.
 
-No memory protection. No sandbox. No permission dialogs standing between you and
+There's no memory protection, no sandbox, no permission dialogs standing between you and
 the hardware. The whole machine is yours, the way it used to be.
 
 ## Where it's headed
