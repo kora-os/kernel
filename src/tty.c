@@ -90,7 +90,13 @@ void tty_serial_init(void) {
     uart_rx_irq_enable(serial_isr);
 }
 
+void tty_flush(void) {
+    screen_flush();
+}
+
 char tty_getc(void) {
+    tty_flush();  // whatever was echoed or printed must be visible while we wait
+
     // Syscalls run with PSTATE.I set (exception entry masks IRQs), so without
     // this window the keyboard, SOF and systick interrupts would all stall for
     // as long as the shell waits for input. Only this idle wait is opened up:
