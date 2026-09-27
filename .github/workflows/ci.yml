@@ -25,7 +25,7 @@ jobs:
     name: Host unit tests
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Ubuntu 24.04 runners randomise mmap addresses with more bits than
       # AddressSanitizer's shadow layout tolerates, which crashes ASan binaries
@@ -40,7 +40,7 @@ jobs:
     name: Build kernels + QEMU smoke test
     runs-on: ubuntu-24.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Install toolchain and QEMU
         run: |
@@ -71,7 +71,7 @@ jobs:
           ls -l sdcard-boot
 
       - name: Upload SD card boot files
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: sdcard-boot
           path: sdcard-boot/
@@ -79,7 +79,7 @@ jobs:
 
       - name: Upload QEMU smoke artifacts (serial log, screenshots)
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: qemu-smoke
           path: build/qemu-smoke/
