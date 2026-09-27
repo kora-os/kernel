@@ -349,15 +349,22 @@ endif()
 list(JOIN enabled_variants ", " enabled_variants_str)
 
 # ---------------------------------------------------------------------------
-# Vendored Circle USB stack (third_party/circle, pinned fork kora-os/circle).
-# Step 3b-i compiles the vendored subset into a static library to prove it
-# builds under KoraOS's toolchain. It is NOT yet linked into the kernel: the
-# KoraOS HAL-bridge adapters (CInterruptSystem/CTimer/CLogger/memory) that
-# resolve its externals land in step 3b-ii. A static archive does not resolve
-# external symbols, so unimplemented adapters are fine at this stage.
+# Vendored Circle USB stack (third_party/circle, pinned fork kora-os/circle),
+# built as a static library together with the KoraOS HAL-bridge adapters in
+# src/circle. Circle is compiled for the board being built (RASPPI), which picks
+# the host controller behind CUSBHCIDevice: DWC2 on the Pi 3, xHCI (the VL805
+# behind PCIe) on the Pi 4. Circle's USB core is compiled for one controller
+# family or the other, so each board's build leaves the other's sources out:
+# the Pi 3 skips xHCI/PCIe/device tree, the Pi 4 skips DWC2 (so its USB-C port,
+# a DWC2, is not supported; it is normally the power input anyway).
 # ---------------------------------------------------------------------------
 set(CIRCLE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/circle")
 file(GLOB_RECURSE CIRCLE_SOURCES "${CIRCLE_DIR}/lib/*.cpp")
+if(RPI_VERSION LESS 4)
+    list(FILTER CIRCLE_SOURCES EXCLUDE REGEX "/(usb/xhci[a-z]*|bcmpciehostbridge|devicetreeblob)\\.cpp$")
+else()
+    list(FILTER CIRCLE_SOURCES EXCLUDE REGEX "/usb/dwhci[a-z]*\\.cpp$")
+endif()
 # KoraOS HAL-bridge adapters (CInterruptSystem/CTimer/CLogger/memory backed by
 # KoraOS) are compiled together with the vendored code so they share Circle's
 # include path and build flags while also seeing KoraOS headers.
@@ -381,7 +388,7 @@ target_compile_options(circle_usb PRIVATE
     -fno-threadsafe-statics
     -std=c++17
     -DAARCH=64
-    -DRASPPI=3
+    -DRASPPI=${RPI_VERSION}
     # No C standard library underneath Circle here; this also strips CString's
     # floating-point %f path, so the kernel stays integer-only (-mgeneral-regs-only).
     -DSTDLIB_SUPPORT=0

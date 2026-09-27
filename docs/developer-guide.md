@@ -118,7 +118,9 @@ cmake --build build --target install_hw
 
 List the files on the boot volume to ensure `kernel8-hw.img` is present, eject the volume safely, and boot the Raspberry Pi. The kernel prints `K` on the serial console, followed by its boot log.
 
-On hardware the serial console and the user console are separate. The UART carries the kernel's diagnostic log (`printf`, `console_log`); the shell runs on the HDMI screen and reads the USB keyboard (Pi 3 for now).
+On hardware the serial console and the user console are separate. The UART carries the kernel's diagnostic log (`printf`, `console_log`); the shell runs on the HDMI screen and reads the USB keyboard (Pi 3 for now; the Pi 4's USB 3 controller is being brought up).
+
+USB limitations: devices are enumerated once at boot, so plug the keyboard (or a hub with the keyboard) in before powering on; there is no hot-plug yet. On the Pi 4 only the four type-A ports are supported (the VL805 xHCI controller); the USB-C port is a different controller (DWC2) that the Pi 4 build does not include, and it normally powers the board anyway. Keyboard auto-repeat is not enabled yet.
 
 Typing on the serial line talks to the kernel debug console (`koraos> `, `src/console.c`), which runs alongside the shell: it is fed from the UART interrupt and from the shell's idle loop, not a task of its own, so its commands must not block. Press **Ctrl-T** to hand the serial line to the screen terminal as a fallback keyboard (what you type is then echoed on the screen, not on the serial line), and Ctrl-T again to return. Besides `help` and `version`, `irqs` shows the interrupt controller in use (the legacy BCM controller on the Pi 3, the GIC-400 on the Pi 4), the system tick count next to the uptime (about 100 ticks per second when interrupts work), and how often each connected IRQ has fired.
 

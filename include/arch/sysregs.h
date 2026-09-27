@@ -110,6 +110,7 @@
 // -------------------------------------------------------------------------
 #define PD_TABLE        0x3   // table descriptor (next level)
 #define PD_BLOCK        0x1   // block descriptor (2MB at L2)
+#define PD_PAGE         0x3   // page descriptor (4KB at L3)
 #define PD_VALID        0x1
 
 #define PD_ATTR_IDX(i)  ((i) << 2)     // AttrIndx -> MAIR index
@@ -138,6 +139,9 @@
 // Device MMIO: read/write for EL1 and EL0.
 #define MMU_DEVICE_BLOCK_FLAGS \
     (PD_BLOCK | PD_AF | PD_AP_EL1RW_EL0RW | PD_ATTR_IDX(MAIR_IDX_DEVICE))
+
+// The same attributes for a 4KB L3 page instead of a 2MB block.
+#define MMU_PAGE_FLAGS(block_flags) (((block_flags) & ~(uint64_t)0x3) | PD_PAGE)
 
 // Coherent DMA: Normal non-cacheable RAM, read/write for EL1 and EL0. Used for
 // buffers a bus master (e.g. the VideoCore mailbox) reads/writes without the CPU

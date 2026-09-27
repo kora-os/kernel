@@ -16,9 +16,9 @@ project-level summary, not a replacement for those headers.
 - **Upstream:** <https://github.com/rsta2/circle>
 - **License:** GNU General Public License, version 3 or later (GPL-3.0-or-later).
 - **What we use:** Circle's USB stack, which drives the Synopsys DWC2 OTG
-  controller (Raspberry Pi 3 and the Pi 4 USB-C port) and the VL805 xHCI
-  controller behind PCIe (Raspberry Pi 4 type-A ports), plus the HID keyboard
-  function driver.
+  controller (Raspberry Pi 3) and the VL805 xHCI controller behind PCIe
+  (Raspberry Pi 4 type-A ports), plus the HID keyboard function driver, the
+  BCM2711 PCIe host bridge, and the device-tree reader.
 - **How we track it:** rather than importing from upstream directly, we vendor
   from our own pinned fork at **kora-os/circle** so a specific, known-good commit
   is recorded and an upstream change cannot silently break our build. The vendored
