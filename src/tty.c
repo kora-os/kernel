@@ -128,10 +128,8 @@ char tty_getc(void) {
     irq_enable();
     char c;
     for (;;) {
-        // Also polled here, not only from the UART interrupt: on boards where
-        // IRQs are not wired up yet (Pi 4, until its GIC is), this is the only
-        // way serial input arrives.
-        tty_poll_serial();
+        // Serial input arrives through the UART interrupt (tty_serial_init),
+        // like the keyboard's, on both boards.
         apply_scroll_request();
         if (input_pop(&c)) {
             break;

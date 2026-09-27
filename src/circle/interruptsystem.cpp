@@ -2,9 +2,9 @@
 //
 // KoraOS bridge for Circle's CInterruptSystem. KoraOS owns the interrupt
 // controller (arch/irq.c); this facade just routes Circle's ConnectIRQ to it.
-// Circle's peripheral IRQ numbering (bcm2835int.h: ARM_IRQ1_BASE=0,
-// ARM_IRQ2_BASE=32) matches KoraOS's peripheral IRQ numbers 0..63 exactly, so
-// no remapping is needed (USB is IRQ 9 on both).
+// KoraOS numbers IRQs the way Circle does for the same board (peripherals/irq.h):
+// VideoCore IRQs 0..63 on the Pi 3 (bcm2835int.h), GIC interrupt IDs on the Pi 4
+// (bcm2711int.h). So no remapping is needed.
 
 #include <circle/interrupt.h>
 
