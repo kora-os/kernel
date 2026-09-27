@@ -6,7 +6,6 @@
 
 #include "arch/irq.h"
 #include "lib/timer.h"
-#include "memory_access.h"
 #include "peripherals/irq.h"
 
 static volatile uint64_t g_ticks;
@@ -51,11 +50,9 @@ void systick_init(unsigned hz) {
     g_interval = timer_freq_hz() / hz;
     g_ticks = 0;
 
-    irq_connect(IRQ_LOCAL_CNTPNS, systick_isr, NULL);
-
-    // Route the non-secure physical timer event to this core's IRQ line.
-    write32(CORE0_TIMER_IRQCNTL, LOCAL_TIMER_IRQ_CNTPNS);
-    asm volatile("dsb sy" ::: "memory");
+    // Enabling the IRQ also routes the timer event to this core (the local
+    // controller on the Pi 3, a per-core PPI in the GIC on the Pi 4).
+    irq_connect(IRQ_TIMER_CNTPNS, systick_isr, NULL);
 
     // Arm the first absolute deadline and enable the timer (bit0=ENABLE,
     // bit1=IMASK=0).

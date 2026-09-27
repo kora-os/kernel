@@ -21,6 +21,9 @@ core_freq=250
 kernel=kernel8-rpi3.img
 
 [pi4]
+# The kernel drives the Pi 4's GIC-400 interrupt controller. This is already the
+# firmware default; set here so the kernel never depends on it.
+enable_gic=1
 kernel=kernel8-rpi4.img
 
 [all]
