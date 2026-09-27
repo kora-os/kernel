@@ -126,6 +126,16 @@ Under QEMU, which has no USB keyboard, the serial line starts on the screen term
 
 The screen terminal understands the xterm escape sequences that the `xterm-256color` terminfo entry uses: cursor movement and addressing, erase/insert/delete, scroll regions, SGR attributes with 16, 256 and 24-bit colour, the alternate screen, save/restore cursor, tab stops, DEC line drawing (and UTF-8 box characters), and the status/size reports. `termdemo` shows most of it. **Shift+PgUp / Shift+PgDn** scroll back through the history (`TERM_SCROLLBACK_LINES`, default 1000); new output returns to the live screen. The cursor is a block by default; set `TERM_DEFAULT_CURSOR` in `include/video/term.h` to `TERM_CURSOR_UNDERLINE` or `TERM_CURSOR_BAR` (programs can also change it with `ESC [ n SP q`).
 
+## Tests
+
+Pure-logic kernel code has host-side unit tests that run on your machine under AddressSanitizer/UndefinedBehaviorSanitizer, with no QEMU or hardware:
+
+```bash
+tests/run-host-tests.sh
+```
+
+See `tests/README.md` for what is covered and how to add a test.
+
 ## Legacy Makefile
 
 `make` still produces a bootable kernel, but the CMake flow is the source of truth and the only way to refresh `compile_commands.json`. Use Make only if you need compatibility with existing tooling.
