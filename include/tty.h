@@ -23,8 +23,10 @@ extern "C" {
 void tty_serial_init(void);
 void tty_poll_serial(void);
 
-// Write one character to the terminal.
+// Write one character to the terminal. Screen output that scrolls is batched:
+// call tty_flush() when a burst of output is done.
 void tty_putc(char c);
+void tty_flush(void);
 
 // Block until an input byte arrives from the keyboard or the UART (when routed
 // here). Must be called with IRQs masked (from a syscall); IRQs are opened only
