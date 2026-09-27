@@ -1,5 +1,5 @@
 #include "mini_uart.h"
-#include "peripherals/gpio.h"
+#include "gpio.h"
 #include "peripherals/irq.h"
 #include "utils.h"
 
@@ -20,12 +20,11 @@ void uart_init(void) {
     selector |= (4 << 12) | (4 << 15);     // Set to Alt0 (PL011 UART)
     REGS_GPIO->func_select[1] = selector;
     
-    // Disable pull-up/pull-down for pins 14 and 15
-    REGS_GPIO->pupd_enable = 0;
-    delay(150);
-    REGS_GPIO->pupd_enable_clocks[0] = (1 << 14) | (1 << 15);
-    delay(150);
-    REGS_GPIO->pupd_enable_clocks[0] = 0;
+    // TX is driven by the UART; pull RX up so a line with nothing driving it
+    // (adapter unplugged, loose wire) idles high instead of floating, which
+    // the receiver would decode as a stream of noise bytes.
+    gpio_pin_set_pull(14, GPNone);
+    gpio_pin_set_pull(15, GPUp);
     
     // Clear pending interrupts
     REGS_PL011->icr = 0x7FF;
@@ -112,12 +111,11 @@ void uart_init(void) {
     selector |= (2 << 12) | (2 << 15);     // Set to Alt5 (Mini UART)
     REGS_GPIO->func_select[1] = selector;
     
-    // Disable pull-up/pull-down for pins 14 and 15
-    REGS_GPIO->pupd_enable = 0;
-    delay(150);
-    REGS_GPIO->pupd_enable_clocks[0] = (1 << 14) | (1 << 15);
-    delay(150);
-    REGS_GPIO->pupd_enable_clocks[0] = 0;
+    // TX is driven by the UART; pull RX up so a line with nothing driving it
+    // (adapter unplugged, loose wire) idles high instead of floating, which
+    // the receiver would decode as a stream of noise bytes.
+    gpio_pin_set_pull(14, GPNone);
+    gpio_pin_set_pull(15, GPUp);
     
     // Enable transmitter and receiver
     REGS_AUX->mu_control = 0x03;
