@@ -13,6 +13,7 @@
 #include "lib/printf.h"
 #include "lib/stdlib.h"
 #include "mini_uart.h"
+#include "tty.h"
 #include "utils.h"
 #include "video/console_fb.h"
 
@@ -102,6 +103,12 @@ void kernel_main(void) {
 
   printf("Current EL: %d\n", get_el());
 
+  // The kernel debug console lives on the UART alongside the shell on the
+  // screen: fed from the UART interrupt (and the terminal's idle loop), not a
+  // task of its own. Hooked only now so it does not interleave with boot output.
+  console_init();
+  tty_serial_init();
+
   // Start /bin/init as the first (and only) user program the kernel launches.
   // init owns userland policy from here: it spawns the shell, which spawns
   // further programs -- all loaded from the filesystem.
@@ -114,6 +121,9 @@ void kernel_main(void) {
   }
   task_reap_all();  // release anything left unreaped
 
-  console_init();
-  console_run();
+  // Nothing left to run: keep serving the serial line (the debug console, or
+  // Ctrl-T to switch) for as long as the machine is up.
+  for (;;) {
+    tty_poll_serial();
+  }
 }
