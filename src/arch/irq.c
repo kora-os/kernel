@@ -76,6 +76,10 @@ const char *irq_name(unsigned irq) {
         return "uart (mini-UART)";
     case IRQ_UART0:
         return "uart (PL011)";
+#ifdef IRQ_PCIE_INTA
+    case IRQ_PCIE_INTA:
+        return "usb (xHCI via PCIe)";
+#endif
     default:
         return "connected";
     }
