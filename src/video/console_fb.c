@@ -1,29 +1,48 @@
 #include "video/console_fb.h"
-#include "lib/string.h"
 #include "video/font8x8.h"
 
 #define FONT_WIDTH 8
 #define FONT_HEIGHT 8
-#define TAB_WIDTH 8
+#define NO_CURSOR 0xFF
 
-// Paint one cell's glyph into the framebuffer (32 bpp, writes only).
-static void draw_cell(fb_console_t *console, uint32_t col, uint32_t row) {
-    // The bitmap font only covers ASCII (0-127). UTF-8 byte streams (e.g. a
-    // filename with non-ASCII characters) carry bytes >= 128; render those as
-    // '?' rather than indexing past the 128-glyph table.
-    uint8_t glyph_index = (uint8_t)console->cells[row][col];
-    if (glyph_index >= 128) {
-        glyph_index = '?';
+// Paint one cell into the framebuffer (32 bpp, writes only), optionally with the
+// cursor on it.
+static void draw_cell(fb_console_t *console, uint32_t row, uint32_t col,
+                      const term_cell_t *cell, uint8_t cursor) {
+    uint32_t fg = cell->fg;
+    uint32_t bg = cell->bg;
+    if (cell->attr & TERM_ATTR_REVERSE) {
+        uint32_t tmp = fg;
+        fg = bg;
+        bg = tmp;
     }
-    const uint8_t *glyph = font8x8_basic[glyph_index];
-    uint32_t fg = console->fg_color;
-    uint32_t bg = console->bg_color;
+    if (cursor == TERM_CURSOR_BLOCK) {
+        uint32_t tmp = fg;
+        fg = bg;
+        bg = tmp;
+    }
+    const uint8_t *glyph = cell->ch < 0x80 ? font8x8_basic[cell->ch] : term_glyph(cell->ch);
 
     uint8_t *line = console->fb.buffer + row * FONT_HEIGHT * console->fb.pitch +
                     col * FONT_WIDTH * sizeof(uint32_t);
     for (uint32_t y = 0; y < FONT_HEIGHT; y++) {
-        uint32_t *px = (uint32_t *)line;
         uint8_t bits = glyph[y];
+        if (cell->attr & TERM_ATTR_BOLD) {
+            bits |= bits >> 1;  // no bold font: thicken the strokes
+        }
+        if ((cell->attr & TERM_ATTR_UNDERLINE) && y == FONT_HEIGHT - 1) {
+            bits = 0xFF;
+        }
+        if ((cell->attr & TERM_ATTR_STRIKE) && y == FONT_HEIGHT / 2) {
+            bits = 0xFF;
+        }
+        if (cursor == TERM_CURSOR_UNDERLINE && y >= FONT_HEIGHT - 2) {
+            bits = 0xFF;
+        }
+        if (cursor == TERM_CURSOR_BAR) {
+            bits |= 0xC0;
+        }
+        uint32_t *px = (uint32_t *)line;
         for (uint32_t x = 0; x < FONT_WIDTH; x++) {
             px[x] = (bits & (1u << (7 - x))) ? fg : bg;
         }
@@ -31,91 +50,49 @@ static void draw_cell(fb_console_t *console, uint32_t col, uint32_t row) {
     }
 }
 
-static void scroll_up(fb_console_t *console) {
-    memmove(console->cells[0], console->cells[1],
-            (console->rows - 1) * FB_CONSOLE_MAX_COLS);
-    memset(console->cells[console->rows - 1], ' ', FB_CONSOLE_MAX_COLS);
-    console->dirty = true;  // redrawn on the next flush
-}
-
-static void newline(fb_console_t *console) {
-    console->cursor_col = 0;
-    if (console->cursor_row + 1 < console->rows) {
-        console->cursor_row++;
-    } else {
-        scroll_up(console);
-    }
-}
-
-static void put_char(fb_console_t *console, char c) {
-    switch (c) {
-    case '\n':
-        newline(console);
-        return;
-    case '\r':
-        console->cursor_col = 0;
-        return;
-    case '\b':
-        if (console->cursor_col > 0) {
-            console->cursor_col--;
-        }
-        return;
-    case '\t':
-        console->cursor_col = (console->cursor_col + TAB_WIDTH) & ~(uint32_t)(TAB_WIDTH - 1);
-        if (console->cursor_col > console->cols) {
-            console->cursor_col = console->cols;
-        }
-        return;
-    default:
-        break;
-    }
-
-    if (console->cursor_col >= console->cols) {
-        newline(console);  // wrap
-    }
-    console->cells[console->cursor_row][console->cursor_col] = c;
-    if (!console->dirty) {
-        draw_cell(console, console->cursor_col, console->cursor_row);
-    }
-    console->cursor_col++;
-}
-
 void fb_console_flush(fb_console_t *console) {
-    if (!console || !console->dirty) {
+    if (!console) {
         return;
     }
-    for (uint32_t row = 0; row < console->rows; row++) {
-        for (uint32_t col = 0; col < console->cols; col++) {
-            draw_cell(console, col, row);
-        }
+    term_t *t = &console->term;
+
+    // Redraw the row the cursor was drawn in, which erases it.
+    if (console->cursor_drawn) {
+        t->dirty[console->cursor_row] = true;
     }
-    console->dirty = false;
+    for (uint32_t row = 0; row < t->rows; row++) {
+        if (!t->dirty[row]) {
+            continue;
+        }
+        for (uint32_t col = 0; col < t->cols; col++) {
+            draw_cell(console, row, col, term_view_cell(t, row, col), NO_CURSOR);
+        }
+        t->dirty[row] = false;
+    }
+
+    console->cursor_drawn = false;
+    if (term_cursor_shown(t)) {
+        draw_cell(console, t->row, t->col, term_view_cell(t, t->row, t->col),
+                  t->cursor_style);
+        console->cursor_drawn = true;
+        console->cursor_row = t->row;
+    }
 }
 
 int fb_console_init(fb_console_t *console, uint32_t width, uint32_t height, uint32_t depth) {
     if (!console || depth != 32) {
         return 0;  // draw_cell writes 32 bpp pixels
     }
-
     if (!framebuffer_init(&console->fb, width, height, depth)) {
         return 0;
     }
-
-    console->cols = console->fb.width / FONT_WIDTH;
-    if (console->cols > FB_CONSOLE_MAX_COLS) {
-        console->cols = FB_CONSOLE_MAX_COLS;
-    }
-    console->rows = console->fb.height / FONT_HEIGHT;
-    if (console->rows > FB_CONSOLE_MAX_ROWS) {
-        console->rows = FB_CONSOLE_MAX_ROWS;
-    }
-    if (console->cols == 0 || console->rows == 0) {
+    if (!term_init(&console->term, console->fb.width / FONT_WIDTH,
+                   console->fb.height / FONT_HEIGHT)) {
         return 0;
     }
-    console->fg_color = 0x00ffffff;
-    console->bg_color = 0x00000000;
-
-    fb_console_clear(console);
+    console->cursor_drawn = false;
+    framebuffer_clear(&console->fb, TERM_DEFAULT_BG);  // incl. any partial cell
+    fb_console_flush(console);
     return 1;
 }
 
@@ -123,22 +100,13 @@ void fb_console_write(fb_console_t *console, const char *text) {
     if (!console || !text) {
         return;
     }
-
     while (*text) {
-        put_char(console, *text++);
+        if (*text == '\n') {
+            term_putc(&console->term, '\r');
+        }
+        term_putc(&console->term, *text++);
     }
     fb_console_flush(console);
-}
-
-void fb_console_clear(fb_console_t *console) {
-    if (!console) {
-        return;
-    }
-    memset(console->cells, ' ', sizeof(console->cells));
-    console->cursor_col = 0;
-    console->cursor_row = 0;
-    console->dirty = false;
-    framebuffer_clear(&console->fb, console->bg_color);
 }
 
 // The console the kernel and syscalls treat as "the screen".
@@ -150,12 +118,19 @@ void fb_console_make_active(fb_console_t *console) {
 
 void screen_putc(char c) {
     if (active_console) {
-        put_char(active_console, c);
+        term_putc(&active_console->term, c);
     }
 }
 
 void screen_flush(void) {
     fb_console_flush(active_console);
+}
+
+void screen_scroll_view(int halfpages) {
+    if (active_console) {
+        term_t *t = &active_console->term;
+        term_scroll_view(t, halfpages * (int)(t->rows / 2));
+    }
 }
 
 const framebuffer_info_t *screen_framebuffer(void) {

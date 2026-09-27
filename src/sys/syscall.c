@@ -83,12 +83,30 @@ static open_file_t *fd_lookup(int fd) {
 }
 
 // Read a line from the terminal, echoing as it goes and honouring backspace.
-// Returns at a newline or when the buffer fills. Other control bytes (and the
-// escape sequences a serial terminal sends for arrow keys) are not echoed.
+// Returns at a newline or when the buffer fills. Other control bytes are not
+// echoed, and escape sequences (arrow keys from a serial terminal, or the
+// terminal's own status replies) are swallowed whole: there is no line editing
+// to give them meaning yet.
 static long read_console_line(char *buf, uint64_t len) {
     uint64_t i = 0;
+    enum { ESC_NONE, ESC_START, ESC_BODY } esc = ESC_NONE;
     while (i < len) {
         char c = tty_getc();
+        if (c == 0x1b) {
+            esc = ESC_START;
+            continue;
+        }
+        if (esc == ESC_START) {
+            // ESC [ ... and ESC O x run to a final byte; other ESC x are done.
+            esc = (c == '[' || c == 'O') ? ESC_BODY : ESC_NONE;
+            continue;
+        }
+        if (esc == ESC_BODY) {
+            if (c >= 0x40 && c <= 0x7e) {
+                esc = ESC_NONE;
+            }
+            continue;
+        }
         if (c == '\r') {
             c = '\n';
         }
