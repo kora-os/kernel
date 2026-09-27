@@ -8,9 +8,10 @@ extern "C" {
 
 // Build a flat, fully-permissive identity map of the low 4 GB and enable the
 // MMU at EL1. Every 2 MB block is mapped read/write/execute for both EL1 and
-// EL0 (no memory protection by design); regions at or above the SoC
-// peripheral base (PBASE) are mapped as Device memory, the rest as Normal
-// write-back cacheable memory.
+// EL0 (no memory protection by design); the SoC peripherals (from PBASE, or
+// 0xFC000000 on the Pi 4) are mapped as Device memory, the rest as Normal
+// write-back cacheable memory. The Pi 4 also maps its PCIe outbound window at
+// 0x6_0000_0000 (the VL805 xHCI registers) as Device memory.
 //
 // After this returns the kernel runs with caches and the MMU enabled. The UART
 // must still work, which is the primary correctness check.
