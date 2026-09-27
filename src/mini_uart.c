@@ -70,6 +70,13 @@ int uart_rx_ready(void) {
     return !(REGS_PL011->fr & (1 << 4));  // RX FIFO not empty
 }
 
+#define IRQ_PERIPH_UART0 57  // PL011
+
+void uart_rx_irq_enable(irq_handler_t handler) {
+    irq_connect(IRQ_PERIPH_UART0, handler, NULL);
+    REGS_PL011->imsc = (1 << 4) | (1 << 6);  // RX + RX timeout (FIFO enabled)
+}
+
 #else
 // Use Mini UART for real hardware
 #include "peripherals/aux.h"
@@ -140,6 +147,15 @@ unsigned char uart_getc(void) {
 int uart_rx_ready(void) {
     return REGS_AUX->mu_lsr & (1 << 0);  // LSR data ready
 }
+
+#define IRQ_PERIPH_AUX 29  // mini-UART (shared with SPI1/SPI2)
+
+void uart_rx_irq_enable(irq_handler_t handler) {
+    irq_connect(IRQ_PERIPH_AUX, handler, NULL);
+    // Receive interrupt only. Per the BCM2835 datasheet errata, bit 0 (not 1)
+    // enables RX, and bits 3:2 must be set for interrupts to be raised at all.
+    REGS_AUX->mu_ier = 0x0D;
+}
 #endif
 
 // Hardware-agnostic helper function
@@ -149,35 +165,5 @@ void uart_puts(const char *str) {
             uart_putc('\r');
         }
         uart_putc(*str++);
-    }
-}
-
-int uart_readline(char *buffer, int max_len) {
-    int pos = 0;
-    
-    while (1) {
-        unsigned char c = uart_getc();
-        
-        // Handle carriage return or newline
-        if (c == '\r' || c == '\n') {
-            uart_puts("\r\n");
-            buffer[pos] = '\0';
-            return pos;
-        }
-        
-        // Handle backspace (ASCII 8 or 127)
-        if (c == 8 || c == 127) {
-            if (pos > 0) {
-                pos--;
-                uart_puts("\b \b");  // Move back, space, move back again
-            }
-            continue;
-        }
-        
-        // Handle printable characters
-        if (c >= 32 && c < 127 && pos < max_len - 1) {
-            buffer[pos++] = c;
-            uart_putc(c);  // Echo character
-        }
     }
 }
