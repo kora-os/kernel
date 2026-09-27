@@ -1,0 +1,86 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# Continuous integration: host unit tests, all kernel builds (QEMU, Pi 3, Pi 4)
+# and the QEMU smoke test, on every pull request and every push to main.
+# Real-hardware behaviour (USB, HDMI, caches, Pi 4 boot) is still tested by
+# hand; see tests/README.md.
+
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  host-tests:
+    name: Host unit tests
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      # Ubuntu 24.04 runners randomise mmap addresses with more bits than
+      # AddressSanitizer's shadow layout tolerates, which crashes ASan binaries
+      # at startup. 28 bits is the long-standing default.
+      - name: Make AddressSanitizer usable on this kernel
+        run: sudo sysctl -w vm.mmap_rnd_bits=28
+
+      - name: Run host unit tests (clang, ASan + UBSan)
+        run: tests/run-host-tests.sh
+
+  build-and-smoke:
+    name: Build kernels + QEMU smoke test
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install toolchain and QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            clang lld llvm cmake mtools qemu-system-arm
+
+      - name: Build QEMU kernel (raspi3b)
+        run: RPI_VERSION=3 ./build.sh --qemu
+
+      - name: Build Raspberry Pi 3 kernel
+        run: RPI_VERSION=3 ./build.sh --hw --release --build-dir build-rpi3
+
+      - name: Build Raspberry Pi 4 kernel
+        run: RPI_VERSION=4 ./build.sh --hw --release --build-dir build-rpi4
+
+      - name: QEMU smoke test
+        run: tests/run-qemu-smoke.py
+
+      # One boot partition for both boards: firmware, device trees, config.txt,
+      # kernel8-rpi3.img and kernel8-rpi4.img. Copy its contents to the SD card.
+      - name: Assemble SD card boot files
+        run: |
+          mkdir -p sdcard-boot
+          cp -R build-rpi3/boot/. sdcard-boot/
+          cp -R build-rpi4/boot/. sdcard-boot/
+          cp firmware/LICENCE.broadcom sdcard-boot/  # redistributed firmware's licence
+          ls -l sdcard-boot
+
+      - name: Upload SD card boot files
+        uses: actions/upload-artifact@v4
+        with:
+          name: sdcard-boot
+          path: sdcard-boot/
+          if-no-files-found: error
+
+      - name: Upload QEMU smoke artifacts (serial log, screenshots)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: qemu-smoke
+          path: build/qemu-smoke/
+          if-no-files-found: ignore
