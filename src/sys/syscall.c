@@ -67,6 +67,7 @@ static long sys_write(int fd, const char *buf, uint64_t len) {
     for (uint64_t i = 0; i < len; i++) {
         tty_putc(buf[i]);
     }
+    tty_flush();
     return (long)len;
 }
 
@@ -109,6 +110,7 @@ static long read_console_line(char *buf, uint64_t len) {
             break;
         }
     }
+    tty_flush();
     return (long)i;
 }
 
