@@ -124,6 +124,7 @@ add_user_program(init "${USER_DIR}/init.c")
 add_user_program(shell "${USER_DIR}/shell.c")
 add_user_program(echo "${USER_DIR}/echo.c")
 add_user_program(gfxdemo "${USER_DIR}/gfxdemo.c")
+add_user_program(termdemo "${USER_DIR}/termdemo.c")
 add_user_program(ls "${USER_DIR}/ls.c")
 add_user_program(cat "${USER_DIR}/cat.c")
 

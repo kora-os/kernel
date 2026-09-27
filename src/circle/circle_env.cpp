@@ -29,6 +29,35 @@ void key_pressed_handler(const char *pString) {
     }
 }
 
+// Shift+PageUp / Shift+PageDown scroll the screen's history. Circle's keymaps
+// give these no cooked string, so they are picked out of the raw HID boot
+// reports; the handler runs in mixed mode, so cooked keys still flow above.
+constexpr unsigned char kHidPageUp = 0x4B;
+constexpr unsigned char kHidPageDown = 0x4E;
+constexpr unsigned char kHidShiftMask = 0x02 | 0x20;  // left / right shift
+
+void key_status_raw(unsigned char ucModifiers, const unsigned char RawKeys[6]) {
+    static unsigned char previous[6];
+    for (unsigned i = 0; i < 6; i++) {
+        unsigned char key = RawKeys[i];
+        bool held_before = false;
+        for (unsigned j = 0; j < 6; j++) {
+            held_before |= key == previous[j];
+        }
+        if (key == 0 || held_before || !(ucModifiers & kHidShiftMask)) {
+            continue;
+        }
+        if (key == kHidPageUp) {
+            tty_scrollback(1);
+        } else if (key == kHidPageDown) {
+            tty_scrollback(-1);
+        }
+    }
+    for (unsigned i = 0; i < 6; i++) {
+        previous[i] = RawKeys[i];
+    }
+}
+
 }  // namespace
 
 void circle_usb_init(int enumerate) {
@@ -68,5 +97,6 @@ void circle_usb_init(int enumerate) {
     }
 
     pKeyboard->RegisterKeyPressedHandler(key_pressed_handler);
+    pKeyboard->RegisterKeyStatusHandlerRaw(key_status_raw, TRUE /* mixed mode */);
     tfp_printf("circle: USB keyboard ready -- input goes to the screen terminal\n");
 }
