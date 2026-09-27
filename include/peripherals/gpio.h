@@ -22,8 +22,13 @@ struct GpioRegs {
     struct GpioPinData async_re_detect;
     struct GpioPinData async_fe_detect;
     reg32 reserved;
-    reg32 pupd_enable;
-    reg32 pupd_enable_clocks[2];
+    reg32 pupd_enable;             // GPPUD (BCM2835/Pi 3 pull control)
+    reg32 pupd_enable_clocks[2];   // GPPUDCLK0/1
+    reg32 reserved2[17];
+    reg32 pup_pdn_cntrl[4];        // GPIO_PUP_PDN_CNTRL_REG0..3 (BCM2711/Pi 4), at 0xE4
 };
+
+_Static_assert(__builtin_offsetof(struct GpioRegs, pup_pdn_cntrl) == 0xE4,
+               "BCM2711 pull registers start at GPIO base + 0xE4");
 
 #define REGS_GPIO ((struct GpioRegs *)(PBASE + 0x00200000))
