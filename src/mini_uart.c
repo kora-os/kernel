@@ -1,5 +1,6 @@
 #include "mini_uart.h"
 #include "peripherals/gpio.h"
+#include "peripherals/irq.h"
 #include "utils.h"
 
 #ifdef QEMU_TESTING
@@ -70,10 +71,8 @@ int uart_rx_ready(void) {
     return !(REGS_PL011->fr & (1 << 4));  // RX FIFO not empty
 }
 
-#define IRQ_PERIPH_UART0 57  // PL011
-
 void uart_rx_irq_enable(irq_handler_t handler) {
-    irq_connect(IRQ_PERIPH_UART0, handler, NULL);
+    irq_connect(IRQ_UART0, handler, NULL);
     REGS_PL011->imsc = (1 << 4) | (1 << 6);  // RX + RX timeout (FIFO enabled)
 }
 
@@ -148,10 +147,8 @@ int uart_rx_ready(void) {
     return REGS_AUX->mu_lsr & (1 << 0);  // LSR data ready
 }
 
-#define IRQ_PERIPH_AUX 29  // mini-UART (shared with SPI1/SPI2)
-
 void uart_rx_irq_enable(irq_handler_t handler) {
-    irq_connect(IRQ_PERIPH_AUX, handler, NULL);
+    irq_connect(IRQ_AUX, handler, NULL);
     // Receive interrupt only. Per the BCM2835 datasheet errata, bit 0 (not 1)
     // enables RX, and bits 3:2 must be set for interrupts to be raised at all.
     REGS_AUX->mu_ier = 0x0D;
