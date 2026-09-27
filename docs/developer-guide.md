@@ -134,7 +134,14 @@ Pure-logic kernel code has host-side unit tests that run on your machine under A
 tests/run-host-tests.sh
 ```
 
-See `tests/README.md` for what is covered and how to add a test.
+A QEMU smoke test boots the kernel on `raspi3b` and drives the shell over serial, checking the output and framebuffer screenshots:
+
+```bash
+RPI_VERSION=3 ./build.sh --qemu
+tests/run-qemu-smoke.py
+```
+
+See `tests/README.md` for what each covers and how to add tests.
 
 ## Legacy Makefile
 

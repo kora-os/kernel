@@ -31,3 +31,24 @@ Current suites:
 | Test | Covers |
 |------|--------|
 | `term_test.c` | `src/video/term.c`: autowrap, scrollback and its view, scroll regions, insert/delete/erase, alternate screen, status replies, colours (16/256/24-bit, bce), UTF-8 and DEC line drawing, tabs, origin mode, cursor style/visibility, OSC, REP |
+
+## QEMU smoke test (`tests/run-qemu-smoke.py`)
+
+Boots the QEMU kernel on the `raspi3b` machine, drives the shell over the serial
+line and checks the results: boot to the shell, `ls`, `hello`, `echo` (argv and
+exit code), `cat` of a long-filename file, Ctrl-T to the kernel debug console
+and back, and screenshots of `termdemo` (colour tables on screen) and `gfxdemo`
+(gradient pixels). It waits for expected output rather than sleeping, so it
+does not depend on how fast QEMU runs, and fails fast on a kernel fault banner.
+
+```bash
+RPI_VERSION=3 ./build.sh --qemu
+tests/run-qemu-smoke.py
+```
+
+Needs Python 3 (standard library only) and `qemu-system-aarch64`. Artifacts
+land in `build/qemu-smoke/`: `serial.log` and a PNG per screenshot.
+
+It cannot cover what QEMU does not model: USB, real HDMI output, caches,
+interrupt timing, or the Pi 4 (QEMU's `raspi4b` machine is incomplete). Those
+stay manual hardware tests.
