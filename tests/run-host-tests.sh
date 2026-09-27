@@ -20,6 +20,7 @@ CFLAGS=(
     -Wall -Wextra -Werror -Wno-incompatible-library-redeclaration
     -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer
     -I "$ROOT/include" -I "$ROOT/tests/host"
+    -DPRINTF_LONG_SUPPORT  # as in the kernel build (%l formats)
 )
 
 mkdir -p "$OUT"
@@ -47,6 +48,7 @@ run_test() {
 }
 
 run_test term src/video/term.c
+run_test printf src/lib/printf.c
 
 if [ "$failed" -ne 0 ]; then
     echo "host tests: FAILED"
