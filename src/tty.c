@@ -90,6 +90,29 @@ void tty_serial_init(void) {
     uart_rx_irq_enable(serial_isr);
 }
 
+// Scrollback requests from the keyboard (IRQ context), in half screens. They
+// are applied from the input wait loop below, so the screen is never drawn
+// from an interrupt handler.
+static volatile int scroll_request;
+
+void tty_scrollback(int halfpages) {
+    scroll_request += halfpages;
+}
+
+static void apply_scroll_request(void) {
+    if (scroll_request == 0) {
+        return;
+    }
+    irq_disable();
+    int request = scroll_request;
+    scroll_request = 0;
+    if (request != 0) {
+        screen_scroll_view(request);
+        screen_flush();
+    }
+    irq_enable();
+}
+
 void tty_flush(void) {
     screen_flush();
 }
@@ -109,6 +132,7 @@ char tty_getc(void) {
         // IRQs are not wired up yet (Pi 4, until its GIC is), this is the only
         // way serial input arrives.
         tty_poll_serial();
+        apply_scroll_request();
         if (input_pop(&c)) {
             break;
         }
@@ -117,14 +141,23 @@ char tty_getc(void) {
     return c;
 }
 
+// Screen output with the Unix newline translation (ONLCR): the terminal treats
+// LF as a pure line feed, as xterm does, so '\n' is sent as CR LF.
+static void screen_out(char c) {
+    if (c == '\n') {
+        screen_putc('\r');
+    }
+    screen_putc(c);
+}
+
 void tty_putc(char c) {
 #ifndef QEMU_TESTING
     if (screen_framebuffer() != NULL) {
-        screen_putc(c);
+        screen_out(c);
         return;
     }
 #else
-    screen_putc(c);
+    screen_out(c);
 #endif
     if (c == '\n') {
         uart_putc('\r');

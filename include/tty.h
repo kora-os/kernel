@@ -33,6 +33,11 @@ void tty_flush(void);
 // while waiting.
 char tty_getc(void);
 
+// Scroll the screen's history view by `halfpages` half screens (positive = back
+// in time), e.g. for Shift+PgUp/PgDn. Called from IRQ context by the keyboard
+// driver; applied while the terminal waits for input.
+void tty_scrollback(int halfpages);
+
 // Queue a byte of keyboard input. Called from IRQ context by the USB keyboard
 // driver; bytes are dropped if the queue is full.
 void tty_input_push(char c);

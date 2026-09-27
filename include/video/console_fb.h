@@ -2,44 +2,42 @@
 
 #include "common.h"
 #include "video/framebuffer.h"
+#include "video/term.h"
 
-// Text console on a 32 bpp framebuffer. The console keeps its own grid of
-// character cells and draws the screen from it, so scrolling shifts the grid
-// and redraws (framebuffer writes only) instead of reading pixels back from the
-// uncached framebuffer, which is slow. A scroll only marks the screen dirty;
-// the redraw happens once, on the next flush, so a burst of output costs one
-// redraw rather than one per line.
-
-#define FB_CONSOLE_MAX_COLS 240  // 1920 / 8
-#define FB_CONSOLE_MAX_ROWS 135  // 1080 / 8
+// Text console on a 32 bpp framebuffer: renders a terminal (video/term.h) with
+// the 8x8 font. The terminal marks the rows that changed; flushing redraws just
+// those (writes only -- the framebuffer is uncached, so it is never read back)
+// and then the cursor. A burst of output that scrolls costs one full redraw at
+// the next flush, not one per line.
 
 typedef struct {
     framebuffer_info_t fb;
-    uint32_t cols;        // grid size in cells, fitted to the framebuffer
-    uint32_t rows;
-    uint32_t cursor_col;  // may equal cols: the wrap happens on the next char
+    term_t term;
+    bool cursor_drawn;    // the cursor is on screen, in row cursor_row
     uint32_t cursor_row;
-    uint32_t fg_color;
-    uint32_t bg_color;
-    bool dirty;           // grid scrolled since the screen was last redrawn
-    char cells[FB_CONSOLE_MAX_ROWS][FB_CONSOLE_MAX_COLS];
 } fb_console_t;
 
 int fb_console_init(fb_console_t *console, uint32_t width, uint32_t height, uint32_t depth);
-void fb_console_write(fb_console_t *console, const char *text);
-void fb_console_clear(fb_console_t *console);
 
-// Bring the screen up to date with the grid (a full redraw if it scrolled).
+// Write plain text ('\n' starts a new line) and flush.
+void fb_console_write(fb_console_t *console, const char *text);
+
+// Bring the screen up to date with the terminal.
 void fb_console_flush(fb_console_t *console);
 
-// Designate a console as the active screen, so screen_putc()/screen_framebuffer()
-// (used by the tty and the fb_info syscall) target it.
+// Designate a console as the active screen, so the screen_* calls and the
+// fb_info syscall target it.
 void fb_console_make_active(fb_console_t *console);
 
-// Write one character to the active screen console; no-op if none is active.
-// Call screen_flush() when a batch of output is done.
+// Feed one byte to the active screen's terminal (escape sequences included; no
+// newline translation). No-op if no screen is active. Call screen_flush() when a
+// batch of output is done.
 void screen_putc(char c);
 void screen_flush(void);
+
+// Scroll the active screen's history view by `halfpages` half screens
+// (positive = back in time). The view returns to the live screen on output.
+void screen_scroll_view(int halfpages);
 
 // The active screen's framebuffer, or NULL if no console is active. Used by the
 // fb_info syscall to hand user programs the framebuffer geometry and address.
