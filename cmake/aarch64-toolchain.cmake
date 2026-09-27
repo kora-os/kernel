@@ -28,6 +28,12 @@ else()
     set(CMAKE_CXX_LINK_EXECUTABLE "${CMAKE_CXX_COMPILER} <CMAKE_CXX_LINK_FLAGS> <LINK_FLAGS> <OBJECTS> -o <TARGET> <LINK_LIBRARIES>")
 endif()
 
+# The link rules above invoke ld.lld directly, so compiler-driver link flags do
+# not apply. CMake >= 3.27 would otherwise add "-Xlinker --dependency-file=..."
+# for LLD/GNU-style linkers (not on macOS, whose system linker lacks it), which
+# ld.lld rejects.
+set(CMAKE_LINK_DEPENDS_USE_LINKER FALSE)
+
 # Find llvm-objcopy
 find_program(OBJCOPY llvm-objcopy
     PATHS 

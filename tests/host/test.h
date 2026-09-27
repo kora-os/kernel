@@ -12,8 +12,8 @@
 #include "common.h"
 
 int printf(const char *fmt, ...);
-void *calloc(size_t n, size_t size);
 int strcmp(const char *a, const char *b);
+int fflush(void *stream);
 
 extern int test_failures;
 extern int test_checks;
@@ -41,5 +41,6 @@ extern int test_checks;
         }                                                             \
         printf("%s: %d checks, %d failures\n", __FILE__, test_checks, \
                test_failures);                                        \
+        fflush(NULL); /* before any sanitizer exit report */          \
         return test_failures != 0;                                    \
     }
