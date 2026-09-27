@@ -1,5 +1,8 @@
 #include "console.h"
+#include "arch/irq.h"
+#include "arch/systick.h"
 #include "common.h"
+#include "lib/timer.h"
 #include "lib/printf.h"
 #include "lib/string.h"
 #include "mini_uart.h"
@@ -20,6 +23,7 @@ void console_cmd_help(const char *args) {
   uart_puts("  help - Show available commands\n");
   uart_puts("  get_el - Get current Exception Level\n");
   uart_puts("  version - Print current KoraOS version\n");
+  uart_puts("  irqs - Show interrupt counters and the system tick\n");
   uart_puts("Ctrl-T switches the serial line between this console and the\n");
   uart_puts("screen terminal (the shell).\n");
 }
@@ -32,10 +36,30 @@ void console_cmd_version(const char *args) {
   printf("KoraOS version %s\n", KORAOS_VERSION);
 }
 
+// Interrupt health at a glance: the tick count should track the uptime (100 per
+// second), and every connected IRQ is listed with how often it fired.
+void console_cmd_irqs(const char *args) {
+  uint64_t ms = timer_us() / 1000;
+  printf("controller: %s\n", irq_controller());
+  printf("systick: %lu ticks, uptime %lu.%03lu s\n",
+         (unsigned long)systick_count(), (unsigned long)(ms / 1000),
+         (unsigned long)(ms % 1000));
+  printf("  IRQ        hits  source\n");
+  for (unsigned irq = 0; irq < irq_lines(); irq++) {
+    unsigned long hits = irq_hits(irq);
+    const char *name = irq_name(irq);
+    if (hits == 0 && name[0] == '\0') {
+      continue;
+    }
+    printf("  %3u  %10lu  %s\n", irq, hits, name[0] ? name : "(no handler)");
+  }
+}
+
 console_command_t commands[] = {
     {"help", "Show available commands", console_cmd_help},
     {"get_el", "Get the current Exception Level", console_cmd_get_el},
     {"version", "Get current KoraOS version", console_cmd_version},
+    {"irqs", "Show interrupt counters and the system tick", console_cmd_irqs},
     {NULL, NULL, NULL},
 };
 
