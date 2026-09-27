@@ -8,8 +8,20 @@
 
 // --- Stubs for the kernel services term.c uses -------------------------------
 
+// Pages come from a static arena rather than the heap, so LeakSanitizer (on by
+// default with ASan on Linux) has nothing to report: term.c never frees, just
+// like the kernel it runs in. Static storage is zeroed, as frame pages are.
+static uint8_t arena[16 * 1024 * 1024] __attribute__((aligned(4096)));
+static size_t arena_used;
+
 void *frame_alloc_pages(size_t count) {
-    return calloc(count, 4096);  // leaked: each test program is short-lived
+    size_t bytes = count * 4096;
+    if (arena_used + bytes > sizeof(arena)) {
+        return NULL;
+    }
+    void *p = arena + arena_used;
+    arena_used += bytes;
+    return p;
 }
 
 // Status replies the terminal sends back as keyboard input.
