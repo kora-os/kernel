@@ -8,12 +8,31 @@
 // End of the executable (code) region, 2 MB aligned by the linker script.
 extern char text_end[];
 
+// Start of MMIO in the low 4 GB. The Pi 4 (BCM2711, "low peripheral" mode) has
+// peripherals from 0xFC000000 up, below PBASE: the PCIe host bridge is at
+// 0xFD500000. (PBASE itself may be lower, as in the QEMU Pi 4 variant.)
+#if RPI_VERSION == 4
+#define DEVICE_BASE (PBASE < 0xFC000000UL ? PBASE : 0xFC000000UL)
+// PCIe outbound window where the VL805 xHCI controller's registers appear
+// (Circle's MEM_PCIE_RANGE_START, 64 MB), above the low 4 GB: mapped as one
+// 1 GB Device block at level 1.
+#define PCIE_WINDOW_BASE 0x600000000UL
+#else
+#define DEVICE_BASE PBASE
+#endif
+
 // Coherent (Normal non-cacheable) pool for bus-master buffers such as the
-// VideoCore mailbox. 2 MB aligned and 2 MB sized so it occupies exactly one MMU
-// block, which build_identity_map() maps non-cacheable.
+// VideoCore mailbox. 2 MB aligned and a whole number of 2 MB MMU blocks, which
+// build_identity_map() maps non-cacheable. The Pi 4 needs 4 MB: Circle's xHCI
+// driver takes coherent slots 256..1023 (circle/memory.h COHERENT_SLOT_XHCI_*)
+// for its rings, contexts and scratchpad.
+#if RPI_VERSION == 4
+#define COHERENT_POOL_SIZE 0x400000
+#else
 #define COHERENT_POOL_SIZE 0x200000
+#endif
 static uint8_t coherent_pool[COHERENT_POOL_SIZE]
-    __attribute__((aligned(COHERENT_POOL_SIZE)));
+    __attribute__((aligned(SECTION_SIZE)));
 
 void *coherent_page(unsigned slot) {
     uint64_t offset = (uint64_t)slot * PAGE_SIZE;
@@ -34,6 +53,30 @@ static uint64_t l1_table[ENTRIES_PER_TABLE] __attribute__((aligned(PAGE_SIZE)));
 static uint64_t l2_tables[GIB_COVERED][ENTRIES_PER_TABLE]
     __attribute__((aligned(PAGE_SIZE)));
 
+// The first 2 MB block is split into 4 KB pages so that page 0, which belongs
+// to the firmware (the ARM stub, the secondary cores' spin table, and at 0xF8
+// the device-tree pointer), can be made writable on its own while the rest of
+// the block, the start of the kernel image at 0x80000, stays code. Page 0 is
+// read-only like the code by default, so NULL-pointer writes still fault.
+static uint64_t l3_low_table[ENTRIES_PER_TABLE] __attribute__((aligned(PAGE_SIZE)));
+
+static void build_low_pages(void) {
+    for (uint64_t p = 0; p < ENTRIES_PER_TABLE; p++) {
+        l3_low_table[p] = (p << PAGE_SHIFT) | MMU_PAGE_FLAGS(MMU_CODE_BLOCK_FLAGS);
+    }
+    l2_tables[0][0] = (uint64_t)l3_low_table | PD_TABLE;
+}
+
+void mmu_set_firmware_page_writable(int writable) {
+    // Only the access permissions change, which needs no break-before-make.
+    l3_low_table[0] = 0 | MMU_PAGE_FLAGS(writable ? MMU_NORMAL_BLOCK_FLAGS
+                                                  : MMU_CODE_BLOCK_FLAGS);
+    asm volatile("dsb ishst" ::: "memory");
+    asm volatile("tlbi vaae1, %0" ::"r"(0UL) : "memory");
+    asm volatile("dsb ish" ::: "memory");
+    asm volatile("isb");
+}
+
 static void build_identity_map(void) {
     uint64_t code_end = (uint64_t)text_end;
 
@@ -47,11 +90,12 @@ static void build_identity_map(void) {
             uint64_t addr = (g << 30) | (i << 21);
 
             uint64_t flags;
-            if (addr >= PBASE) {
+            if (addr >= DEVICE_BASE) {
                 flags = MMU_DEVICE_BLOCK_FLAGS;       // peripherals / MMIO
             } else if (addr < code_end) {
                 flags = MMU_CODE_BLOCK_FLAGS;         // kernel + user text
-            } else if (addr == (uint64_t)coherent_pool) {
+            } else if (addr >= (uint64_t)coherent_pool &&
+                       addr < (uint64_t)coherent_pool + COHERENT_POOL_SIZE) {
                 flags = MMU_COHERENT_BLOCK_FLAGS;     // Normal non-cacheable pool
             } else {
                 flags = MMU_NORMAL_BLOCK_FLAGS;       // general RAM, EL0+EL1 RW
@@ -60,6 +104,12 @@ static void build_identity_map(void) {
             l2_tables[g][i] = addr | flags;
         }
     }
+
+    build_low_pages();
+
+#ifdef PCIE_WINDOW_BASE
+    l1_table[PCIE_WINDOW_BASE >> 30] = PCIE_WINDOW_BASE | MMU_DEVICE_BLOCK_FLAGS;
+#endif
 }
 
 void mmu_init(void) {
@@ -115,7 +165,7 @@ void mmu_map_coherent(uintptr_t base, size_t size) {
     dcache_clean_invalidate((const void *)start, end - start);
 
     for (uint64_t addr = start; addr < end; addr += SECTION_SIZE) {
-        if (addr >= PBASE) {
+        if (addr >= DEVICE_BASE) {
             break;  // already Device memory
         }
         uint64_t *entry = &l2_tables[addr >> 30][(addr >> 21) & (ENTRIES_PER_TABLE - 1)];

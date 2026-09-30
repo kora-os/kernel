@@ -26,7 +26,7 @@ static void* stdout_putp;
 static void uli2a(unsigned long int num, unsigned int base, int uc,char * bf)
     {
     int n=0;
-    unsigned int d=1;
+    unsigned long int d=1;  /* KoraOS: was unsigned int, which wrapped to 0 for num >= 2^32 */
     while (num/d >= base)
         d*=base;
     while (d!=0) {
@@ -43,11 +43,12 @@ static void uli2a(unsigned long int num, unsigned int base, int uc,char * bf)
 
 static void li2a (long num, char * bf)
     {
+    unsigned long int mag=num;
     if (num<0) {
-        num=-num;
+        mag=0UL-mag;  /* KoraOS: -num overflows for LONG_MIN */
         *bf++ = '-';
         }
-    uli2a(num,10,0,bf);
+    uli2a(mag,10,0,bf);
     }
 
 #endif
@@ -72,11 +73,12 @@ static void ui2a(unsigned int num, unsigned int base, int uc,char * bf)
 
 static void i2a (int num, char * bf)
     {
+    unsigned int mag=num;
     if (num<0) {
-        num=-num;
+        mag=0U-mag;  /* KoraOS: -num overflows for INT_MIN */
         *bf++ = '-';
         }
-    ui2a(num,10,0,bf);
+    ui2a(mag,10,0,bf);
     }
 
 static int a2d(char ch)
@@ -120,7 +122,7 @@ static void putchw(void* putp,putcf putf,int n, char z, char* bf)
 
 void tfp_format(void* putp,putcf putf,char *fmt, va_list va)
     {
-    char bf[12];
+    char bf[24];  /* KoraOS: was 12, too small for 64-bit %lu/%ld (up to 21 chars) */
 
     char ch;
 
@@ -164,7 +166,7 @@ void tfp_format(void* putp,putcf putf,char *fmt, va_list va)
                 case 'd' :  {
 #ifdef  PRINTF_LONG_SUPPORT
                     if (lng)
-                        li2a(va_arg(va, unsigned long int),bf);
+                        li2a(va_arg(va, long int),bf);
                     else
 #endif
                     i2a(va_arg(va, int),bf);
