@@ -52,3 +52,15 @@ land in `build/qemu-smoke/`: `serial.log` and a PNG per screenshot.
 It cannot cover what QEMU does not model: USB, real HDMI output, caches,
 interrupt timing, or the Pi 4 (QEMU's `raspi4b` machine is incomplete). Those
 stay manual hardware tests.
+
+## QEMU virt
+
+`./build.sh --virt --build-dir build-virt` produces an independent image.
+Run serial/EL0/FAT32/IRQ checks with:
+
+```bash
+tests/run-qemu-smoke.py --machine virt --kernel build-virt/kernel-virt.img --no-graphics --out build-virt/qemu-smoke
+```
+
+Use `--ram 128M` to exercise a different memory size. The retained raspi3b
+smoke and Pi hardware builds continue to run in CI.

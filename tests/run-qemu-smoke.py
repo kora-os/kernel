@@ -35,14 +35,17 @@ class Failure(Exception):
 
 
 class Qemu:
-    def __init__(self, qemu, kernel, outdir):
+    def __init__(self, qemu, kernel, outdir, machine="raspi3b", ram="256M", extra=()):
         self.outdir = outdir
         self.log = open(os.path.join(outdir, "serial.log"), "wb")
         self.pending = b""  # output not yet consumed by expect()
         # The monitor socket path is relative to QEMU's working directory:
         # UNIX socket paths are limited to ~104 bytes and temp dirs are long.
+        machine_args = ["-M", "raspi3b"] if machine == "raspi3b" else [
+            "-M", "virt,gic-version=2,highmem=off", "-cpu", "cortex-a72",
+            "-smp", "1", "-nic", "none", "-m", ram]
         self.proc = subprocess.Popen(
-            [qemu, "-M", "raspi3b", "-kernel", kernel,
+            [qemu, *machine_args, *extra, "-kernel", kernel,
              "-serial", "stdio", "-display", "none",
              "-monitor", "unix:monitor.sock,server,nowait"],
             cwd=outdir, stdin=subprocess.PIPE, stdout=subprocess.PIPE,
@@ -168,7 +171,7 @@ def near(actual, expected, tolerance=8):
 PROMPT = rb"^\$ "
 
 
-def run(q):
+def run(q, graphics=True):
     """Yield (name, check) steps; each check raises Failure on error."""
 
     def boot():
@@ -216,22 +219,30 @@ def run(q):
     def irqs():
         q.send("\x14")
         q.expect(rb"koraos> ")
-        q.send("irqs\r")
-        q.expect(rb"^controller: BCM2835 legacy")
-        m = q.expect(rb"^systick: (\d+) ticks, uptime (\d+)\.(\d+) s")
-        ticks = int(m.group(1))
-        uptime = int(m.group(2)) + int(m.group(3)) / 1000
-        # 100 Hz, started a little after the counter: never ahead of uptime.
-        if ticks == 0 or ticks > uptime * 100 + 1:
-            raise Failure("systick %d ticks after %.3f s uptime" % (ticks, uptime))
-        # Everything typed so far reached the kernel through this interrupt.
-        m = q.expect(rb"^\s+\d+\s+(\d+)\s+uart \(PL011\)")
-        if int(m.group(1)) == 0:
-            raise Failure("the UART receive interrupt never fired")
-        q.expect(rb"koraos> ")
+        deadline = time.monotonic() + 5
+        while True:
+            q.send("irqs\r")
+            q.expect(rb"^controller: (?:BCM2835 legacy|GICv2 \(virt\))")
+            m = q.expect(rb"^systick: (\d+) ticks, uptime (\d+)\.(\d+) s")
+            ticks = int(m.group(1))
+            uptime = int(m.group(2)) + int(m.group(3)) / 1000
+            if ticks > uptime * 100 + 1:
+                raise Failure("systick %d ticks after %.3f s uptime" % (ticks, uptime))
+            m = q.expect(rb"^\s+\d+\s+(\d+)\s+uart \(PL011\)")
+            if int(m.group(1)) == 0:
+                raise Failure("the UART receive interrupt never fired")
+            q.expect(rb"koraos> ")
+            if ticks >= 5:
+                break
+            if time.monotonic() >= deadline:
+                raise Failure("system tick never advanced to five interrupts")
+            time.sleep(0.05)
         q.send("\x14")
         q.expect(rb"\[serial -> screen terminal")
     yield "irqs shows the system tick and the UART interrupt", irqs
+
+    if not graphics:
+        return
 
     def termdemo():
         q.send("termdemo\r")
@@ -262,20 +273,25 @@ def run(q):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--kernel", default=os.path.join(ROOT, "build", "kernel8.img"))
+    parser.add_argument("--machine", choices=("raspi3b", "virt"), default="raspi3b")
+    parser.add_argument("--ram", default="256M")
+    parser.add_argument("--no-graphics", action="store_true")
+    parser.add_argument("--kernel")
     parser.add_argument("--qemu", default="qemu-system-aarch64")
     parser.add_argument("--out", default=os.path.join(ROOT, "build", "qemu-smoke"))
     args = parser.parse_args()
 
+    if args.kernel is None:
+        args.kernel = os.path.join(ROOT, "build", "kernel-virt.img" if args.machine == "virt" else "kernel8.img")
     if not os.path.exists(args.kernel):
         sys.exit("no kernel at %s -- build it with: RPI_VERSION=3 ./build.sh --qemu"
                  % args.kernel)
     os.makedirs(args.out, exist_ok=True)
 
-    q = Qemu(args.qemu, os.path.abspath(args.kernel), os.path.abspath(args.out))
+    q = Qemu(args.qemu, os.path.abspath(args.kernel), os.path.abspath(args.out), args.machine, args.ram)
     failed = False
     try:
-        for name, check in run(q):
+        for name, check in run(q, not args.no_graphics):
             try:
                 check()
                 print("ok   - " + name)

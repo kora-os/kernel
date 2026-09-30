@@ -67,16 +67,23 @@ const char *irq_name(unsigned irq) {
     if (irq >= IRQ_COUNT || irq_table[irq].handler == NULL) {
         return "";
     }
+#ifdef KORAOS_VIRT
+    if (irq == IRQ_UART0) {
+        return "uart (PL011)";
+    }
+#endif
     switch (irq) {
     case IRQ_TIMER_CNTPNS:
         return "timer (systick)";
+#ifndef KORAOS_VIRT
     case IRQ_USB:
         return "usb (DWC2)";
     case IRQ_AUX:
         return "uart (mini-UART)";
     case IRQ_UART0:
         return "uart (PL011)";
-#ifdef IRQ_PCIE_INTA
+#endif
+#if defined(IRQ_PCIE_INTA) && !defined(KORAOS_VIRT)
     case IRQ_PCIE_INTA:
         return "usb (xHCI via PCIe)";
 #endif

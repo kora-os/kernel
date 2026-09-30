@@ -51,6 +51,12 @@ jobs:
       - name: Build QEMU kernel (raspi3b)
         run: RPI_VERSION=3 ./build.sh --qemu
 
+      - name: Build QEMU virt kernel
+        run: ./build.sh --virt --build-dir build-virt
+
+      - name: QEMU virt serial smoke test
+        run: tests/run-qemu-smoke.py --machine virt --kernel build-virt/kernel-virt.img --no-graphics --out build-virt/qemu-smoke
+
       - name: Build Raspberry Pi 3 kernel
         run: RPI_VERSION=3 ./build.sh --hw --release --build-dir build-rpi3
 

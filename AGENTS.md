@@ -3,7 +3,7 @@
 Use this file when you drop into the workspace so you can ramp quickly and keep changes aligned with project conventions.
 
 ## Project Snapshot
-- **Target**: Bare-metal Raspberry Pi kernel (Pi 3 via QEMU raspi3b, Pi 4 hardware)
+- **Target**: QEMU AArch64 virt (independent development target), plus Bare-metal Raspberry Pi kernel (Pi 3 via QEMU raspi3b, Pi 4 hardware)
 - **Current Capabilities**: Boot flow and UART console bring-up verified on QEMU and real hardware
 - **Toolchain**: LLVM/Clang cross-compilation managed by CMake (`./build.sh`), legacy Makefile retained for compatibility
 
@@ -11,6 +11,7 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
 - `README.md` – entry point with quick-start build/run commands.
 - `docs/developer-guide.md` – detailed toolchain setup, build variants, QEMU usage, hardware deployment.
 - `docs/repository-guidelines.md` – coding style, directory layout, and contribution workflow.
+- `project_doc/virt-plan.md` – virt target milestones and delivery verification.
 - `project_doc/roadmap.md` – high-level milestones for upcoming kernel features (exception vectors, interrupts, console polish).
 
 ## Working Guidelines

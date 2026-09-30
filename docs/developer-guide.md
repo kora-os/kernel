@@ -156,3 +156,25 @@ See `tests/README.md` for what each covers and how to add tests.
 - [syscalls.md](syscalls.md) – the full system-call ABI.
 - [writing-userland-programs.md](writing-userland-programs.md) – how to write, build, and run a userland program (no compiler or libc on the device yet).
 
+
+## QEMU virt development target
+
+The independent AArch64 virt target boots the same EL0 programs and embedded
+FAT32 root filesystem using PL011, GICv2 and the architectural timer:
+
+```bash
+./build.sh --virt --build-dir build-virt
+BUILD_DIR=build-virt ./run-qemu.sh --virt
+tests/run-qemu-smoke.py --machine virt --kernel build-virt/kernel-virt.img --no-graphics --out build-virt/qemu-smoke
+```
+
+The initial profile is one cortex-a72 CPU, GICv2, TCG, and 256 MiB RAM below
+4 GiB. `KORA_QEMU_RAM=128M` changes RAM. The kernel discovers RAM and device
+addresses from QEMU's DTB; raw Image boot preserves x0. Launch the `.img` with `-kernel`;
+use the matching `.elf` for debugger symbols. Direct ELF launching is not part
+of this profile (QEMU firmware DTB placement can overlap the image). Unsupported/incomplete DTBs stop before device
+access. Pi GPIO, mailboxes and Circle USB are excluded from virt. The serial
+line starts on the shell; Ctrl-T selects the debug console, where `irqs`
+reports timer and UART interrupt counters. Hardware and raspi3b commands and
+artifacts retain their existing meanings. Graphics and VirtIO devices are
+tracked in `project_doc/virt-plan.md` as separate milestones.
