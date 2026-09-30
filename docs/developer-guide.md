@@ -10,6 +10,7 @@ KoraOS is built with the LLVM toolchain while targeting `aarch64-none-elf`. The 
 
 - LLVM/Clang (including `clang`, `ld.lld`, and `llvm-objcopy`)
 - CMake 3.20 or newer
+- Python 3 (shared-build coordination and regression tooling)
 - [mtools](https://www.gnu.org/software/mtools/) (`mformat`, `mcopy`), used to
   build the embedded FAT32 filesystem image; the build fails without it
 - QEMU (only for virtualization workflows)
@@ -43,76 +44,78 @@ llvm-objcopy --version
 
 Run `./build.sh` at least once. CMake writes `build/compile_commands.json`, which clangd automatically discovers via the repository's `.clangd` configuration.
 
-## Building for QEMU
-
-The CMake build produces a QEMU-friendly image that enables the PL011 UART (`QEMU_TESTING` is defined).
+## Building and selecting targets
 
 ```bash
-# Build both QEMU and hardware variants (default)
-./build.sh
-
-# Just the QEMU variant
-./build.sh --qemu
+./build.sh --target qemu_raspi3b
+./build.sh --target qemu_virt
+./build.sh --target hw_raspi3b --release
+./build.sh --target hw_raspi4b --release
+./build.sh --target hw_raspi3b --target hw_raspi4b --release
+./build.sh --target all
 ```
 
-Useful flags:
+No target argument means all four. Repeated selections are deduplicated in
+first-seen order. `--debug` (default) or `--release` applies to selected kernel
+configurations. Each has its own cache and `kernel.elf`, `kernel.img`, and
+`kernel.map` in `build/<debug|release>/<target>/`; `--build-dir` sets the root.
+The shared userfs producer owns `build/userfs/aarch64/user/*.elf` and
+`build/userfs/aarch64/koraos.img`, independent of the selected board and kernel
+configuration. It keeps the current AArch64/O2/PIE userland flags.
 
-- `--release` or `--debug` chooses the CMake build type (default debug).
-- `-v all|qemu|hw` mirrors the `--qemu`/`--hw` shortcuts.
-- `--build-dir <path>` isolates artifacts in a custom directory.
-- Environment variables such as `RPI_VERSION` and `BOOTMNT` can be provided on the command line (for example `RPI_VERSION=4 ./build.sh --qemu`).
-
-Expected outputs (in `build/` by default):
-
-- `kernel8.elf` and `kernel8.img` – ELF and binary images for QEMU.
-- `compile_commands.json` – compilation database for clangd and other tooling.
-- `boot/kernel8-qemu.img` – QEMU-ready image copied to a local boot staging folder alongside `config.txt`.
-- `fs/koraos.img` – the FAT32 filesystem image that is embedded into the kernel (see [filesystem.md](filesystem.md)).
-
-Manual CMake flow:
+`--clean` rebuilds selected configurations and the owned shared userfs, preserving
+unselected configurations and explicitly supplied userfs. Invalid arguments are
+rejected before cleanup. `clean` removes selected generated configurations
+without rebuilding. The shared producer is serialized against another build
+invocation and publishes its image atomically, keeping the previous valid image
+if generation fails. Avoid running kernel consumers while replacing their image
+through an unrelated manual command.
 
 ```bash
-mkdir -p build
-cmake -S . -B build -DRPI_VERSION=4
-cmake --build build -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+# Build the shared artifact alone; consume it explicitly (as CI does)
+./build.sh --userfs-only
+./build.sh --target qemu_virt --userfs-dir build/userfs/aarch64
 ```
 
-## Running with QEMU
+A supplied `--userfs-dir` is a prepared artifact: the caller controls its contents
+and freshness. Its `koraos.img` must exist and be nonempty. CI produces it from the
+same checkout and downloads it into each consumer job.
 
-After building the QEMU variant, launch the emulator:
+The first selected kernel's compilation database is copied to
+`build/compile_commands.json`, matching `.clangd`. A custom build root needs a
+matching clangd setting. Select the development target first for multi-target
+builds.
+
+## Running QEMU
 
 ```bash
-./run-qemu.sh
+./run-qemu.sh --target qemu_raspi3b
+./run-qemu.sh --target qemu_virt
+KORA_QEMU_FB=1 ./run-qemu.sh --target qemu_virt
+./run-qemu.sh --target qemu_virt --release --build-dir my-build -s -S
 ```
 
-The script boots `build/kernel8.img` on the `raspi3b` machine, connects the UART to your terminal, and hides the graphical display. Provide additional QEMU flags by appending them to the command (for example `./run-qemu.sh -s -S` to wait for a debugger).
+The launcher uses the matching configuration's `kernel.img` and forwards extra
+QEMU arguments. Ctrl-A X quits. `KORA_QEMU_DISPLAY` overrides the native display
+choice (cocoa on macOS, gtk on Linux). The build and launcher share target names,
+build roots and configuration flags.
 
-Quit QEMU with `Ctrl-A X`. If you need automated smoke tests, pipe input to the script (e.g. `echo "test" | timeout 2 ./run-qemu.sh`).
-
-## Building for Raspberry Pi Hardware
-
-Select the hardware variant to target the Mini UART peripherals and real Raspberry Pi memory map:
+## Raspberry Pi deployment
 
 ```bash
-./build.sh --hw --release
+./build.sh --target hw_raspi3b --target hw_raspi4b --release --install-to /Volumes/BOOT
 ```
 
-Artifacts you should see:
-
-- `build/kernel8-hw.elf` and `build/kernel8-hw.img`
-- `build/boot/kernel8-rpi4.img` (or the appropriate board suffix)
-- `build/kernel8-hw.map`
-
-### Copying to a Boot Volume
-
-Set `BOOTMNT` to the mount point of your SD card's FAT partition and use the install target:
+All selected builds must succeed before installation starts. Only selected
+hardware targets are installed, with firmware, DTBs, config and licence. Existing
+boot filenames remain `kernel8-rpi3.img` and `kernel8-rpi4.img`. Building alone
+does not copy anything to an external volume. Low-level hardware configurations
+retain `install_hw`, using their cached `BOOTMNT` destination.
 
 ```bash
-BOOTMNT=/Volumes/BOOT ./build.sh --hw
-cmake --build build --target install_hw
+# Package already-built hardware targets without mounting or root privileges
+./create-sd-image.sh --target all --release --output build/koraos-boot.img
 ```
-
-`install_hw` copies the hardware image and `config.txt` to `BOOTMNT`. If you build both variants, `cmake --build build --target install_kernel` pushes every enabled image.
 
 ### Verifying the Image
 
@@ -139,15 +142,11 @@ tests/run-host-tests.sh
 A QEMU smoke test boots the kernel on `raspi3b` and drives the shell over serial, checking the output and framebuffer screenshots:
 
 ```bash
-RPI_VERSION=3 ./build.sh --qemu
-tests/run-qemu-smoke.py
+./build.sh --target qemu_raspi3b
+tests/run-qemu-smoke.py --target qemu_raspi3b
 ```
 
 See `tests/README.md` for what each covers and how to add tests.
-
-## Legacy Makefile
-
-`make` still produces a bootable kernel, but the CMake flow is the source of truth and the only way to refresh `compile_commands.json`. Use Make only if you need compatibility with existing tooling.
 
 ## Further Documentation
 
@@ -157,60 +156,49 @@ See `tests/README.md` for what each covers and how to add tests.
 - [writing-userland-programs.md](writing-userland-programs.md) – how to write, build, and run a userland program (no compiler or libc on the device yet).
 
 
-## QEMU virt development target
-
-The independent AArch64 virt target boots the same EL0 programs and embedded
-FAT32 root filesystem using PL011, GICv2 and the architectural timer:
+## QEMU virt development profile
 
 ```bash
-./build.sh --virt --build-dir build-virt
-BUILD_DIR=build-virt ./run-qemu.sh --virt
-tests/run-qemu-smoke.py --machine virt --kernel build-virt/kernel-virt.img --out build-virt/qemu-smoke
+./build.sh --target qemu_virt
+KORA_QEMU_FB=1 ./run-qemu.sh --target qemu_virt
+KORA_QEMU_DISK=build/userfs/aarch64/koraos.img ./run-qemu.sh --target qemu_virt
 ```
 
-The supported profile is one cortex-a72 CPU, GICv2, TCG, and 256 MiB RAM below
-4 GiB. `KORA_QEMU_RAM=128M` changes RAM. The kernel discovers RAM and device
-addresses from QEMU's DTB; raw Image boot preserves x0. Launch the `.img` with `-kernel`;
-use the matching `.elf` for debugger symbols. Direct ELF launching is not part
-of this profile (QEMU firmware DTB placement can overlap the image). Unsupported/incomplete DTBs stop before device
-access. Pi GPIO, mailboxes and Circle USB are excluded from virt. The serial
-line starts on the shell; Ctrl-T selects the debug console, where `irqs`
-reports timer and UART interrupt counters. Hardware and raspi3b commands and
-artifacts retain their existing meanings. The launcher attaches `ramfb` by default. `KORA_QEMU_FB=1` shows a display;
-The launcher selects `gtk` on Linux and `cocoa` on macOS;
-`KORA_QEMU_DISPLAY` overrides this. The existing
-1024x768 XRGB8888 framebuffer console and `fb_info` syscall work on virt.
-`KORA_QEMU_RAMFB=0` omits the device and leaves a usable serial shell. CI checks
-terminal colors and userland framebuffer pixels. An optional external root disk uses modern VirtIO MMIO (see `filesystem.md`):
-`KORA_QEMU_DISK=build-virt/fs/koraos.img BUILD_DIR=build-virt ./run-qemu.sh --virt`.
-Without an attached disk the embedded root remains available. Media is read-only
-by default. The launcher also attaches a VirtIO keyboard. Click the display to type on the
-screen terminal; its US layout supports Shift/Ctrl/Caps Lock, editing keys,
-arrows and Shift+PgUp/PgDn scrollback. `KORA_QEMU_KEYBOARD=0` omits it. UART
-continues to mirror shell output and provides input fallback, with Ctrl-T
-switching to the kernel console. Pi USB layouts still use `KORAOS_KEYMAP`.
+The supported profile is one cortex-a72 CPU, GICv2 and TCG, with 256 MiB RAM
+below 4 GiB. `KORA_QEMU_RAM=128M` changes RAM. The kernel discovers RAM/device
+locations from QEMU's DTB; use raw `kernel.img` for boot and `kernel.elf` for
+symbols. Pi GPIO, mailbox and Circle USB are excluded from virt.
 
-### Virt regression profiles
+ramfb provides a 1024x768 XRGB8888 screen and `fb_info`; `KORA_QEMU_RAMFB=0`
+omits it for serial fallback. The VirtIO keyboard uses a US keymap with
+Shift/Ctrl/Caps, editing/navigation and Shift+PgUp/PgDn scrollback.
+`KORA_QEMU_KEYBOARD=0` omits it. UART mirrors shell output and Ctrl-T switches
+to the debug console. Pi USB layouts still use the Circle keymap setting.
 
-CI runs host sanitizer tests, raspi3b graphics smoke and Pi 3/4 builds on every
-PR and push to main. Independent virt jobs exercise embedded root with ramfb,
-external root with keyboard and 128 MiB RAM, serial-only 64 MiB RAM, and EL2
-entry (`--el2`) before dropping to EL1. Each uploads serial logs/screenshots.
+An external disk uses modern VirtIO MMIO and defaults to read-only media.
+`KORA_QEMU_DISK_READONLY=off` enables raw block writes on a supplied disposable
+image; FAT32/file syscalls stay read-only. A missing disk uses embedded userfs;
+a configured broken disk does not silently fall back. See `filesystem.md`.
 
-`--repeat 256` runs `/bin/allocprobe` repeatedly: each process allocates and
-checks a 64 KiB heap across a nested ELF child, then exits and is reaped. This
-uses more cumulative heap than the 16 MiB pool, catching lifetime regressions.
-A configured invalid FAT32 image is also required to fail without root fallback.
-The fixture lives in `tests/user/`; it adds no syscall or scheduler behavior.
+CI builds shared userfs once and passes its artifact to kernel jobs. It builds
+all four targets, both hardware release targets, a complete SD payload, and
+retains host sanitizer/CLI tests and raspi3b smoke. Independent virt profiles
+cover embedded graphics, external disk/keyboard at 128 MiB, serial-only 64 MiB,
+EL2 entry, and repeated 64 KiB EL0 allocation/nested-process lifetime. Logs and
+screenshots are retained on failure. QEMU does not validate real Pi USB, HDMI,
+cache behavior or firmware. The current virt profile has no SMP, GICv3, PCI,
+networking, audio or VirtIO GPU; scheduling remains cooperative.
 
-The virt profile does not implement SMP, GICv3, PCI, networking, audio, or a
-VirtIO GPU. ramfb provides a CPU-writable framebuffer. FAT32 remains read-only,
-and scheduling remains cooperative. QEMU checks do not validate real Pi USB,
-HDMI, cache behavior or boot firmware. Use raw `.img` boot and `.elf` symbols.
+## Migration and direct CMake
 
-The raspi3b build always selects Pi 3 drivers, independently of `RPI_VERSION`,
-which chooses the physical hardware board. A default build can therefore build
-raspi3b and Pi 4 together; enabling `BUILD_VIRT_VARIANT=ON` in CMake adds virt
-to that same build. The shared rootfs is generated once before any kernel links.
-Cross-target static libraries use LLVM ar/ranlib; use a fresh build directory or
-`--clean` after changing archive tools in an existing CMake cache.
+`--qemu`, `--virt`, `--hw` and `--variant` remain deprecated aliases. Hardware
+aliases use `RPI_VERSION`, while canonical names select the board explicitly.
+Aliases produce the new directory layout too. `BOOTMNT` does not implicitly
+install; use `--install-to`. Direct legacy CMake variant options remain available,
+but normal development should use the orchestrating script.
+
+Modern kernel CMake configurations receive `KORAOS_TARGET` and
+`KORAOS_USERFS_DIR`; they only consume the prepared image. The standalone producer
+is `cmake/userfs`. Register user programs in `cmake/userfs.cmake`.
+Cross-target static libraries use LLVM ar/ranlib. Use a fresh build directory
+when changing archive tools in an existing CMake cache.

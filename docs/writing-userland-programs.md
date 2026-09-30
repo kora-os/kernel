@@ -51,14 +51,14 @@ patterns: [`user/hello.c`](../user/hello.c) (minimal),
 
 ## Building it
 
-Register the program in [`CMakeLists.txt`](../CMakeLists.txt), in the
-"User programs" section, next to the others:
+Register the program in [`cmake/userfs.cmake`](../cmake/userfs.cmake), inside the
+`koraos_add_userfs` function, next to the existing registrations:
 
 ```cmake
-add_user_program(greet "${USER_DIR}/greet.c")
+koraos_add_user_program(greet "${USER_DIR}/greet.c")
 ```
 
-That is all. `add_user_program` compiles the source together with the userland
+That is all. `koraos_add_user_program` compiles the source together with the userland
 runtime (`crt0.S` + `syscall.S`) into a standalone **position-independent** ELF
 (`-fPIE -Wl,-pie`), using the same cross toolchain as the kernel:
 
@@ -75,10 +75,10 @@ The linker is told to emit classic `DT_RELA` relocations
 Build as usual (`mtools` is required so the FS image can be assembled):
 
 ```bash
-./build.sh --qemu
+./build.sh --target qemu_virt
 ```
 
-CMake installs `build/user/greet.elf` onto the FAT32 image as `/bin/greet` (the
+CMake installs `build/userfs/aarch64/user/greet.elf` onto the FAT32 image as `/bin/greet` (the
 `.elf` suffix is stripped) and rebuilds the embedded image automatically. See
 [filesystem.md](filesystem.md) for how the image is put together.
 
@@ -87,7 +87,7 @@ CMake installs `build/user/greet.elf` onto the FAT32 image as `/bin/greet` (the
 Boot and use the shell:
 
 ```bash
-./run-qemu.sh
+./run-qemu.sh --target qemu_virt
 ```
 
 ```

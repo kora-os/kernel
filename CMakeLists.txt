@@ -8,19 +8,44 @@ project(KoraOS C CXX ASM)
 # Enable compile_commands.json generation for clangd
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
-# Build configuration
+# Modern configurations select one canonical target. Direct legacy CMake
+# configurations retain the old variant switches and artifact names.
+set(KORAOS_TARGET "" CACHE STRING "Canonical kernel target")
+set_property(CACHE KORAOS_TARGET PROPERTY STRINGS hw_raspi3b hw_raspi4b qemu_raspi3b qemu_virt)
+set(KORAOS_USERFS_DIR "" CACHE PATH "Prepared shared AArch64 userfs directory")
 set(RPI_VERSION "4" CACHE STRING "Physical Raspberry Pi version (3 or 4)")
 set_property(CACHE RPI_VERSION PROPERTY STRINGS 3 4)
+option(BUILD_QEMU_VARIANT "Build kernel image configured for QEMU" ON)
+option(BUILD_VIRT_VARIANT "Build kernel for QEMU AArch64 virt" OFF)
+option(BUILD_HW_VARIANT "Build kernel image configured for physical hardware" ON)
+
+if(KORAOS_TARGET)
+    set(BUILD_QEMU_VARIANT OFF)
+    set(BUILD_VIRT_VARIANT OFF)
+    set(BUILD_HW_VARIANT OFF)
+    if(KORAOS_TARGET STREQUAL "qemu_raspi3b")
+        set(BUILD_QEMU_VARIANT ON)
+        set(RPI_VERSION 3)
+    elseif(KORAOS_TARGET STREQUAL "qemu_virt")
+        set(BUILD_VIRT_VARIANT ON)
+        set(RPI_VERSION 3)
+    elseif(KORAOS_TARGET STREQUAL "hw_raspi3b")
+        set(BUILD_HW_VARIANT ON)
+        set(RPI_VERSION 3)
+    elseif(KORAOS_TARGET STREQUAL "hw_raspi4b")
+        set(BUILD_HW_VARIANT ON)
+        set(RPI_VERSION 4)
+    else()
+        message(FATAL_ERROR "Unknown KORAOS_TARGET '${KORAOS_TARGET}'; choose hw_raspi3b, hw_raspi4b, qemu_raspi3b or qemu_virt.")
+    endif()
+    set(_default_bootmnt "${CMAKE_BINARY_DIR}/boot")
+else()
+    set(_default_bootmnt "/workspace/build/boot")
+endif()
 if(NOT RPI_VERSION MATCHES "^[34]$")
     message(FATAL_ERROR "RPI_VERSION must be 3 or 4; the raspi3b QEMU target always uses Pi 3.")
 endif()
-
-option(BUILD_QEMU_VARIANT "Build kernel image configured for QEMU" ON)
-option(BUILD_VIRT_VARIANT "Build kernel for QEMU AArch64 virt" OFF)
-
-option(BUILD_HW_VARIANT "Build kernel image configured for physical hardware" ON)
-
-set(BOOTMNT "/workspace/build/boot" CACHE PATH "Boot mount directory")
+set(BOOTMNT "${_default_bootmnt}" CACHE PATH "Boot mount directory")
 
 # Directories
 set(SRC_DIR "${CMAKE_CURRENT_SOURCE_DIR}/src")
@@ -33,6 +58,7 @@ set(LINKER_SCRIPT "${SRC_DIR}/linker.ld")
 # fixup.dat boot the Pi 3; start4.elf/fixup4.dat boot the Pi 4 (which has no
 # bootcode.bin). Both DTBs ship so one card serves either board.
 set(BOOT_FIRMWARE_FILES
+    "${CMAKE_CURRENT_SOURCE_DIR}/firmware/LICENCE.broadcom"
     "${CMAKE_CURRENT_SOURCE_DIR}/firmware/bootcode.bin"
     "${CMAKE_CURRENT_SOURCE_DIR}/firmware/start.elf"
     "${CMAKE_CURRENT_SOURCE_DIR}/firmware/fixup.dat"
@@ -57,112 +83,25 @@ file(GLOB LIB_ASM_SOURCES "${LIB_DIR}/*.S" "${LIB_DIR}/*.s")
 
 set(KERNEL_SOURCES ${KERNEL_C_SOURCES} ${KERNEL_CXX_SOURCES} ${KERNEL_ASM_SOURCES} ${LIB_C_SOURCES} ${LIB_ASM_SOURCES})
 
-# ---------------------------------------------------------------------------
-# User programs: standalone position-independent ELF executables built with the
-# same cross toolchain but their own flags and linker settings, then embedded
-# into the kernel image as read-only blobs (looked up via src/user/embedded.c).
-# ---------------------------------------------------------------------------
-set(USER_DIR "${CMAKE_CURRENT_SOURCE_DIR}/user")
-set(USER_BUILD_DIR "${CMAKE_BINARY_DIR}/user")
-file(MAKE_DIRECTORY "${USER_BUILD_DIR}")
-
-# Runtime linked into every user program: entry stub + syscall wrappers.
-set(USER_RUNTIME_SOURCES
-    "${USER_DIR}/crt0.S"
-    "${USER_DIR}/libk/syscall.S"
-)
-
-set(USER_COMPILE_FLAGS
-    --target=aarch64-none-elf
-    -mcpu=cortex-a72
-    -ffreestanding
-    -nostdlib
-    -fno-builtin
-    -fno-stack-protector
-    -mgeneral-regs-only
-    -fPIE
-    -O2
-    -Wall
-    "-I${USER_DIR}"
-)
-
-# -pie produces an ET_DYN image; --pack-dyn-relocs=none forces classic DT_RELA
-# (only R_AARCH64_RELATIVE entries) so the Step 3 loader needs a single
-# relocation path -- no packed DT_RELR.
-set(USER_LINK_FLAGS
-    -nostdlib
-    -fuse-ld=lld
-    -Wl,-pie
-    -Wl,-e,_start
-    -Wl,--pack-dyn-relocs=none
-    -Wl,-z,norelro
-    -Wl,-z,noexecstack
-    # Pack segments on 4 KB instead of the default 64 KB boundaries, so the
-    # loaded image spans a handful of pages rather than tens of them.
-    -Wl,-z,max-page-size=4096
-)
-
-set(USER_PROGRAM_NAMES "")
-set(USER_PROGRAM_ELVES "")
-
-# add_user_program(<name> <source>...) builds user/<...> into
-# ${USER_BUILD_DIR}/<name>.elf and records it for embedding.
-function(add_user_program NAME)
-    set(elf "${USER_BUILD_DIR}/${NAME}.elf")
-    add_custom_command(
-        OUTPUT "${elf}"
-        COMMAND ${CMAKE_C_COMPILER} ${USER_COMPILE_FLAGS} ${USER_LINK_FLAGS}
-                ${USER_RUNTIME_SOURCES} ${ARGN} -o "${elf}"
-        DEPENDS ${USER_RUNTIME_SOURCES} ${ARGN}
-        COMMENT "Building user program ${NAME}.elf (PIE)"
-        VERBATIM
-    )
-    set(_names ${USER_PROGRAM_NAMES})
-    set(_elves ${USER_PROGRAM_ELVES})
-    list(APPEND _names "${NAME}")
-    list(APPEND _elves "${elf}")
-    set(USER_PROGRAM_NAMES "${_names}" PARENT_SCOPE)
-    set(USER_PROGRAM_ELVES "${_elves}" PARENT_SCOPE)
-endfunction()
-
-add_user_program(hello "${USER_DIR}/hello.c")
-add_user_program(init "${USER_DIR}/init.c")
-add_user_program(shell "${USER_DIR}/shell.c")
-add_user_program(echo "${USER_DIR}/echo.c")
-add_user_program(gfxdemo "${USER_DIR}/gfxdemo.c")
-add_user_program(termdemo "${USER_DIR}/termdemo.c")
-add_user_program(ls "${USER_DIR}/ls.c")
-add_user_program(cat "${USER_DIR}/cat.c")
-# EL0 allocation/process lifetime regression fixture shipped in the test rootfs.
-add_user_program(allocprobe "${CMAKE_CURRENT_SOURCE_DIR}/tests/user/allocprobe.c")
-
-# ---------------------------------------------------------------------------
-# Filesystem ramdisk: a FAT32 image built on the host by create-fs-image.sh
-# (mtools) and embedded into the kernel as a read-only blob, served by
-# src/fs/blkdev.c. The userland programs above are installed into /bin on the
-# image and loaded from there at runtime (src/proc/task.c) -- there is no
-# separate embedded-blob registry.
-# ---------------------------------------------------------------------------
-set(FS_ROOT_DIR "${CMAKE_CURRENT_SOURCE_DIR}/fsroot")
-set(FS_IMAGE "${CMAKE_BINARY_DIR}/fs/koraos.img")
-set(FS_IMAGE_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/create-fs-image.sh")
-
-# Rebuild the image whenever any shipped file, any user program, or the builder
-# changes.
-file(GLOB_RECURSE FS_ROOT_FILES "${FS_ROOT_DIR}/*")
-
-add_custom_command(
-    OUTPUT "${FS_IMAGE}"
-    COMMAND "${FS_IMAGE_SCRIPT}" --fsroot "${FS_ROOT_DIR}" --output "${FS_IMAGE}"
-            --bindir "${USER_BUILD_DIR}"
-    DEPENDS ${FS_ROOT_FILES} ${USER_PROGRAM_ELVES} "${FS_IMAGE_SCRIPT}"
-    COMMENT "Building FAT32 ramdisk image koraos.img"
-    VERBATIM
-)
-
-# All kernel variants embed the same rootfs. Produce it once before any kernel
-# target starts, so parallel default/all builds cannot race to format its file.
-add_custom_target(filesystem_image DEPENDS "${FS_IMAGE}")
+# Canonical kernel configurations consume the already prepared immutable
+# image; only the standalone userfs project is a producer for modern builds.
+if(KORAOS_TARGET)
+    if(NOT KORAOS_USERFS_DIR)
+        message(FATAL_ERROR "KORAOS_USERFS_DIR is required; build cmake/userfs first.")
+    endif()
+    get_filename_component(_userfs_dir "${KORAOS_USERFS_DIR}" ABSOLUTE
+        BASE_DIR "${CMAKE_CURRENT_SOURCE_DIR}")
+    set(FS_IMAGE "${_userfs_dir}/koraos.img")
+    if(NOT EXISTS "${FS_IMAGE}" OR IS_DIRECTORY "${FS_IMAGE}")
+        message(FATAL_ERROR "Prepared userfs image not found: ${FS_IMAGE}; build cmake/userfs first.")
+    endif()
+    add_custom_target(filesystem_image DEPENDS "${FS_IMAGE}")
+else()
+    # Compatibility with old direct multi-variant CMake builds.
+    set(FS_IMAGE "${CMAKE_BINARY_DIR}/fs/koraos.img")
+    include("${CMAKE_CURRENT_SOURCE_DIR}/cmake/userfs.cmake")
+    koraos_add_userfs("${CMAKE_CURRENT_SOURCE_DIR}" "${FS_IMAGE}")
+endif()
 
 set(FS_BLOB_ASM "${CMAKE_BINARY_DIR}/fs/fs_blob.S")
 file(GENERATE OUTPUT "${FS_BLOB_ASM}" CONTENT
@@ -247,6 +186,12 @@ function(add_kernel_variant VARIANT)
         set(KVAR_MAP_NAME "${KVAR_OUTPUT_NAME}.map")
     endif()
 
+    if(KORAOS_TARGET)
+        set(KVAR_OUTPUT_NAME kernel)
+        set(KVAR_IMAGE_NAME kernel.img)
+        set(KVAR_MAP_NAME kernel.map)
+    endif()
+
     set(target "kernel_${VARIANT}")
     set(variant_sources ${KERNEL_SOURCES})
     if(KVAR_VIRT)
@@ -290,47 +235,59 @@ function(add_kernel_variant VARIANT)
 
     set(image_path "${CMAKE_BINARY_DIR}/${KVAR_IMAGE_NAME}")
 
-    add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND ${OBJCOPY} -O binary $<TARGET_FILE:${target}> ${image_path}
-        COMMENT "Creating ${KVAR_IMAGE_NAME} binary"
-        BYPRODUCTS ${image_path}
-    )
-
-    add_custom_command(TARGET ${target} POST_BUILD
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/boot
-        COMMAND ${CMAKE_COMMAND} -E copy ${image_path} ${CMAKE_BINARY_DIR}/boot/${KVAR_BOOT_IMAGE_NAME}
-        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/config.txt ${CMAKE_BINARY_DIR}/boot/config.txt
-        COMMENT "Copying ${KVAR_IMAGE_NAME} to local boot directory (${KVAR_BOOT_IMAGE_NAME})"
-    )
-
-    # For hardware builds, also stage the GPU boot firmware and device trees next
-    # to the kernel so the boot partition is complete and serves both boards.
-    if(NOT KVAR_QEMU AND NOT KVAR_VIRT)
+    if(KORAOS_TARGET)
+        # An explicit output restores a deleted image without recompiling the
+        # kernel, and makes hardware installation depend on image generation.
+        add_custom_command(OUTPUT "${image_path}"
+            COMMAND ${OBJCOPY} -O binary $<TARGET_FILE:${target}> "${image_path}"
+            DEPENDS ${target}
+            COMMENT "Creating ${KVAR_IMAGE_NAME} binary"
+            VERBATIM)
+        add_custom_target(image_${VARIANT} ALL DEPENDS "${image_path}")
+        set(image_dependency image_${VARIANT})
+    else()
         add_custom_command(TARGET ${target} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy ${BOOT_FIRMWARE_FILES} ${CMAKE_BINARY_DIR}/boot/
-            COMMENT "Staging Raspberry Pi boot firmware into local boot directory"
-        )
+            COMMAND ${OBJCOPY} -O binary $<TARGET_FILE:${target}> "${image_path}"
+            COMMENT "Creating ${KVAR_IMAGE_NAME} binary"
+            VERBATIM
+            BYPRODUCTS "${image_path}")
+        set(image_dependency ${target})
     endif()
 
-    add_custom_target(install_${VARIANT}
-        COMMAND ${CMAKE_COMMAND} -E make_directory ${BOOTMNT}
-        COMMAND ${CMAKE_COMMAND} -E copy ${image_path} ${BOOTMNT}/${KVAR_BOOT_IMAGE_NAME}
-        COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/config.txt ${BOOTMNT}/config.txt
-        DEPENDS ${target}
-        COMMENT "Copying ${KVAR_IMAGE_NAME} to boot mount: ${BOOTMNT}"
-    )
-
-    # Hardware install also delivers the firmware and device trees (idempotent, so
-    # installing the Pi 3 and Pi 4 builds in turn populates one card for both).
-    if(NOT KVAR_QEMU AND NOT KVAR_VIRT)
-        add_custom_command(TARGET install_${VARIANT} POST_BUILD
-            COMMAND ${CMAKE_COMMAND} -E copy ${BOOT_FIRMWARE_FILES} ${BOOTMNT}/
-            COMMENT "Copying Raspberry Pi boot firmware to boot mount: ${BOOTMNT}"
-        )
+    if(NOT KORAOS_TARGET)
+        add_custom_command(TARGET ${target} POST_BUILD
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${CMAKE_BINARY_DIR}/boot
+            COMMAND ${CMAKE_COMMAND} -E copy ${image_path} ${CMAKE_BINARY_DIR}/boot/${KVAR_BOOT_IMAGE_NAME}
+            COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/config.txt ${CMAKE_BINARY_DIR}/boot/config.txt
+            COMMENT "Copying ${KVAR_IMAGE_NAME} to local boot directory (${KVAR_BOOT_IMAGE_NAME})"
+            VERBATIM)
+        if(NOT KVAR_QEMU AND NOT KVAR_VIRT)
+            add_custom_command(TARGET ${target} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy ${BOOT_FIRMWARE_FILES} ${CMAKE_BINARY_DIR}/boot/
+                COMMENT "Staging Raspberry Pi boot firmware into local boot directory"
+                VERBATIM)
+        endif()
     endif()
 
+    # Canonical builds install hardware only, on explicit request. Compatibility
+    # configurations retain all of their existing install targets.
+    if(NOT KORAOS_TARGET OR (NOT KVAR_QEMU AND NOT KVAR_VIRT))
+        add_custom_target(install_${VARIANT}
+            COMMAND ${CMAKE_COMMAND} -E make_directory ${BOOTMNT}
+            COMMAND ${CMAKE_COMMAND} -E copy ${image_path} ${BOOTMNT}/${KVAR_BOOT_IMAGE_NAME}
+            COMMAND ${CMAKE_COMMAND} -E copy ${CMAKE_CURRENT_SOURCE_DIR}/config.txt ${BOOTMNT}/config.txt
+            DEPENDS ${image_dependency}
+            COMMENT "Copying ${KVAR_IMAGE_NAME} to boot mount: ${BOOTMNT}"
+            VERBATIM)
+        if(NOT KVAR_QEMU AND NOT KVAR_VIRT)
+            add_custom_command(TARGET install_${VARIANT} POST_BUILD
+                COMMAND ${CMAKE_COMMAND} -E copy ${BOOT_FIRMWARE_FILES} ${BOOTMNT}/
+                COMMENT "Copying Raspberry Pi boot firmware to boot mount: ${BOOTMNT}"
+                VERBATIM)
+        endif()
+        set_property(GLOBAL APPEND PROPERTY KERNEL_INSTALL_TARGETS install_${VARIANT})
+    endif()
     set_property(GLOBAL APPEND PROPERTY KERNEL_VARIANT_TARGETS ${target})
-    set_property(GLOBAL APPEND PROPERTY KERNEL_INSTALL_TARGETS install_${VARIANT})
 endfunction()
 
 if(BUILD_QEMU_VARIANT)
