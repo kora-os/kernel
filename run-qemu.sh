@@ -10,6 +10,7 @@ case "$TARGET" in
     virt) KERNEL_IMG="$BUILD_DIR/kernel-virt.img"
           MACHINE_ARGS=(-M virt,gic-version=2,highmem=off -cpu cortex-a72 -smp 1 -nic none -global virtio-mmio.force-legacy=false -m "${KORA_QEMU_RAM:-256M}")
           if [[ "${KORA_QEMU_RAMFB:-1}" == "1" ]]; then MACHINE_ARGS+=(-device ramfb); fi
+          if [[ "${KORA_QEMU_KEYBOARD:-1}" == "1" ]]; then MACHINE_ARGS+=(-device virtio-keyboard-device); fi
           if [[ -n "${KORA_QEMU_DISK:-}" ]]; then
               [[ -f "$KORA_QEMU_DISK" ]] || { echo "Missing $KORA_QEMU_DISK" >&2; exit 1; }
               MACHINE_ARGS+=(-drive "if=none,id=root,format=raw,file=$KORA_QEMU_DISK,readonly=${KORA_QEMU_DISK_READONLY:-on}" -device virtio-blk-device,drive=root)
