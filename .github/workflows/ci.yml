@@ -58,7 +58,7 @@ jobs:
         run: tests/run-qemu-smoke.py --machine virt --kernel build-virt/kernel-virt.img --out build-virt/qemu-smoke
 
       - name: QEMU virt external disk smoke test
-        run: tests/run-qemu-smoke.py --machine virt --kernel build-virt/kernel-virt.img --disk build-virt/fs/koraos.img --out build-virt/qemu-disk
+        run: tests/run-qemu-smoke.py --machine virt --kernel build-virt/kernel-virt.img --keyboard --disk build-virt/fs/koraos.img --out build-virt/qemu-disk
 
       - name: Build Raspberry Pi 3 kernel
         run: RPI_VERSION=3 ./build.sh --hw --release --build-dir build-rpi3
