@@ -1,4 +1,7 @@
 #include "video/framebuffer.h"
+#if defined(KORAOS_VIRT) && defined(KORAOS_RAMFB)
+#include "video/ramfb.h"
+#endif
 #ifndef KORAOS_VIRT
 #include "drivers/mailbox.h"
 #endif
