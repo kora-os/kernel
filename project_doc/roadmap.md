@@ -36,3 +36,13 @@ This roadmap outlines the minimum feature set needed to turn the current boot + 
 
 This plan should evolve alongside implementation progress; update the roadmap as we discover new requirements or validate assumptions. Until we lock down the interrupt and console stack, keep the focus on instrumentation and observability so debugging remains manageable.
 
+
+## QEMU virt development platform
+
+An independent AArch64 virt target supports platform discovery, PL011/GICv2,
+generic timer, ramfb, VirtIO MMIO block storage and keyboard. It preserves the
+Pi hardware and raspi3b targets and runs the existing FAT32/EL0 environment.
+See `virt-plan.md` for the completed PR bundles and validation. Automated
+profiles cover embedded/external rootfs, graphics/serial, RAM sizes, EL2 entry,
+and repeated allocation/process lifetime. Scheduler and writable filesystem
+work remain future subsystems; this platform provides their development target.

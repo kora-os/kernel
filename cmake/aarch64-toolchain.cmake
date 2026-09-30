@@ -5,6 +5,28 @@ set(CMAKE_SYSTEM_PROCESSOR aarch64)
 # Target triple
 set(TARGET_TRIPLE aarch64-none-elf)
 
+# Prefer LLVM archive tools for cross-target ELF libraries. Apple's default
+# ar/ranlib can produce empty archives from AArch64 ELF objects; select tools
+# before project() chooses platform defaults. Preserve explicit alternatives.
+if(NOT CMAKE_AR OR (CMAKE_HOST_APPLE AND CMAKE_AR STREQUAL "/usr/bin/ar"))
+    find_program(KORAOS_LLVM_AR llvm-ar
+        PATHS /opt/homebrew/opt/llvm/bin /usr/local/opt/llvm/bin /usr/bin)
+    if(KORAOS_LLVM_AR)
+        set(CMAKE_AR "${KORAOS_LLVM_AR}" CACHE FILEPATH "ELF archive tool" FORCE)
+    elseif(CMAKE_HOST_APPLE)
+        message(FATAL_ERROR "llvm-ar is required for bare-metal ELF libraries on macOS.")
+    endif()
+endif()
+if(NOT CMAKE_RANLIB OR (CMAKE_HOST_APPLE AND CMAKE_RANLIB STREQUAL "/usr/bin/ranlib"))
+    find_program(KORAOS_LLVM_RANLIB llvm-ranlib
+        PATHS /opt/homebrew/opt/llvm/bin /usr/local/opt/llvm/bin /usr/bin)
+    if(KORAOS_LLVM_RANLIB)
+        set(CMAKE_RANLIB "${KORAOS_LLVM_RANLIB}" CACHE FILEPATH "ELF archive index tool" FORCE)
+    elseif(CMAKE_HOST_APPLE)
+        message(FATAL_ERROR "llvm-ranlib is required for bare-metal ELF libraries on macOS.")
+    endif()
+endif()
+
 # Specify the cross compilers
 set(CMAKE_C_COMPILER clang)
 set(CMAKE_CXX_COMPILER clang++)

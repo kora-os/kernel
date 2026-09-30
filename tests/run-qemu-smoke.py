@@ -35,14 +35,14 @@ class Failure(Exception):
 
 
 class Qemu:
-    def __init__(self, qemu, kernel, outdir, machine="raspi3b", ram="256M", extra=()):
+    def __init__(self, qemu, kernel, outdir, machine="raspi3b", ram="256M", extra=(), el2=False):
         self.outdir = outdir
         self.log = open(os.path.join(outdir, "serial.log"), "wb")
         self.pending = b""  # output not yet consumed by expect()
         # The monitor socket path is relative to QEMU's working directory:
         # UNIX socket paths are limited to ~104 bytes and temp dirs are long.
         machine_args = ["-M", "raspi3b"] if machine == "raspi3b" else [
-            "-M", "virt,gic-version=2,highmem=off", "-cpu", "cortex-a72",
+            "-M", "virt,gic-version=2,highmem=off" + (",virtualization=on" if el2 else ""), "-cpu", "cortex-a72",
             "-smp", "1", "-nic", "none", "-global", "virtio-mmio.force-legacy=false", "-m", ram]
         self.proc = subprocess.Popen(
             [qemu, *machine_args, *extra, "-kernel", kernel,
@@ -171,7 +171,7 @@ def near(actual, expected, tolerance=8):
 PROMPT = rb"^\$ "
 
 
-def run(q, graphics=True, keyboard=False):
+def run(q, graphics=True, keyboard=False, repeat=0):
     """Yield (name, check) steps; each check raises Failure on error."""
 
     def boot():
@@ -241,6 +241,15 @@ def run(q, graphics=True, keyboard=False):
         q.expect(rb"\[serial -> screen terminal")
     yield "irqs shows the system tick and the UART interrupt", irqs
 
+    if repeat:
+        def allocation_lifetime():
+            for _ in range(repeat):
+                q.send("allocprobe\r")
+                q.expect(rb"allocprobe: heap checked")
+                q.expect(rb"exited with 0")
+                q.expect(PROMPT)
+        yield "repeated EL0 heap and nested-process lifetime (%d runs)" % repeat, allocation_lifetime
+
     if keyboard:
         def keyboard_input():
             # Typed entirely through the virtual device, including Shift,
@@ -292,6 +301,9 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--machine", choices=("raspi3b", "virt"), default="raspi3b")
     parser.add_argument("--ram", default="256M")
+    parser.add_argument("--el2", action="store_true", help="enter virt via EL2 before dropping to EL1")
+    parser.add_argument("--repeat", type=int, default=0, help="repeat 64 KiB EL0 heap/nested-process probe")
+    parser.add_argument("--expect-root-failure", action="store_true", help="require a configured disk mount failure")
     parser.add_argument("--keyboard", action="store_true", help="inject keys through a VirtIO keyboard")
     parser.add_argument("--disk", help="external bare FAT32 image for virt")
     parser.add_argument("--disk-writable", action="store_true", help="enable raw writes to the supplied test disk")
@@ -300,6 +312,12 @@ def main():
     parser.add_argument("--qemu", default="qemu-system-aarch64")
     parser.add_argument("--out", default=os.path.join(ROOT, "build", "qemu-smoke"))
     args = parser.parse_args()
+    if args.repeat < 0 or args.repeat > 2000:
+        parser.error("--repeat must be between 0 and 2000")
+    if args.el2 and args.machine != "virt":
+        parser.error("--el2 requires virt")
+    if args.expect_root_failure and not args.disk:
+        parser.error("--expect-root-failure requires --disk")
 
     if args.kernel is None:
         args.kernel = os.path.join(ROOT, "build", "kernel-virt.img" if args.machine == "virt" else "kernel8.img")
@@ -319,14 +337,19 @@ def main():
         extra += ["-drive", "if=none,id=root,format=raw,file=%s,readonly=%s" %
                   (os.path.abspath(args.disk), "off" if args.disk_writable else "on"),
                   "-device", "virtio-blk-device,drive=root"]
-    q = Qemu(args.qemu, os.path.abspath(args.kernel), os.path.abspath(args.out), args.machine, args.ram, extra)
+    q = Qemu(args.qemu, os.path.abspath(args.kernel), os.path.abspath(args.out), args.machine, args.ram, extra, args.el2)
     failed = False
     try:
         if args.disk:
             q.expect(rb"\[blkdev\] using VirtIO disk")
+        if args.expect_root_failure:
+            q.expect(rb"fat32: mount failed:")
+            q.expect(rb"kernel: failed to load /bin/init")
+            print("ok   - configured invalid disk fails without ramdisk fallback")
+            return
         if args.keyboard:
             q.expect(rb"\[virtio-input\] keyboard ready")
-        for name, check in run(q, not args.no_graphics, args.keyboard):
+        for name, check in run(q, not args.no_graphics, args.keyboard, args.repeat):
             try:
                 check()
                 print("ok   - " + name)

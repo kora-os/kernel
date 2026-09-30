@@ -18,7 +18,7 @@ flat identity mapping and cooperative process model.
   external disk boot, bounded error paths, embedded-rootfs fallback.
 - [x] 4. Input: VirtIO keyboard, modifiers and terminal editing/scrollback;
   monitor-injected keys and serial fallback.
-- [ ] 5. CI/docs: virt regression profiles on PRs and main pushes, artifacts,
+- [x] 5. CI/docs: virt regression profiles on PRs and main pushes, artifacts,
   allocator/process repetition, retained raspi3b/Pi builds and usage docs.
 
 ## Delivery workflow
@@ -80,3 +80,20 @@ key translation, IRQ framing, and failed setup. Actual QEMU monitor key injectio
 runs `echo Ab` through the keyboard with Shift release, Backspace and Enter,
 then exercises scrollback and the full external-rootfs/ramfb smoke. Milestone 3
 upstream PR #40 merged; fork main synchronized.
+
+### Milestone 5 validation
+
+All four final virt profiles passed locally: embedded graphics (64 allocation
+probes), 128 MiB external disk/keyboard/graphics (256 probes), serial-only
+64 MiB (32 probes), and EL2 entry (32 probes). Invalid configured disk failed
+without fallback. All host sanitizer suites passed. Clean default and combined
+three-family builds passed, as did Pi 3/4 builds and raspi3b full smoke. Target
+selection now keeps raspi3b on Pi 3 independently of the hardware board;
+separate Circle libraries, shared rootfs dependency and LLVM archives fix
+combined builds. Independent review found no blocking findings. Milestone 4
+upstream PR #41 merged and fork main synchronized before this final PR.
+
+Merged implementation PRs: [boot #38](https://github.com/kora-os/kernel/pull/38),
+[ramfb #39](https://github.com/kora-os/kernel/pull/39),
+[storage #40](https://github.com/kora-os/kernel/pull/40),
+[keyboard #41](https://github.com/kora-os/kernel/pull/41).

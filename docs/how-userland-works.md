@@ -84,19 +84,27 @@ currently does nothing, there is nothing to switch to.
 
 The MMU ([`src/mm/mmu.c`](../src/mm/mmu.c)) installs a **flat identity map of the
 low 4 GB** with 2 MB blocks: **virtual address == physical address**,
-everywhere. There are exactly three kinds of block:
+everywhere. The mappings distinguish code, ordinary RAM, coherent RAM and devices:
 
 | Region | Covers | EL1 | EL0 | Executable |
 |--------|--------|-----|-----|------------|
-| code   | kernel + statically-linked text (below `text_end`) | read-only | read-only | yes |
+| code   | kernel/static text blocks, bounded by the target load address and `text_end` | read-only | read-only | yes |
 | normal | the rest of RAM (the page pool, kernel data/stack/heap, the page tables, loaded programs) | read/write | **read/write** | at EL0 only |
-| device | MMIO at/above the peripheral base | read/write | read/write | no |
+| coherent | DMA pool/framebuffer (Normal non-cacheable) | read/write | read/write | yes |
+| device | platform MMIO outside the selected RAM window | read/write | read/write | no |
+
+On virt, RAM starts at `0x40000000`; the DTB supplies its size and device
+locations. Code mappings cover the aligned kernel text range, while other RAM
+holds loaded EL0 programs. Coherent DMA/framebuffer blocks are Normal
+non-cacheable memory. The allocator still uses up to 16 MiB after the image,
+clamped to RAM and excluding DTB/reserved regions. These platform differences
+preserve the same flat, open memory model and process ABI.
 
 The only hardware-enforced protections are:
 
 - the **code region is read-only**, so nothing can scribble over kernel or
   static program text; and
-- EL0-writable pages are forced **PXN** (privileged-execute-never), which is why
+- ordinary EL0-writable RAM pages are forced **PXN** (privileged-execute-never), which is why
   a program loaded into normal RAM runs at EL0 but the *kernel* cannot execute
   it, and why the kernel's own code lives in the separate read-only code block.
 

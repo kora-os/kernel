@@ -9,7 +9,11 @@ project(KoraOS C CXX ASM)
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 # Build configuration
-set(RPI_VERSION "4" CACHE STRING "Raspberry Pi version (3 or 4)")
+set(RPI_VERSION "4" CACHE STRING "Physical Raspberry Pi version (3 or 4)")
+set_property(CACHE RPI_VERSION PROPERTY STRINGS 3 4)
+if(NOT RPI_VERSION MATCHES "^[34]$")
+    message(FATAL_ERROR "RPI_VERSION must be 3 or 4; the raspi3b QEMU target always uses Pi 3.")
+endif()
 
 option(BUILD_QEMU_VARIANT "Build kernel image configured for QEMU" ON)
 option(BUILD_VIRT_VARIANT "Build kernel for QEMU AArch64 virt" OFF)
@@ -129,6 +133,8 @@ add_user_program(gfxdemo "${USER_DIR}/gfxdemo.c")
 add_user_program(termdemo "${USER_DIR}/termdemo.c")
 add_user_program(ls "${USER_DIR}/ls.c")
 add_user_program(cat "${USER_DIR}/cat.c")
+# EL0 allocation/process lifetime regression fixture shipped in the test rootfs.
+add_user_program(allocprobe "${CMAKE_CURRENT_SOURCE_DIR}/tests/user/allocprobe.c")
 
 # ---------------------------------------------------------------------------
 # Filesystem ramdisk: a FAT32 image built on the host by create-fs-image.sh
@@ -153,6 +159,10 @@ add_custom_command(
     COMMENT "Building FAT32 ramdisk image koraos.img"
     VERBATIM
 )
+
+# All kernel variants embed the same rootfs. Produce it once before any kernel
+# target starts, so parallel default/all builds cannot race to format its file.
+add_custom_target(filesystem_image DEPENDS "${FS_IMAGE}")
 
 set(FS_BLOB_ASM "${CMAKE_BINARY_DIR}/fs/fs_blob.S")
 file(GENERATE OUTPUT "${FS_BLOB_ASM}" CONTENT
@@ -182,7 +192,6 @@ set(C_FLAGS
     ${COMMON_FLAGS}
     -Wall
     -mgeneral-regs-only
-    -DRPI_VERSION=${RPI_VERSION}
     -DPRINTF_LONG_SUPPORT
 )
 
@@ -219,7 +228,7 @@ endif()
 
 function(add_kernel_variant VARIANT)
     set(options QEMU VIRT)
-    set(oneValueArgs OUTPUT_NAME IMAGE_NAME BOOT_IMAGE_NAME MAP_NAME)
+    set(oneValueArgs BOARD OUTPUT_NAME IMAGE_NAME BOOT_IMAGE_NAME MAP_NAME)
     cmake_parse_arguments(KVAR "${options}" "${oneValueArgs}" "" ${ARGN})
 
     if(NOT KVAR_OUTPUT_NAME)
@@ -246,6 +255,7 @@ function(add_kernel_variant VARIANT)
         list(FILTER variant_sources EXCLUDE REGEX "/(platform/|drivers/virtio)")
     endif()
     add_executable(${target} ${variant_sources})
+    add_dependencies(${target} filesystem_image)
 
     set_target_properties(${target} PROPERTIES
         OUTPUT_NAME ${KVAR_OUTPUT_NAME}
@@ -261,7 +271,10 @@ function(add_kernel_variant VARIANT)
         $<$<COMPILE_LANGUAGE:ASM>:${ASM_FLAGS}>
     )
 
-    target_compile_definitions(${target} PRIVATE RPI_VERSION=${RPI_VERSION})
+    if(NOT KVAR_BOARD MATCHES "^[34]$")
+        message(FATAL_ERROR "Kernel variant ${VARIANT} requires BOARD 3 or 4.")
+    endif()
+    target_compile_definitions(${target} PRIVATE RPI_VERSION=${KVAR_BOARD})
     if(KVAR_VIRT)
         target_compile_definitions(${target} PRIVATE KORAOS_VIRT KORAOS_RAMFB KORAOS_VIRTIO_BLK KORAOS_VIRTIO_INPUT)
         target_link_options(${target} PRIVATE --defsym=KERNEL_LOAD_ADDRESS=0x40080000)
@@ -322,7 +335,7 @@ endfunction()
 
 if(BUILD_QEMU_VARIANT)
     add_kernel_variant(qemu
-        QEMU
+        QEMU BOARD 3
         OUTPUT_NAME kernel8
         IMAGE_NAME kernel8.img
         BOOT_IMAGE_NAME kernel8-qemu.img
@@ -331,7 +344,7 @@ if(BUILD_QEMU_VARIANT)
 endif()
 
 if(BUILD_VIRT_VARIANT)
-    add_kernel_variant(virt QEMU VIRT
+    add_kernel_variant(virt QEMU VIRT BOARD 3
         OUTPUT_NAME kernel-virt
         IMAGE_NAME kernel-virt.img
         BOOT_IMAGE_NAME kernel-virt.img
@@ -340,6 +353,7 @@ endif()
 
 if(BUILD_HW_VARIANT)
     add_kernel_variant(hw
+        BOARD ${RPI_VERSION}
         OUTPUT_NAME kernel8-hw
         IMAGE_NAME kernel8-hw.img
         BOOT_IMAGE_NAME kernel8-rpi${RPI_VERSION}.img
@@ -380,76 +394,76 @@ list(JOIN enabled_variants ", " enabled_variants_str)
 # a DWC2, is not supported; it is normally the power input anyway).
 # ---------------------------------------------------------------------------
 set(CIRCLE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/third_party/circle")
-file(GLOB_RECURSE CIRCLE_SOURCES "${CIRCLE_DIR}/lib/*.cpp")
-if(RPI_VERSION LESS 4)
-    list(FILTER CIRCLE_SOURCES EXCLUDE REGEX "/(usb/xhci[a-z]*|bcmpciehostbridge|devicetreeblob)\\.cpp$")
-else()
-    list(FILTER CIRCLE_SOURCES EXCLUDE REGEX "/usb/dwhci[a-z]*\\.cpp$")
-endif()
-# KoraOS HAL-bridge adapters (CInterruptSystem/CTimer/CLogger/memory backed by
-# KoraOS) are compiled together with the vendored code so they share Circle's
-# include path and build flags while also seeing KoraOS headers.
+file(GLOB_RECURSE CIRCLE_ALL_SOURCES "${CIRCLE_DIR}/lib/*.cpp")
+# Each board needs its own controller sources and RASPPI definition. Sharing
+# one library would couple the retained raspi3b target to the hardware board.
 file(GLOB CIRCLE_BRIDGE_SOURCES "${SRC_DIR}/circle/*.cpp")
-if(BUILD_QEMU_VARIANT OR BUILD_HW_VARIANT)
-add_library(circle_usb STATIC ${CIRCLE_SOURCES} ${CIRCLE_BRIDGE_SOURCES})
-target_include_directories(circle_usb PRIVATE "${CIRCLE_DIR}/include" "${INCLUDE_DIR}")
-target_compile_options(circle_usb PRIVATE
-    --target=aarch64-none-elf
-    -mcpu=cortex-a72
-    -ffreestanding
-    -nostdlib
-    -fno-builtin
-    -fno-stack-protector
-    # NOTE: unlike the rest of the kernel, Circle is NOT built -mgeneral-regs-only:
-    # CString unconditionally compiles a floating-point %f path, and clang may
-    # emit NEON elsewhere. EL1 FP/NEON access must be enabled before any Circle
-    # code runs (done in 3b-ii); the USB paths themselves never format floats.
-    -nostdinc++
-    -fno-exceptions
-    -fno-rtti
-    -fno-threadsafe-statics
-    -std=c++17
-    -DAARCH=64
-    -DRASPPI=${RPI_VERSION}
-    # No C standard library underneath Circle here; this also strips CString's
-    # floating-point %f path, so the kernel stays integer-only (-mgeneral-regs-only).
-    -DSTDLIB_SUPPORT=0
-    # Build only the HID keyboard device driver from Circle's USB device factory;
-    # every other class (mouse, gamepads, storage, audio, net, ...) is excluded so
-    # we do not have to vendor those drivers and their dependencies.
-    -DEXCLUDE_USB_AUDIO
-    -DEXCLUDE_USB_BLUETOOTH
-    -DEXCLUDE_USB_GAMEPAD
-    -DEXCLUDE_USB_MIDI
-    -DEXCLUDE_USB_MOUSE
-    -DEXCLUDE_USB_NET
-    -DEXCLUDE_USB_PRINTER
-    -DEXCLUDE_USB_SERIAL
-    -DEXCLUDE_USB_STORAGE
-    -DEXCLUDE_USB_TOUCHSCREEN
-    # Vendored third-party code: do not enforce KoraOS's warning policy on it.
-    -Wno-everything
-)
-
-# USB keyboard layout, one of Circle's keymaps (lib/input/keymap_*.h). Circle
-# itself defaults to DE; KoraOS defaults to US. Change with -DKORAOS_KEYMAP=IT.
 set(KORAOS_KEYMAP "US" CACHE STRING "USB keyboard layout: US, UK, DE, FR, IT, ES or DV")
-target_compile_definitions(circle_usb PRIVATE DEFAULT_KEYMAP="${KORAOS_KEYMAP}")
-
-# Link the Circle USB library (vendored stack + KoraOS bridge) into every kernel
-# variant. It references KoraOS symbols (irq_connect, the timer helpers, the
-# frame allocator, printf) which are provided by the kernel objects at link time.
-get_property(_circle_link_targets GLOBAL PROPERTY KERNEL_VARIANT_TARGETS)
-foreach(_t ${_circle_link_targets})
-    if(NOT _t STREQUAL "kernel_virt")
-        target_link_libraries(${_t} PRIVATE circle_usb)
+function(add_circle_library NAME BOARD)
+    set(circle_sources ${CIRCLE_ALL_SOURCES})
+    if(BOARD LESS 4)
+        list(FILTER circle_sources EXCLUDE REGEX "/(usb/xhci[a-z]*|bcmpciehostbridge|devicetreeblob)\\.cpp$")
+    else()
+        list(FILTER circle_sources EXCLUDE REGEX "/usb/dwhci[a-z]*\\.cpp$")
     endif()
-endforeach()
+    add_library(${NAME} STATIC ${circle_sources} ${CIRCLE_BRIDGE_SOURCES})
+    target_include_directories(${NAME} PRIVATE "${CIRCLE_DIR}/include" "${INCLUDE_DIR}")
+    target_compile_definitions(${NAME} PRIVATE
+        RASPPI=${BOARD} RPI_VERSION=${BOARD} DEFAULT_KEYMAP="${KORAOS_KEYMAP}")
+    target_compile_options(${NAME} PRIVATE
+        --target=aarch64-none-elf
+        -mcpu=cortex-a72
+        -ffreestanding
+        -nostdlib
+        -fno-builtin
+        -fno-stack-protector
+        # NOTE: unlike the rest of the kernel, Circle is NOT built -mgeneral-regs-only:
+        # CString unconditionally compiles a floating-point %f path, and clang may
+        # emit NEON elsewhere. EL1 FP/NEON access must be enabled before any Circle
+        # code runs (done in 3b-ii); the USB paths themselves never format floats.
+        -nostdinc++
+        -fno-exceptions
+        -fno-rtti
+        -fno-threadsafe-statics
+        -std=c++17
+        -DAARCH=64
+        # No C standard library underneath Circle here; this also strips CString's
+        # floating-point %f path, so the kernel stays integer-only (-mgeneral-regs-only).
+        -DSTDLIB_SUPPORT=0
+        # Build only the HID keyboard device driver from Circle's USB device factory;
+        # every other class (mouse, gamepads, storage, audio, net, ...) is excluded so
+        # we do not have to vendor those drivers and their dependencies.
+        -DEXCLUDE_USB_AUDIO
+        -DEXCLUDE_USB_BLUETOOTH
+        -DEXCLUDE_USB_GAMEPAD
+        -DEXCLUDE_USB_MIDI
+        -DEXCLUDE_USB_MOUSE
+        -DEXCLUDE_USB_NET
+        -DEXCLUDE_USB_PRINTER
+        -DEXCLUDE_USB_SERIAL
+        -DEXCLUDE_USB_STORAGE
+        -DEXCLUDE_USB_TOUCHSCREEN
+        # Vendored third-party code: do not enforce KoraOS's warning policy on it.
+        -Wno-everything
+    )
+endfunction()
 
-endif() # Raspberry Pi Circle libraries
+if(BUILD_QEMU_VARIANT OR (BUILD_HW_VARIANT AND RPI_VERSION STREQUAL "3"))
+    add_circle_library(circle_usb_rpi3 3)
+endif()
+if(BUILD_HW_VARIANT AND RPI_VERSION STREQUAL "4")
+    add_circle_library(circle_usb_rpi4 4)
+endif()
+if(BUILD_QEMU_VARIANT)
+    target_link_libraries(kernel_qemu PRIVATE circle_usb_rpi3)
+endif()
+if(BUILD_HW_VARIANT)
+    target_link_libraries(kernel_hw PRIVATE circle_usb_rpi${RPI_VERSION})
+endif()
+# QEMU virt uses independent VirtIO input and never links Circle.
 
 # Print configuration
-message(STATUS "Building for Raspberry Pi ${RPI_VERSION}")
+message(STATUS "Physical hardware board: Raspberry Pi ${RPI_VERSION}; QEMU raspi3b board: Pi 3")
 message(STATUS "Boot mount directory: ${BOOTMNT}")
 message(STATUS "Compiler: ${CMAKE_C_COMPILER}")
 message(STATUS "Linker script: ${LINKER_SCRIPT}")

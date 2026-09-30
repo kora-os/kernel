@@ -4,7 +4,7 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
 
 ## Project Snapshot
 - **Target**: QEMU AArch64 virt (independent development target), plus Bare-metal Raspberry Pi kernel (Pi 3 via QEMU raspi3b, Pi 4 hardware)
-- **Current Capabilities**: Boot flow and UART console bring-up verified on QEMU and real hardware
+- **Current Capabilities**: EL0/FAT32 console, Pi USB keyboards; virt PL011/GICv2, ramfb, VirtIO storage/input and CI development profiles
 - **Toolchain**: LLVM/Clang cross-compilation managed by CMake (`./build.sh`), legacy Makefile retained for compatibility
 
 ## Where To Look
@@ -18,6 +18,8 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
 - Follow the clang-flavored C style already in the tree (four-space indent, same-line braces, snake_case identifiers).
 - Keep headers self-contained; prefer `const` pointers for memory-mapped peripherals.
 - Build via `./build.sh` to refresh `build/compile_commands.json` for clangd.
+- Use `build.sh --virt` and `run-qemu.sh --virt` for independent development;
+  raspi3b remains `--qemu` and `run-qemu.sh` (its board selection is always Pi 3).
 - Use `run-qemu.sh` for rapid UART smoke tests; see the developer guide for hardware installation steps.
 - Documentation lives under `docs/`; do not store temporary todos there—use `project_doc/` for roadmap-level planning instead.
 
