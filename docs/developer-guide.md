@@ -165,7 +165,7 @@ FAT32 root filesystem using PL011, GICv2 and the architectural timer:
 ```bash
 ./build.sh --virt --build-dir build-virt
 BUILD_DIR=build-virt ./run-qemu.sh --virt
-tests/run-qemu-smoke.py --machine virt --kernel build-virt/kernel-virt.img --no-graphics --out build-virt/qemu-smoke
+tests/run-qemu-smoke.py --machine virt --kernel build-virt/kernel-virt.img --out build-virt/qemu-smoke
 ```
 
 The initial profile is one cortex-a72 CPU, GICv2, TCG, and 256 MiB RAM below
@@ -176,5 +176,9 @@ of this profile (QEMU firmware DTB placement can overlap the image). Unsupported
 access. Pi GPIO, mailboxes and Circle USB are excluded from virt. The serial
 line starts on the shell; Ctrl-T selects the debug console, where `irqs`
 reports timer and UART interrupt counters. Hardware and raspi3b commands and
-artifacts retain their existing meanings. Graphics and VirtIO devices are
-tracked in `project_doc/virt-plan.md` as separate milestones.
+artifacts retain their existing meanings. The launcher attaches `ramfb` by default. `KORA_QEMU_FB=1` shows a display;
+set `KORA_QEMU_DISPLAY=gtk` on Linux (default `cocoa` on macOS). The existing
+1024x768 XRGB8888 framebuffer console and `fb_info` syscall work on virt.
+`KORA_QEMU_RAMFB=0` omits the device and leaves a usable serial shell. CI checks
+terminal colors and userland framebuffer pixels. VirtIO devices are tracked in
+`project_doc/virt-plan.md` as separate milestones.

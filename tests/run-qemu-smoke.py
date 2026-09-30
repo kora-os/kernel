@@ -288,7 +288,8 @@ def main():
                  % args.kernel)
     os.makedirs(args.out, exist_ok=True)
 
-    q = Qemu(args.qemu, os.path.abspath(args.kernel), os.path.abspath(args.out), args.machine, args.ram)
+    extra = ["-device", "ramfb"] if args.machine == "virt" and not args.no_graphics else []
+    q = Qemu(args.qemu, os.path.abspath(args.kernel), os.path.abspath(args.out), args.machine, args.ram, extra)
     failed = False
     try:
         for name, check in run(q, not args.no_graphics):
