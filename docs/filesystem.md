@@ -12,9 +12,9 @@ embedded in the kernel. QEMU virt can instead mount one attached VirtIO MMIO
 block disk. No SD/eMMC driver exists yet.
 
 ```
-create-fs-image.sh  ──(mtools)──▶  build/fs/koraos.img  ──(.incbin)──▶  kernel image
+create-fs-image.sh  ──(mtools)──▶  build/userfs/aarch64/koraos.img  ──(.incbin)──▶  kernel image
        ▲                                                                    │
-   fsroot/  +  build/user/*.elf                                    _koraos_fs_start/_end
+   fsroot/  +  build/userfs/aarch64/user/*.elf                                    _koraos_fs_start/_end
 ```
 
 - [`create-fs-image.sh`](../create-fs-image.sh) formats a bare FAT32 volume
@@ -22,10 +22,11 @@ create-fs-image.sh  ──(mtools)──▶  build/fs/koraos.img  ──(.incbin
   populates it. It requires **mtools** (`mformat`, `mcopy`); see the
   [developer guide](developer-guide.md).
 - Everything under [`fsroot/`](../fsroot) is mirrored into the image root.
-- Each built user program (`build/user/<name>.elf`) is installed as
+- Each built user program (`build/userfs/aarch64/user/<name>.elf`) is installed as
   `/bin/<name>` (the `.elf` suffix is stripped, so programs are spawned by bare
   name).
-- CMake runs the script at build time and `.incbin`s `koraos.img` into the
+- The standalone userfs producer (`cmake/userfs`) runs the script once; each
+  kernel configuration `.incbin`s the prepared `koraos.img` into the
   kernel's read-only data, exposing `_koraos_fs_start` / `_koraos_fs_end`. The
   image is rebuilt whenever anything in `fsroot/` or any user program changes.
 
@@ -98,8 +99,8 @@ Each layer has a clean seam:
 ## VirtIO root disk on virt
 
 ```bash
-./build.sh --virt --build-dir build-virt
-KORA_QEMU_DISK=build-virt/fs/koraos.img BUILD_DIR=build-virt ./run-qemu.sh --virt
+./build.sh --target qemu_virt
+KORA_QEMU_DISK=build/userfs/aarch64/koraos.img ./run-qemu.sh --target qemu_virt
 ```
 
 Attach one bare FAT32 volume (BPB at sector zero, without MBR/GPT). The image
@@ -111,3 +112,14 @@ FAT32 and file syscalls remain read-only. The driver's capacity is bounded by
 the current 32-bit sector API. Missing disks use the embedded root; a configured
 broken disk does not silently fall back. Timed-out devices retain DMA buffers
 and reject subsequent requests until reboot.
+
+## Shared producer and dependencies
+
+All current boards share AArch64 userland and the syscall ABI, so one userfs
+artifact serves all four kernels and Debug/Release configurations. User headers,
+program sources, runtime assembly and added/removed fsroot files trigger updates.
+Image generation is atomic. Kernels depend on the prepared image and reassemble
+their blob when it changes. `--userfs-only` builds it alone; `--userfs-dir` consumes
+an explicitly prepared artifact without rebuilding. A future userland ISA/ABI or
+configuration change needs a distinct artifact, rather than sharing incompatible
+binaries.
