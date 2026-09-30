@@ -43,7 +43,7 @@ class Qemu:
         # UNIX socket paths are limited to ~104 bytes and temp dirs are long.
         machine_args = ["-M", "raspi3b"] if machine == "raspi3b" else [
             "-M", "virt,gic-version=2,highmem=off", "-cpu", "cortex-a72",
-            "-smp", "1", "-m", ram]
+            "-smp", "1", "-nic", "none", "-m", ram]
         self.proc = subprocess.Popen(
             [qemu, *machine_args, *extra, "-kernel", kernel,
              "-serial", "stdio", "-display", "none",
