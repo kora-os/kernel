@@ -213,6 +213,26 @@ def run(q):
         q.expect(rb"\[serial -> screen terminal")
     yield "Ctrl-T reaches the kernel debug console and back", debug_console
 
+    def irqs():
+        q.send("\x14")
+        q.expect(rb"koraos> ")
+        q.send("irqs\r")
+        q.expect(rb"^controller: BCM2835 legacy")
+        m = q.expect(rb"^systick: (\d+) ticks, uptime (\d+)\.(\d+) s")
+        ticks = int(m.group(1))
+        uptime = int(m.group(2)) + int(m.group(3)) / 1000
+        # 100 Hz, started a little after the counter: never ahead of uptime.
+        if ticks == 0 or ticks > uptime * 100 + 1:
+            raise Failure("systick %d ticks after %.3f s uptime" % (ticks, uptime))
+        # Everything typed so far reached the kernel through this interrupt.
+        m = q.expect(rb"^\s+\d+\s+(\d+)\s+uart \(PL011\)")
+        if int(m.group(1)) == 0:
+            raise Failure("the UART receive interrupt never fired")
+        q.expect(rb"koraos> ")
+        q.send("\x14")
+        q.expect(rb"\[serial -> screen terminal")
+    yield "irqs shows the system tick and the UART interrupt", irqs
+
     def termdemo():
         q.send("termdemo\r")
         q.expect(rb"Shift\+PgUp")

@@ -1,46 +1,27 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Legacy Broadcom interrupt controller dispatch for KoraOS (Pi 3 / raspi3b).
-// See arch/irq.h and peripherals/irq.h.
+// KoraOS interrupt dispatch, independent of the interrupt controller: the
+// handler table, per-IRQ counters, and the CPU-side mask. The controller
+// itself is in irq_bcm.c (Pi 3) or irq_gic.c (Pi 4). See arch/irq.h.
 
 #include "arch/irq.h"
 
-#include "memory_access.h"
+#include "intc.h"
 #include "peripherals/irq.h"
 
 static struct {
     irq_handler_t handler;
     void *ctx;
+    unsigned long hits;
 } irq_table[IRQ_COUNT];
 
 void irq_init(void) {
     for (unsigned i = 0; i < IRQ_COUNT; i++) {
         irq_table[i].handler = NULL;
         irq_table[i].ctx = NULL;
+        irq_table[i].hits = 0;
     }
-    // Mask every peripheral IRQ to start from a known-quiet state.
-    write32(DISABLE_IRQS_1, 0xFFFFFFFF);
-    write32(DISABLE_IRQS_2, 0xFFFFFFFF);
-    write32(DISABLE_BASIC_IRQS, 0xFFFFFFFF);
-    asm volatile("dsb sy" ::: "memory");
-}
-
-static void enable_peripheral(unsigned irq) {
-    if (irq < 32) {
-        write32(ENABLE_IRQS_1, 1u << irq);
-    } else if (irq < 64) {
-        write32(ENABLE_IRQS_2, 1u << (irq - 32));
-    }
-    asm volatile("dsb sy" ::: "memory");
-}
-
-static void disable_peripheral(unsigned irq) {
-    if (irq < 32) {
-        write32(DISABLE_IRQS_1, 1u << irq);
-    } else if (irq < 64) {
-        write32(DISABLE_IRQS_2, 1u << (irq - 32));
-    }
-    asm volatile("dsb sy" ::: "memory");
+    intc_init();
 }
 
 void irq_connect(unsigned irq, irq_handler_t handler, void *ctx) {
@@ -49,48 +30,63 @@ void irq_connect(unsigned irq, irq_handler_t handler, void *ctx) {
     }
     irq_table[irq].handler = handler;
     irq_table[irq].ctx = ctx;
-    if (irq < 64) {
-        enable_peripheral(irq);
-    }
+    intc_enable(irq);
 }
 
 void irq_disconnect(unsigned irq) {
     if (irq >= IRQ_COUNT) {
         return;
     }
-    if (irq < 64) {
-        disable_peripheral(irq);
-    }
+    intc_disable(irq);
     irq_table[irq].handler = NULL;
     irq_table[irq].ctx = NULL;
 }
 
-static void dispatch(unsigned irq) {
-    if (irq < IRQ_COUNT && irq_table[irq].handler != NULL) {
-        irq_table[irq].handler(irq_table[irq].ctx);
-    }
-}
-
-static void dispatch_pending(uint32_t pending, unsigned base) {
-    while (pending != 0) {
-        unsigned bit = (unsigned)__builtin_ctz(pending);
-        dispatch(base + bit);
-        pending &= ~(1u << bit);
+void irq_dispatch(unsigned irq) {
+    if (irq < IRQ_COUNT) {
+        irq_table[irq].hits++;
+        if (irq_table[irq].handler != NULL) {
+            irq_table[irq].handler(irq_table[irq].ctx);
+        }
     }
 }
 
 void handle_irq(void) {
-    uint32_t source = read32(CORE0_IRQ_SOURCE);
+    intc_handle();
+}
 
-    // Local per-core sources: generic-timer events (bits 0..3).
-    dispatch_pending(source & 0xF, IRQ_LOCAL_BASE);
+unsigned irq_lines(void) {
+    return IRQ_COUNT;
+}
 
-    // Peripheral (GPU) IRQs are signalled by one aggregate bit; the specific
-    // lines come from the BCM2835 pending registers.
-    if (source & CORE_IRQ_GPU) {
-        dispatch_pending(read32(IRQ_PENDING_1), 0);
-        dispatch_pending(read32(IRQ_PENDING_2), 32);
+unsigned long irq_hits(unsigned irq) {
+    return irq < IRQ_COUNT ? irq_table[irq].hits : 0;
+}
+
+const char *irq_name(unsigned irq) {
+    if (irq >= IRQ_COUNT || irq_table[irq].handler == NULL) {
+        return "";
     }
+    switch (irq) {
+    case IRQ_TIMER_CNTPNS:
+        return "timer (systick)";
+    case IRQ_USB:
+        return "usb (DWC2)";
+    case IRQ_AUX:
+        return "uart (mini-UART)";
+    case IRQ_UART0:
+        return "uart (PL011)";
+#ifdef IRQ_PCIE_INTA
+    case IRQ_PCIE_INTA:
+        return "usb (xHCI via PCIe)";
+#endif
+    default:
+        return "connected";
+    }
+}
+
+const char *irq_controller(void) {
+    return intc_name;
 }
 
 void irq_enable(void) {
