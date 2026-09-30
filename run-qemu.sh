@@ -20,7 +20,8 @@ esac
 [[ -f "$KERNEL_IMG" ]] || { echo "Missing $KERNEL_IMG; build first." >&2; exit 1; }
 DISPLAY_ARGS=(-display none)
 if [[ "${KORA_QEMU_FB:-0}" == "1" ]]; then
-    DISPLAY_ARGS=(-display "${KORA_QEMU_DISPLAY:-cocoa}")
+    if [[ "$(uname -s)" == "Darwin" ]]; then DEFAULT_DISPLAY=cocoa; else DEFAULT_DISPLAY=gtk; fi
+    DISPLAY_ARGS=(-display "${KORA_QEMU_DISPLAY:-$DEFAULT_DISPLAY}")
 fi
 echo "Starting KoraOS on $TARGET; Ctrl-A X quits QEMU"
 exec qemu-system-aarch64 "${MACHINE_ARGS[@]}" -kernel "$KERNEL_IMG" \
