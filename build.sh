@@ -1,152 +1,185 @@
-#!/bin/bash
-# Build script for KoraOS using CMake and the LLVM toolchain
-
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
 set -euo pipefail
 
 usage() {
-    cat <<'EOF'
-Usage: ./build.sh [options]
-
-Options:
-  --variant, -v <qemu|virt|hw|all>   Select kernel variant(s) to build (default: all)
-  --qemu                        Build only the QEMU testing variant
-  --virt                        Build only the QEMU virt variant
-  --hw, --hardware              Build only the hardware variant
-  --release                     Configure with CMAKE_BUILD_TYPE=Release
-  --debug                       Configure with CMAKE_BUILD_TYPE=Debug (default)
-  --build-dir <dir>             Override the build directory (default: build)
-  --clean                       Remove the build directory before configuring
-  clean                         Remove the build directory and exit
-  --help, -h                    Show this help message
-EOF
+    cat <<'USAGE'
+Usage: ./build.sh [options] [clean]
+  --target NAME       Repeatable: hw_raspi3b, hw_raspi4b, qemu_raspi3b,
+                      qemu_virt or all (default: all four; first-seen order)
+  --debug | --release Kernel configuration (default: Debug)
+  --build-dir DIR     Build root (default: build beside this script)
+  --userfs-only       Build only the shared AArch64 user programs/FAT image
+  --userfs-dir DIR    Consume DIR/koraos.img without rebuilding userfs
+  --install-to DIR    Install selected hardware targets after all builds pass
+  --clean             Clean selected configuration/targets and owned userfs first
+  clean               Clean those outputs and exit
+  --help              Show this help
+Legacy --qemu, --virt, --hw, --variant and --all flags are deprecated aliases.
+Userfs generation/consumption is serialized. Python3 is required for path/locking.
+USAGE
 }
+fail() { echo "Error: $*" >&2; exit 1; }
+warn() { echo "Deprecated: $*" >&2; }
+require_value() { [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || fail "$1 requires a value"; }
+script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
+original_args=("$@")
+build_root="${BUILD_DIR:-$script_dir/build}"
+build_type="${BUILD_TYPE:-Debug}"
+userfs_override=""
+install_dir=""
+userfs_only=0
+clean_first=0
+clean_only=0
+targets=()
 
-BUILD_DIR="${BUILD_DIR:-build}"
-BUILD_TYPE="${BUILD_TYPE:-Debug}"
-RPI_VERSION="${RPI_VERSION:-4}"
-BOOTMNT="${BOOTMNT:-/workspace/build/boot}"
-VARIANT="all"
-CLEAN_FIRST=0
-CLEAN_ONLY=0
-
+add_target() {
+    local name="$1" existing
+    if [[ "$name" == all ]]; then
+        add_target hw_raspi3b; add_target hw_raspi4b
+        add_target qemu_raspi3b; add_target qemu_virt
+        return
+    fi
+    case "$name" in hw_raspi3b|hw_raspi4b|qemu_raspi3b|qemu_virt) ;; *) fail "Unknown target: $name" ;; esac
+    for existing in "${targets[@]:-}"; do [[ "$existing" != "$name" ]] || return 0; done
+    targets+=("$name")
+}
+legacy_target() {
+    local alias="$1"
+    warn "$alias; use --target with a canonical name"
+    case "$alias" in
+        qemu) add_target qemu_raspi3b ;;
+        virt) add_target qemu_virt ;;
+        hw|hardware)
+            case "${RPI_VERSION:-4}" in
+                3) add_target hw_raspi3b ;; 4) add_target hw_raspi4b ;;
+                *) fail "Legacy --hw requires RPI_VERSION=3 or 4" ;;
+            esac ;;
+        all|both) add_target all ;;
+        *) fail "Unknown legacy variant: $alias" ;;
+    esac
+}
 while [[ $# -gt 0 ]]; do
     case "$1" in
-        -v|--variant)
-            [[ $# -ge 2 ]] || { echo "Error: --variant requires an argument"; usage; exit 1; }
-            VARIANT="$2"
-            shift 2
-            ;;
-        --qemu)
-            VARIANT="qemu"
-            shift
-            ;;
-        --virt)
-            VARIANT="virt"
-            shift
-            ;;
-        --hw|--hardware)
-            VARIANT="hw"
-            shift
-            ;;
-        --all|--both)
-            VARIANT="all"
-            shift
-            ;;
-        --release)
-            BUILD_TYPE="Release"
-            shift
-            ;;
-        --debug)
-            BUILD_TYPE="Debug"
-            shift
-            ;;
-        --build-dir)
-            [[ $# -ge 2 ]] || { echo "Error: --build-dir requires a path"; usage; exit 1; }
-            BUILD_DIR="$2"
-            shift 2
-            ;;
-        --clean)
-            CLEAN_FIRST=1
-            shift
-            ;;
-        clean)
-            CLEAN_ONLY=1
-            shift
-            ;;
-        --help|-h)
-            usage
-            exit 0
-            ;;
-        *)
-            echo "Unknown option: $1"
-            usage
-            exit 1
-            ;;
+        --target) require_value "$@"; add_target "$2"; shift 2 ;;
+        --variant|-v) require_value "$@"; legacy_target "$2"; shift 2 ;;
+        --qemu) legacy_target qemu; shift ;;
+        --virt) legacy_target virt; shift ;;
+        --hw|--hardware) legacy_target hw; shift ;;
+        --all|--both) legacy_target all; shift ;;
+        --debug) build_type=Debug; shift ;;
+        --release) build_type=Release; shift ;;
+        --build-dir) require_value "$@"; build_root="$2"; shift 2 ;;
+        --userfs-dir) require_value "$@"; userfs_override="$2"; shift 2 ;;
+        --install-to) require_value "$@"; install_dir="$2"; shift 2 ;;
+        --userfs-only) userfs_only=1; shift ;;
+        --clean) clean_first=1; shift ;;
+        clean) clean_only=1; shift ;;
+        --help|-h) usage; exit 0 ;;
+        *) fail "Unknown option: $1" ;;
     esac
 done
-
-if [[ ${CLEAN_ONLY} -eq 1 ]]; then
-    rm -rf "${BUILD_DIR}"
-    echo "Removed ${BUILD_DIR}"
-    exit 0
+[[ ${#targets[@]} -gt 0 ]] || add_target all
+case "$build_type" in Debug|debug) build_type=Debug; configuration=debug ;; Release|release) build_type=Release; configuration=release ;; *) fail "BUILD_TYPE must be Debug or Release" ;; esac
+[[ $userfs_only -eq 0 || -z "$userfs_override" ]] || fail "--userfs-only and --userfs-dir cannot be combined"
+[[ $userfs_only -eq 0 || -z "$install_dir" ]] || fail "--userfs-only cannot install kernels"
+[[ $clean_only -eq 0 || -z "$install_dir" ]] || fail "clean cannot install kernels"
+hardware_selected=0
+for target in "${targets[@]}"; do
+    case "$target" in hw_*) hardware_selected=1 ;; esac
+done
+[[ -z "$install_dir" || $hardware_selected -eq 1 ]] || fail "--install-to requires a selected hardware target"
+command -v python3 >/dev/null || fail "Python3 is required"
+normalize_path() { python3 -c 'import os,sys; print(os.path.realpath(os.path.abspath(sys.argv[1])))' "$1"; }
+build_root=$(normalize_path "$build_root")
+# Reject broad roots and ancestors of the checkout before any generated deletion.
+python3 - "$build_root" "$script_dir" <<'PY'
+import os, sys
+root, checkout = sys.argv[1:]
+broad = {os.path.realpath(path) for path in ("/", "/tmp", "/var/tmp", os.path.expanduser("~"))}
+if root in broad or root == checkout or checkout.startswith(root + os.sep):
+    sys.exit("Unsafe build root: " + root)
+PY
+if [[ -n "$userfs_override" ]]; then
+    userfs_dir=$(normalize_path "$userfs_override")
+    [[ -s "$userfs_dir/koraos.img" && -f "$userfs_dir/koraos.img" ]] || fail "Prepared userfs image missing or empty: $userfs_dir/koraos.img"
+else
+    userfs_dir="$build_root/userfs/aarch64"
 fi
-
-if [[ ${CLEAN_FIRST} -eq 1 ]]; then
-    rm -rf "${BUILD_DIR}"
+if [[ -n "$install_dir" ]]; then install_dir=$(normalize_path "$install_dir"); fi
+# Validate every prospective clean path first, protecting prepared userfs even
+# when a caller places it inside a selected target directory.
+if [[ $clean_only -eq 1 || $clean_first -eq 1 ]]; then
+    for target in "${targets[@]}"; do
+        path="$build_root/$configuration/$target"
+        if [[ -n "$userfs_override" && ( "$userfs_dir" == "$path" || "$userfs_dir" == "$path/"* ) ]]; then
+            fail "Clean target contains prepared userfs: $path"
+        fi
+        [[ ! -L "$path" && "$(normalize_path "$path")" == "$path" ]] || fail "Refusing to clean a symlink path: $path"
+    done
+    if [[ -z "$userfs_override" ]]; then
+        [[ ! -L "$userfs_dir" && "$(normalize_path "$userfs_dir")" == "$userfs_dir" ]] || fail "Refusing to clean a symlink userfs path: $userfs_dir"
+    fi
 fi
-
-variant_normalized=$(echo "${VARIANT}" | tr '[:upper:]' '[:lower:]')
-
-BUILD_VIRT_VARIANT=OFF
-case "${variant_normalized}" in
-    qemu)
-        BUILD_QEMU_VARIANT=ON
-        BUILD_HW_VARIANT=OFF
-        ;;
-    virt)
-        BUILD_QEMU_VARIANT=OFF
-        BUILD_HW_VARIANT=OFF
-        BUILD_VIRT_VARIANT=ON
-        ;;
-    hw|hardware)
-        BUILD_QEMU_VARIANT=OFF
-        BUILD_HW_VARIANT=ON
-        ;;
-    all|both)
-        BUILD_QEMU_VARIANT=ON
-        BUILD_HW_VARIANT=ON
-        ;;
-    *)
-        echo "Unknown variant: ${VARIANT}"
-        usage
-        exit 1
-        ;;
-esac
-
-mkdir -p "${BUILD_DIR}"
-cmake -S . -B "${BUILD_DIR}" \
-    -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
-    -DRPI_VERSION="${RPI_VERSION}" \
-    -DBOOTMNT="${BOOTMNT}" \
-    -DBUILD_QEMU_VARIANT="${BUILD_QEMU_VARIANT}" \
-    -DBUILD_HW_VARIANT="${BUILD_HW_VARIANT}" \
-    -DBUILD_VIRT_VARIANT="${BUILD_VIRT_VARIANT}" \
-    -G "Unix Makefiles"
-
-cmake --build "${BUILD_DIR}" -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
-
-
-echo ""
-echo "Build complete!"
-if [[ ${BUILD_QEMU_VARIANT} == ON ]]; then
-    echo "  QEMU kernel image: ${BUILD_DIR}/kernel8.img"
+mkdir -p "$build_root"
+# Keep the lock outside the producer directory; --clean must not remove it.
+# All operations in this build root share the lock, including prepared-image
+# consumers and cleans. External prepared images are the caller's responsibility.
+lock_path="$build_root/.userfs-aarch64.lock"
+lock_inherited=0
+if [[ "${KORAOS_USERFS_LOCK_PATH:-}" == "$lock_path" && -n "${KORAOS_USERFS_LOCK_FD:-}" ]]; then
+    if python3 - "$KORAOS_USERFS_LOCK_FD" "$lock_path" <<'PYLOCK'
+import os, sys
+try:
+    inherited = os.fstat(int(sys.argv[1]))
+    expected = os.stat(sys.argv[2])
+    valid = (inherited.st_dev, inherited.st_ino) == (expected.st_dev, expected.st_ino)
+except (ValueError, OSError):
+    valid = False
+sys.exit(0 if valid else 1)
+PYLOCK
+    then lock_inherited=1; fi
 fi
-if [[ ${BUILD_VIRT_VARIANT} == ON ]]; then
-    echo "  QEMU virt image: ${BUILD_DIR}/kernel-virt.img"
+if [[ $lock_inherited -eq 0 ]]; then
+    exec python3 "$script_dir/scripts/with-userfs-lock.py" "$lock_path" "$script_dir/build.sh" ${original_args[@]+"${original_args[@]}"}
 fi
-if [[ ${BUILD_HW_VARIANT} == ON ]]; then
-    echo "  Hardware kernel image: ${BUILD_DIR}/kernel8-hw.img"
+if [[ $clean_only -eq 1 || $clean_first -eq 1 ]]; then
+    if [[ $userfs_only -eq 0 ]]; then
+        for target in "${targets[@]}"; do rm -rf -- "$build_root/$configuration/$target"; done
+        rm -f -- "$build_root/compile_commands.json"
+    fi
+    if [[ -z "$userfs_override" ]]; then rm -rf -- "$userfs_dir"; fi
+    echo "Cleaned selected outputs under $build_root"
+    [[ $clean_only -eq 0 ]] || exit 0
 fi
-echo "  compile_commands.json generated for clangd"
-echo ""
-
+jobs=$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)
+if [[ -z "$userfs_override" ]]; then
+    cmake -S "$script_dir/cmake/userfs" -B "$userfs_dir" -G "Unix Makefiles" \
+        -DCMAKE_BUILD_TYPE="$build_type"
+    cmake --build "$userfs_dir" --parallel "$jobs"
+    [[ -s "$userfs_dir/koraos.img" ]] || fail "Producer did not create $userfs_dir/koraos.img"
+fi
+if [[ $userfs_only -eq 1 ]]; then echo "Userfs ready: $userfs_dir/koraos.img"; exit 0; fi
+copied_commands=0
+for target in "${targets[@]}"; do
+    target_dir="$build_root/$configuration/$target"
+    configure_args=(-S "$script_dir" -B "$target_dir" -G "Unix Makefiles"
+        "-DCMAKE_BUILD_TYPE=$build_type" "-DKORAOS_TARGET=$target" "-DKORAOS_USERFS_DIR=$userfs_dir")
+    if [[ -n "$install_dir" && "$target" == hw_* ]]; then configure_args+=("-DBOOTMNT=$install_dir"); fi
+    cmake "${configure_args[@]}"
+    cmake --build "$target_dir" --parallel "$jobs"
+    if [[ $copied_commands -eq 0 && -f "$target_dir/compile_commands.json" ]]; then
+        cp "$target_dir/compile_commands.json" "$build_root/compile_commands.json"
+        copied_commands=1
+    fi
+    echo "Built $target: $target_dir/kernel.img"
+done
+# Nothing is installed until every selected kernel has built successfully.
+if [[ -n "$install_dir" ]]; then
+    for target in "${targets[@]}"; do
+        if [[ "$target" == hw_* ]]; then
+            cmake --build "$build_root/$configuration/$target" --target install_hw
+        fi
+    done
+    echo "Hardware boot files installed in $install_dir"
+fi

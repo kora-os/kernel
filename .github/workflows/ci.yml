@@ -1,97 +1,98 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
-#
-# Continuous integration: host tests, retained Pi builds/raspi3b smoke,
-# and independent virt development profiles, on every pull request and every push to main.
-# Real-hardware behaviour (USB, HDMI, caches, Pi 4 boot) is still tested by
-# hand; see tests/README.md.
-
+# Shared AArch64 userfs, all platform builds, host tests and QEMU profiles.
 name: CI
-
 on:
   push:
     branches: [main]
   pull_request:
   workflow_dispatch:
-
 permissions:
   contents: read
-
 concurrency:
   group: ci-${{ github.ref }}
   cancel-in-progress: true
-
 jobs:
   host-tests:
-    name: Host unit tests
+    name: Host tests and build CLI
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-
-      # Ubuntu 24.04 runners randomise mmap addresses with more bits than
-      # AddressSanitizer's shadow layout tolerates, which crashes ASan binaries
-      # at startup. 28 bits is the long-standing default.
-      - name: Make AddressSanitizer usable on this kernel
+      - name: Make AddressSanitizer usable
         run: sudo sysctl -w vm.mmap_rnd_bits=28
-
-      - name: Run host unit tests (clang, ASan + UBSan)
+      - name: Host sanitizer suites
         run: tests/run-host-tests.sh
+      - name: Build and launcher orchestration tests
+        run: tests/run-build-tests.py
 
-  build-and-smoke:
-    name: Build kernels + QEMU smoke test
+  userfs:
+    name: Shared AArch64 userfs
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
-
-      - name: Install toolchain and QEMU
+      - name: Install userfs toolchain
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends \
-            clang lld llvm cmake mtools qemu-system-arm
+          sudo apt-get install -y --no-install-recommends clang lld llvm cmake mtools
+      - name: Build user programs and FAT32 image once
+        run: ./build.sh --userfs-only
+      - name: Verify producer invalidation and atomic publication
+        run: tests/run-userfs-tests.py
+      - name: Upload shared userfs
+        uses: actions/upload-artifact@v7
+        with:
+          name: userfs-aarch64
+          path: |
+            build/userfs/aarch64/koraos.img
+            build/userfs/aarch64/user/*.elf
+          if-no-files-found: error
 
-      - name: Build default raspi3b and Pi 4 targets together
-        run: ./build.sh
-
-      - name: Build all three target families together
+  build-and-smoke:
+    name: All targets, SD payload and raspi3b
+    needs: userfs
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/download-artifact@v7
+        with:
+          name: userfs-aarch64
+          path: build/userfs/aarch64
+      - name: Install kernel toolchain and QEMU
         run: |
-          cmake -S . -B build -DBUILD_VIRT_VARIANT=ON
-          cmake --build build -j2
-
-      - name: Build Raspberry Pi 3 kernel
-        run: RPI_VERSION=3 ./build.sh --hw --release --build-dir build-rpi3
-
-      - name: Build Raspberry Pi 4 kernel
-        run: RPI_VERSION=4 ./build.sh --hw --release --build-dir build-rpi4
-
-      - name: QEMU smoke test
-        run: tests/run-qemu-smoke.py
-
-      # One boot partition for both boards: firmware, device trees, config.txt,
-      # kernel8-rpi3.img and kernel8-rpi4.img. Copy its contents to the SD card.
-      - name: Assemble SD card boot files
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang lld llvm cmake mtools qemu-system-arm
+      - name: Build all four targets using shared userfs
+        run: ./build.sh --target all --userfs-dir build/userfs/aarch64
+      - name: Build and stage both hardware release targets
+        run: ./build.sh --target hw_raspi3b --target hw_raspi4b --release --userfs-dir build/userfs/aarch64 --install-to sdcard-boot
+      - name: QEMU raspi3b smoke
+        run: tests/run-qemu-smoke.py --target qemu_raspi3b
+      - name: Create boot image with both hardware targets
+        run: ./create-sd-image.sh --target all --release --output build/koraos-boot.img
+      - name: Verify both hardware boot files
         run: |
-          mkdir -p sdcard-boot
-          cp -R build-rpi3/boot/. sdcard-boot/
-          cp -R build-rpi4/boot/. sdcard-boot/
-          cp firmware/LICENCE.broadcom sdcard-boot/  # redistributed firmware's licence
-          ls -l sdcard-boot
-
-      - name: Upload SD card boot files
+          test -s sdcard-boot/kernel8-rpi3.img
+          test -s sdcard-boot/kernel8-rpi4.img
+          test -s sdcard-boot/LICENCE.broadcom
+          mdir -i build/koraos-boot.img ::/
+      - name: Upload SD card boot files and image
         uses: actions/upload-artifact@v7
         with:
           name: sdcard-boot
-          path: sdcard-boot/
+          path: |
+            sdcard-boot/
+            build/koraos-boot.img
           if-no-files-found: error
-
-      - name: Upload QEMU smoke artifacts (serial log, screenshots)
+      - name: Upload raspi3b smoke artifacts
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          name: qemu-smoke
-          path: build/qemu-smoke/
+          name: qemu-raspi3b
+          path: build/debug/qemu_raspi3b/qemu-smoke/
           if-no-files-found: ignore
 
   virt-tests:
     name: QEMU virt (${{ matrix.profile }})
+    needs: userfs
     runs-on: ubuntu-24.04
     strategy:
       fail-fast: false
@@ -100,30 +101,34 @@ jobs:
           - profile: embedded-graphics
             args: --repeat 64
           - profile: disk-keyboard
-            args: --ram 128M --disk build-virt/fs/koraos.img --keyboard --repeat 256
+            args: --ram 128M --disk build/userfs/aarch64/koraos.img --keyboard --repeat 256
           - profile: serial-small-ram
             args: --ram 64M --no-graphics --repeat 32
           - profile: el2-entry
             args: --el2 --no-graphics --repeat 32
     steps:
       - uses: actions/checkout@v7
-      - name: Install toolchain and QEMU
+      - uses: actions/download-artifact@v7
+        with:
+          name: userfs-aarch64
+          path: build/userfs/aarch64
+      - name: Install kernel toolchain and QEMU
         run: |
           sudo apt-get update
           sudo apt-get install -y --no-install-recommends clang lld llvm cmake mtools qemu-system-arm
-      - name: Build virt kernel and rootfs
-        run: ./build.sh --virt --build-dir build-virt
+      - name: Build virt with prepared userfs
+        run: ./build.sh --target qemu_virt --userfs-dir build/userfs/aarch64
       - name: Exercise development profile
-        run: tests/run-qemu-smoke.py --machine virt --kernel build-virt/kernel-virt.img --out build-virt/qemu-${{ matrix.profile }} ${{ matrix.args }}
+        run: tests/run-qemu-smoke.py --target qemu_virt --out build/debug/qemu_virt/qemu-${{ matrix.profile }} ${{ matrix.args }}
       - name: Reject invalid configured root disk
         if: matrix.profile == 'disk-keyboard'
         run: |
-          truncate -s 2M build-virt/invalid.img
-          tests/run-qemu-smoke.py --machine virt --kernel build-virt/kernel-virt.img --disk build-virt/invalid.img --expect-root-failure --no-graphics --out build-virt/qemu-invalid-disk
+          truncate -s 2M build/invalid.img
+          tests/run-qemu-smoke.py --target qemu_virt --disk build/invalid.img --expect-root-failure --no-graphics --out build/debug/qemu_virt/qemu-invalid-disk
       - name: Upload virt serial logs and screenshots
         if: always()
         uses: actions/upload-artifact@v7
         with:
           name: virt-${{ matrix.profile }}
-          path: build-virt/qemu-*/
+          path: build/debug/qemu_virt/qemu-*/
           if-no-files-found: ignore

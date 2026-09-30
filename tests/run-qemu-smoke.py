@@ -6,8 +6,8 @@ shell over the serial line, and check the output and the framebuffer.
 Waits for expected output (with timeouts) rather than sleeping, so it is not
 sensitive to how fast the machine runs QEMU. Standard library only.
 
-Usage: tests/run-qemu-smoke.py [--kernel build/kernel8.img] [--out DIR]
-Build the kernel first with: RPI_VERSION=3 ./build.sh --qemu
+Usage: tests/run-qemu-smoke.py --target qemu_raspi3b|qemu_virt [--out DIR]
+Build the kernel first with: ./build.sh --target qemu_raspi3b
 
 Artifacts in --out (default build/qemu-smoke): serial.log and one PNG
 screenshot per screen check.
@@ -299,7 +299,12 @@ def run(q, graphics=True, keyboard=False, repeat=0):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
-    parser.add_argument("--machine", choices=("raspi3b", "virt"), default="raspi3b")
+    parser.add_argument("--target", choices=("qemu_raspi3b", "qemu_virt"))
+    parser.add_argument("--machine", choices=("raspi3b", "virt"), help="deprecated target alias")
+    parser.add_argument("--build-dir", default=os.environ.get("BUILD_DIR", os.path.join(ROOT, "build")))
+    mode = parser.add_mutually_exclusive_group()
+    mode.add_argument("--release", action="store_true")
+    mode.add_argument("--debug", action="store_true")
     parser.add_argument("--ram", default="256M")
     parser.add_argument("--el2", action="store_true", help="enter virt via EL2 before dropping to EL1")
     parser.add_argument("--repeat", type=int, default=0, help="repeat 64 KiB EL0 heap/nested-process probe")
@@ -310,8 +315,19 @@ def main():
     parser.add_argument("--no-graphics", action="store_true")
     parser.add_argument("--kernel")
     parser.add_argument("--qemu", default="qemu-system-aarch64")
-    parser.add_argument("--out", default=os.path.join(ROOT, "build", "qemu-smoke"))
+    parser.add_argument("--out")
     args = parser.parse_args()
+    if args.machine:
+        alias = "qemu_virt" if args.machine == "virt" else "qemu_raspi3b"
+        if args.target and args.target != alias:
+            parser.error("--target conflicts with --machine")
+        args.target = alias
+        print("warning: --machine is deprecated; use --target " + alias, file=sys.stderr)
+    args.target = args.target or "qemu_raspi3b"
+    args.machine = "virt" if args.target == "qemu_virt" else "raspi3b"
+    kernel_dir = os.path.join(os.path.abspath(args.build_dir),
+                              "release" if args.release else "debug", args.target)
+    args.out = args.out or os.path.join(kernel_dir, "qemu-smoke")
     if args.repeat < 0 or args.repeat > 2000:
         parser.error("--repeat must be between 0 and 2000")
     if args.el2 and args.machine != "virt":
@@ -320,10 +336,10 @@ def main():
         parser.error("--expect-root-failure requires --disk")
 
     if args.kernel is None:
-        args.kernel = os.path.join(ROOT, "build", "kernel-virt.img" if args.machine == "virt" else "kernel8.img")
+        args.kernel = os.path.join(kernel_dir, "kernel.img")
     if not os.path.exists(args.kernel):
-        sys.exit("no kernel at %s -- build it with: RPI_VERSION=3 ./build.sh --qemu"
-                 % args.kernel)
+        sys.exit("no kernel at %s -- build it with: ./build.sh --target %s%s"
+                 % (args.kernel, args.target, " --release" if args.release else ""))
     os.makedirs(args.out, exist_ok=True)
 
     extra = ["-device", "ramfb"] if args.machine == "virt" and not args.no_graphics else []
