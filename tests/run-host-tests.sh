@@ -52,6 +52,7 @@ run_test printf src/lib/printf.c
 run_test virt src/platform/virt.c
 "$ROOT/tests/run-ramfb-tests.sh" || failed=1
 "$ROOT/tests/run-virtio-tests.sh" || failed=1
+"$ROOT/tests/run-virtio-input-tests.sh" || failed=1
 
 if [ "$failed" -ne 0 ]; then
     echo "host tests: FAILED"

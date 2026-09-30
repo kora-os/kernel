@@ -16,7 +16,7 @@ flat identity mapping and cooperative process model.
   serial fallback and terminal/graphics screenshots.
 - [x] 3. Storage: modern VirtIO MMIO split queues and block I/O beneath FAT32;
   external disk boot, bounded error paths, embedded-rootfs fallback.
-- [ ] 4. Input: VirtIO keyboard, modifiers and terminal editing/scrollback;
+- [x] 4. Input: VirtIO keyboard, modifiers and terminal editing/scrollback;
   monitor-injected keys and serial fallback.
 - [ ] 5. CI/docs: virt regression profiles on PRs and main pushes, artifacts,
   allocator/process repetition, retained raspi3b/Pi builds and usage docs.
@@ -72,3 +72,11 @@ EL0/FAT32/ramfb checks; missing disk ramdisk/serial fallback passed. Transport
 ASan/UBSan. Independent review fixed failed-device bounce mutation; regression
 checks retain request and DMA storage untouched after failure. Milestone 2
 upstream PR #39 merged; fork main synchronized.
+
+### Milestone 4 validation
+
+Independent review passed. 238 host sanitizer checks cover modifiers/releases,
+key translation, IRQ framing, and failed setup. Actual QEMU monitor key injection
+runs `echo Ab` through the keyboard with Shift release, Backspace and Enter,
+then exercises scrollback and the full external-rootfs/ramfb smoke. Milestone 3
+upstream PR #40 merged; fork main synchronized.
