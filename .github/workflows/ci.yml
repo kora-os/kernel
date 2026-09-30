@@ -13,7 +13,8 @@ concurrency:
   cancel-in-progress: true
 jobs:
   host-tests:
-    name: Host tests and build CLI
+    # Required by main branch protection; keep this check name stable.
+    name: Host unit tests
     runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@v7
@@ -47,7 +48,8 @@ jobs:
           if-no-files-found: error
 
   build-and-smoke:
-    name: All targets, SD payload and raspi3b
+    # Required by main branch protection; keep this check name stable.
+    name: Build kernels + QEMU smoke test
     needs: userfs
     runs-on: ubuntu-24.04
     steps:
