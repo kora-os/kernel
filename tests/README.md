@@ -79,3 +79,9 @@ filesystem and EL0 programs. `--disk-writable` negotiates writable media;
 FAT32 still makes no writes. Host transport/block suites check features,
 queue wraparound, DMA directions, read/write chunking, RO and flush errors,
 corrupt completions and retained-buffer lifetime after failure.
+
+Add `--keyboard` to a virt smoke run to attach a VirtIO keyboard and inject
+Shift/release, Backspace and Enter through QEMU's monitor, run an EL0 command,
+and exercise scrollback keys. The virtual keyboard is the input source for this
+step; UART observes output. Pure keymap and input queue/IRQ failure scenarios
+also run under host ASan/UBSan. Serial-only profiles still exercise absence.

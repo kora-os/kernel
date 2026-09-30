@@ -4,6 +4,7 @@
 #include "arch/systick.h"
 #ifdef KORAOS_VIRT
 #include "platform/virt.h"
+#include "drivers/virtio_input.h"
 #else
 #include "circle_env.h"
 #endif
@@ -123,6 +124,9 @@ void kernel_main(uintptr_t dtb) {
   // task of its own. Hooked only now so it does not interleave with boot output.
   console_init();
   tty_serial_init();
+#ifdef KORAOS_VIRTIO_INPUT
+  printf("[virtio-input] keyboard %s\n", virtio_input_init() ? "ready" : "absent; serial input available");
+#endif
 
   // Start /bin/init as the first (and only) user program the kernel launches.
   // init owns userland policy from here: it spawns the shell, which spawns

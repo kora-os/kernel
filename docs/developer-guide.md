@@ -183,4 +183,8 @@ set `KORA_QEMU_DISPLAY=gtk` on Linux (default `cocoa` on macOS). The existing
 terminal colors and userland framebuffer pixels. An optional external root disk uses modern VirtIO MMIO (see `filesystem.md`):
 `KORA_QEMU_DISK=build-virt/fs/koraos.img BUILD_DIR=build-virt ./run-qemu.sh --virt`.
 Without an attached disk the embedded root remains available. Media is read-only
-by default. UART remains the fallback keyboard.
+by default. The launcher also attaches a VirtIO keyboard. Click the display to type on the
+screen terminal; its US layout supports Shift/Ctrl/Caps Lock, editing keys,
+arrows and Shift+PgUp/PgDn scrollback. `KORA_QEMU_KEYBOARD=0` omits it. UART
+continues to mirror shell output and provides input fallback, with Ctrl-T
+switching to the kernel console. Pi USB layouts still use `KORAOS_KEYMAP`.

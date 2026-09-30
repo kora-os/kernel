@@ -171,7 +171,7 @@ def near(actual, expected, tolerance=8):
 PROMPT = rb"^\$ "
 
 
-def run(q, graphics=True):
+def run(q, graphics=True, keyboard=False):
     """Yield (name, check) steps; each check raises Failure on error."""
 
     def boot():
@@ -241,6 +241,23 @@ def run(q, graphics=True):
         q.expect(rb"\[serial -> screen terminal")
     yield "irqs shows the system tick and the UART interrupt", irqs
 
+    if keyboard:
+        def keyboard_input():
+            # Typed entirely through the virtual device, including Shift,
+            # release transitions, editing and Enter. UART is only the observer.
+            for key in ("e", "c", "h", "o", "spc", "shift-a", "b", "c", "backspace", "ret"):
+                reply = q.monitor("sendkey " + key + " 10")
+                if b"Error" in reply or b"unknown" in reply.lower():
+                    raise Failure("QEMU key injection failed: %r" % reply)
+                time.sleep(0.02)
+            q.expect(rb"^Ab\r?$")
+            q.expect(rb"exited with 1")
+            q.expect(PROMPT)
+            q.monitor("sendkey shift-pgup 10")
+            time.sleep(0.02)
+            q.monitor("sendkey shift-pgdn 10")
+        yield "VirtIO keyboard handles Shift, release, editing and Enter", keyboard_input
+
     if not graphics:
         return
 
@@ -275,6 +292,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--machine", choices=("raspi3b", "virt"), default="raspi3b")
     parser.add_argument("--ram", default="256M")
+    parser.add_argument("--keyboard", action="store_true", help="inject keys through a VirtIO keyboard")
     parser.add_argument("--disk", help="external bare FAT32 image for virt")
     parser.add_argument("--disk-writable", action="store_true", help="enable raw writes to the supplied test disk")
     parser.add_argument("--no-graphics", action="store_true")
@@ -291,6 +309,10 @@ def main():
     os.makedirs(args.out, exist_ok=True)
 
     extra = ["-device", "ramfb"] if args.machine == "virt" and not args.no_graphics else []
+    if args.keyboard:
+        if args.machine != "virt":
+            parser.error("--keyboard requires virt")
+        extra += ["-device", "virtio-keyboard-device"]
     if args.disk:
         if args.machine != "virt" or not os.path.isfile(args.disk):
             parser.error("--disk requires virt and an existing image")
@@ -302,7 +324,9 @@ def main():
     try:
         if args.disk:
             q.expect(rb"\[blkdev\] using VirtIO disk")
-        for name, check in run(q, not args.no_graphics):
+        if args.keyboard:
+            q.expect(rb"\[virtio-input\] keyboard ready")
+        for name, check in run(q, not args.no_graphics, args.keyboard):
             try:
                 check()
                 print("ok   - " + name)
