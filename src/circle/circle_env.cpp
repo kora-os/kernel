@@ -4,8 +4,7 @@
 // bridge: the host controller for this board (CUSBHCIDevice is the DWC2 on the
 // Pi 3, the xHCI behind PCIe on the Pi 4), device enumeration, and the USB
 // keyboard feeding the tty. Enumeration needs real hardware (QEMU has no Pi
-// USB), so the caller gates it with `enumerate`. On the Pi 4 the xHCI is only
-// constructed so far; its bring-up follows.
+// USB), so the caller gates it with `enumerate`.
 
 #include "circle_env.h"
 
@@ -93,21 +92,27 @@ void circle_usb_init(int enumerate) {
                MachineInfo.GetDTB() != 0 ? "found" : "NOT found (using defaults)",
                (unsigned long)dma.BusAddress, (unsigned long)dma.CPUAddress,
                (unsigned long)dma.Size);
+    TMemoryWindow mmio = MachineInfo.GetPCIeMemory(PCIE_BUS_XHCI);
+    tfp_printf("circle: PCIe MMIO: cpu 0x%lx -> bus 0x%lx, size 0x%lx\n",
+               (unsigned long)mmio.CPUAddress, (unsigned long)mmio.BusAddress,
+               (unsigned long)mmio.Size);
 #endif
 
     static CUSBHCIDevice USBHCI(&InterruptSystem, &Timer, FALSE /* no plug&play */);
 
-#if RASPPI >= 4
-    // xHCI bring-up (PCIe link, VL805 firmware, enumeration) is the next step.
-    enumerate = 0;
-#endif
     if (!enumerate) {
         tfp_printf("circle: USB host controller (%s) constructed, enumeration skipped\n",
                    RASPPI >= 4 ? "xHCI" : "DWC2");
         return;
     }
 
-    tfp_printf("circle: initializing USB host controller...\n");
+#if RASPPI >= 4
+    // PCIe link and reset, the VideoCore loading the VL805's firmware, the xHCI
+    // reset, then enumeration of the root ports (Circle logs each failure).
+    tfp_printf("circle: initializing USB host controller (xHCI via PCIe)...\n");
+#else
+    tfp_printf("circle: initializing USB host controller (DWC2)...\n");
+#endif
     if (!USBHCI.Initialize()) {
         tfp_printf("circle: USB host controller init FAILED\n");
         return;

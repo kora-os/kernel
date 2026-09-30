@@ -8,6 +8,19 @@
 // End of the executable (code) region, 2 MB aligned by the linker script.
 extern char text_end[];
 
+// Start of MMIO in the low 4 GB. The Pi 4 (BCM2711, "low peripheral" mode) has
+// peripherals from 0xFC000000 up, below PBASE: the PCIe host bridge is at
+// 0xFD500000. (PBASE itself may be lower, as in the QEMU Pi 4 variant.)
+#if RPI_VERSION == 4
+#define DEVICE_BASE (PBASE < 0xFC000000UL ? PBASE : 0xFC000000UL)
+// PCIe outbound window where the VL805 xHCI controller's registers appear
+// (Circle's MEM_PCIE_RANGE_START, 64 MB), above the low 4 GB: mapped as one
+// 1 GB Device block at level 1.
+#define PCIE_WINDOW_BASE 0x600000000UL
+#else
+#define DEVICE_BASE PBASE
+#endif
+
 // Coherent (Normal non-cacheable) pool for bus-master buffers such as the
 // VideoCore mailbox. 2 MB aligned and a whole number of 2 MB MMU blocks, which
 // build_identity_map() maps non-cacheable. The Pi 4 needs 4 MB: Circle's xHCI
@@ -77,7 +90,7 @@ static void build_identity_map(void) {
             uint64_t addr = (g << 30) | (i << 21);
 
             uint64_t flags;
-            if (addr >= PBASE) {
+            if (addr >= DEVICE_BASE) {
                 flags = MMU_DEVICE_BLOCK_FLAGS;       // peripherals / MMIO
             } else if (addr < code_end) {
                 flags = MMU_CODE_BLOCK_FLAGS;         // kernel + user text
@@ -93,6 +106,10 @@ static void build_identity_map(void) {
     }
 
     build_low_pages();
+
+#ifdef PCIE_WINDOW_BASE
+    l1_table[PCIE_WINDOW_BASE >> 30] = PCIE_WINDOW_BASE | MMU_DEVICE_BLOCK_FLAGS;
+#endif
 }
 
 void mmu_init(void) {
@@ -148,7 +165,7 @@ void mmu_map_coherent(uintptr_t base, size_t size) {
     dcache_clean_invalidate((const void *)start, end - start);
 
     for (uint64_t addr = start; addr < end; addr += SECTION_SIZE) {
-        if (addr >= PBASE) {
+        if (addr >= DEVICE_BASE) {
             break;  // already Device memory
         }
         uint64_t *entry = &l2_tables[addr >> 30][(addr >> 21) & (ENTRIES_PER_TABLE - 1)];

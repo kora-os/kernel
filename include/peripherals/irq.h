@@ -57,6 +57,7 @@
 
 #define IRQ_VC(n)        GIC_SPI(64 + (n))
 #define IRQ_TIMER_CNTPNS GIC_PPI(14)  // non-secure physical timer (CNTP_EL0)
+#define IRQ_PCIE_INTA    GIC_SPI(143) // PCIe INTA: the VL805 xHCI controller
 #define IRQ_COUNT        256
 
 #else  // Raspberry Pi 3
