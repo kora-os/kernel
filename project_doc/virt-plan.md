@@ -14,7 +14,7 @@ flat identity mapping and cooperative process model.
   MMU/RAM reservations, PL011, GICv2 and generic timer; embedded-rootfs EL0 shell.
 - [x] 2. Display: fw_cfg DMA and ramfb through the existing framebuffer API;
   serial fallback and terminal/graphics screenshots.
-- [ ] 3. Storage: modern VirtIO MMIO split queues and block I/O beneath FAT32;
+- [x] 3. Storage: modern VirtIO MMIO split queues and block I/O beneath FAT32;
   external disk boot, bounded error paths, embedded-rootfs fallback.
 - [ ] 4. Input: VirtIO keyboard, modifiers and terminal editing/scrollback;
   monitor-injected keys and serial fallback.
@@ -63,3 +63,12 @@ smoke passes (RGB pixel samples and 256/24-bit colors), and absent-ramfb serial
 smoke passes. ELF pixels symbol is 0x40e00000, 2 MiB aligned. Independent review
 found no blocking defects; DMA buffers remain permanently reserved on timeout.
 Milestone 1 upstream PR #38 merged; fork main synchronized.
+
+### Milestone 3 validation
+
+Modern VirtIO disk boot passed with read-only and writable media, including
+EL0/FAT32/ramfb checks; missing disk ramdisk/serial fallback passed. Transport
+116-check and block 5219-check suites plus error scenarios pass under
+ASan/UBSan. Independent review fixed failed-device bounce mutation; regression
+checks retain request and DMA storage untouched after failure. Milestone 2
+upstream PR #39 merged; fork main synchronized.
