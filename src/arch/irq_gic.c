@@ -10,12 +10,16 @@
 
 #include "peripherals/irq.h"
 
-#if RPI_VERSION == 4
+#if RPI_VERSION == 4 || defined(KORAOS_VIRT)
 
 #include "intc.h"
 #include "memory_access.h"
 
+#ifdef KORAOS_VIRT
+const char intc_name[] = "GICv2 (virt)";
+#else
 const char intc_name[] = "GIC-400";
+#endif
 
 void intc_init(void) {
     write32(GICD_CTLR, 0);
@@ -38,6 +42,18 @@ void intc_init(void) {
     for (unsigned n = 0; n < IRQ_COUNT / 16; n++) {
         write32(GICD_ICFGR0 + 4 * n, 0);
     }
+
+#ifdef KORAOS_VIRT
+    // QEMU virtio-mmio transports advertise rising-edge SPIs in their DTB.
+    const struct virt_platform *machine = virt_platform_get();
+    for (unsigned i = 0; i < machine->virtio_count; i++) {
+        const struct virt_mmio_device *dev = &machine->virtio[i];
+        if (dev->edge_triggered) {
+            uintptr_t reg = GICD_ICFGR0 + 4 * (dev->irq / 16);
+            write32(reg, read32(reg) | (2u << (2 * (dev->irq % 16))));
+        }
+    }
+#endif
 
     write32(GICD_CTLR, GICD_CTLR_ENABLE);
 

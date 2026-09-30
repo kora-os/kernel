@@ -4,6 +4,10 @@
 #include "common.h"
 #include "mm.h"
 #include "peripherals/base.h"
+#ifdef KORAOS_VIRT
+#include "platform/virt.h"
+extern char kernel_start[];
+#endif
 
 // End of the executable (code) region, 2 MB aligned by the linker script.
 extern char text_end[];
@@ -11,7 +15,9 @@ extern char text_end[];
 // Start of MMIO in the low 4 GB. The Pi 4 (BCM2711, "low peripheral" mode) has
 // peripherals from 0xFC000000 up, below PBASE: the PCIe host bridge is at
 // 0xFD500000. (PBASE itself may be lower, as in the QEMU Pi 4 variant.)
-#if RPI_VERSION == 4
+#if defined(KORAOS_VIRT)
+#define DEVICE_BASE 0
+#elif RPI_VERSION == 4
 #define DEVICE_BASE (PBASE < 0xFC000000UL ? PBASE : 0xFC000000UL)
 // PCIe outbound window where the VL805 xHCI controller's registers appear
 // (Circle's MEM_PCIE_RANGE_START, 64 MB), above the low 4 GB: mapped as one
@@ -58,6 +64,7 @@ static uint64_t l2_tables[GIB_COVERED][ENTRIES_PER_TABLE]
 // the device-tree pointer), can be made writable on its own while the rest of
 // the block, the start of the kernel image at 0x80000, stays code. Page 0 is
 // read-only like the code by default, so NULL-pointer writes still fault.
+#ifndef KORAOS_VIRT
 static uint64_t l3_low_table[ENTRIES_PER_TABLE] __attribute__((aligned(PAGE_SIZE)));
 
 static void build_low_pages(void) {
@@ -67,7 +74,12 @@ static void build_low_pages(void) {
     l2_tables[0][0] = (uint64_t)l3_low_table | PD_TABLE;
 }
 
+#endif
+
 void mmu_set_firmware_page_writable(int writable) {
+#ifdef KORAOS_VIRT
+    (void)writable;
+#else
     // Only the access permissions change, which needs no break-before-make.
     l3_low_table[0] = 0 | MMU_PAGE_FLAGS(writable ? MMU_NORMAL_BLOCK_FLAGS
                                                   : MMU_CODE_BLOCK_FLAGS);
@@ -75,10 +87,16 @@ void mmu_set_firmware_page_writable(int writable) {
     asm volatile("tlbi vaae1, %0" ::"r"(0UL) : "memory");
     asm volatile("dsb ish" ::: "memory");
     asm volatile("isb");
+#endif
 }
 
 static void build_identity_map(void) {
     uint64_t code_end = (uint64_t)text_end;
+#ifdef KORAOS_VIRT
+    const struct virt_platform *machine = virt_platform_get();
+    uint64_t ram_end = machine->ram_base + machine->ram_size;
+    uint64_t code_start = (uintptr_t)kernel_start & ~(uint64_t)(SECTION_SIZE - 1);
+#endif
 
     l0_table[0] = (uint64_t)l1_table | PD_TABLE;
 
@@ -90,9 +108,15 @@ static void build_identity_map(void) {
             uint64_t addr = (g << 30) | (i << 21);
 
             uint64_t flags;
+#ifdef KORAOS_VIRT
+            if (addr < machine->ram_base || addr >= ram_end) {
+                flags = MMU_DEVICE_BLOCK_FLAGS;
+            } else if (addr >= code_start && addr < code_end) {
+#else
             if (addr >= DEVICE_BASE) {
                 flags = MMU_DEVICE_BLOCK_FLAGS;       // peripherals / MMIO
             } else if (addr < code_end) {
+#endif
                 flags = MMU_CODE_BLOCK_FLAGS;         // kernel + user text
             } else if (addr >= (uint64_t)coherent_pool &&
                        addr < (uint64_t)coherent_pool + COHERENT_POOL_SIZE) {
@@ -105,7 +129,9 @@ static void build_identity_map(void) {
         }
     }
 
+#ifndef KORAOS_VIRT
     build_low_pages();
+#endif
 
 #ifdef PCIE_WINDOW_BASE
     l1_table[PCIE_WINDOW_BASE >> 30] = PCIE_WINDOW_BASE | MMU_DEVICE_BLOCK_FLAGS;
@@ -165,9 +191,16 @@ void mmu_map_coherent(uintptr_t base, size_t size) {
     dcache_clean_invalidate((const void *)start, end - start);
 
     for (uint64_t addr = start; addr < end; addr += SECTION_SIZE) {
+#ifdef KORAOS_VIRT
+        const struct virt_platform *machine = virt_platform_get();
+        if (addr < machine->ram_base || addr >= machine->ram_base + machine->ram_size) {
+            continue; // MMIO must remain Device memory.
+        }
+#else
         if (addr >= DEVICE_BASE) {
             break;  // already Device memory
         }
+#endif
         uint64_t *entry = &l2_tables[addr >> 30][(addr >> 21) & (ENTRIES_PER_TABLE - 1)];
         // Break-before-make: a live mapping's cacheability may only change via
         // an invalid entry and a TLB flush.

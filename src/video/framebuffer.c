@@ -1,8 +1,11 @@
 #include "video/framebuffer.h"
+#ifndef KORAOS_VIRT
 #include "drivers/mailbox.h"
+#endif
 #include "mm/coherent.h"
 #include "mm/mmu.h"
 
+#ifndef KORAOS_VIRT
 #define TAG_SET_PHYS_WH 0x00048003
 #define TAG_SET_VIRT_WH 0x00048004
 #define TAG_SET_DEPTH 0x00048005
@@ -99,6 +102,17 @@ int framebuffer_init(framebuffer_info_t *fb, uint32_t width, uint32_t height, ui
 
     return 1;
 }
+
+#elif defined(KORAOS_RAMFB)
+int framebuffer_init(framebuffer_info_t *fb, uint32_t width, uint32_t height, uint32_t depth) {
+    return ramfb_init(fb, width, height, depth);
+}
+#else
+int framebuffer_init(framebuffer_info_t *fb, uint32_t width, uint32_t height, uint32_t depth) {
+    (void)fb; (void)width; (void)height; (void)depth;
+    return 0;
+}
+#endif
 
 void framebuffer_put_pixel(framebuffer_info_t *fb, uint32_t x, uint32_t y, uint32_t color) {
     if (!fb || !fb->buffer) {

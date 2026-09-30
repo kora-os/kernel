@@ -21,11 +21,17 @@
 // GIC interrupt IDs on the Pi 4. Drivers use the names at the bottom, not raw
 // numbers.
 
-#if RPI_VERSION == 4
+#if RPI_VERSION == 4 || defined(KORAOS_VIRT)
 
 // --- GIC-400 (BCM2711), in the ARM local peripheral block at 0xFF800000.
+#ifdef KORAOS_VIRT
+#include "platform/virt.h"
+#define GICD_BASE (virt_platform_get()->gic_dist)
+#define GICC_BASE (virt_platform_get()->gic_cpu)
+#else
 #define GICD_BASE 0xFF841000  // distributor
 #define GICC_BASE 0xFF842000  // CPU interface
+#endif
 
 #define GICD_CTLR        (GICD_BASE + 0x000)
 #define GICD_TYPER       (GICD_BASE + 0x004)
@@ -105,6 +111,10 @@
 #endif
 
 // --- Board-independent names for the IRQs KoraOS uses.
+#ifndef KORAOS_VIRT
 #define IRQ_USB   IRQ_VC(9)   // DWC2 USB controller (Pi 3)
 #define IRQ_AUX   IRQ_VC(29)  // mini-UART (shared with SPI1/SPI2)
 #define IRQ_UART0 IRQ_VC(57)  // PL011
+#else
+#define IRQ_UART0 (virt_platform_get()->uart_irq)
+#endif

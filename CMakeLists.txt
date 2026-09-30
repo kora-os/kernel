@@ -12,6 +12,8 @@ set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 set(RPI_VERSION "4" CACHE STRING "Raspberry Pi version (3 or 4)")
 
 option(BUILD_QEMU_VARIANT "Build kernel image configured for QEMU" ON)
+option(BUILD_VIRT_VARIANT "Build kernel for QEMU AArch64 virt" OFF)
+
 option(BUILD_HW_VARIANT "Build kernel image configured for physical hardware" ON)
 
 set(BOOTMNT "/workspace/build/boot" CACHE PATH "Boot mount directory")
@@ -216,7 +218,7 @@ if(NOT OBJCOPY)
 endif()
 
 function(add_kernel_variant VARIANT)
-    set(options QEMU)
+    set(options QEMU VIRT)
     set(oneValueArgs OUTPUT_NAME IMAGE_NAME BOOT_IMAGE_NAME MAP_NAME)
     cmake_parse_arguments(KVAR "${options}" "${oneValueArgs}" "" ${ARGN})
 
@@ -237,9 +239,14 @@ function(add_kernel_variant VARIANT)
     endif()
 
     set(target "kernel_${VARIANT}")
-    add_executable(${target}
-        ${KERNEL_SOURCES}
-    )
+    set(variant_sources ${KERNEL_SOURCES})
+    list(FILTER variant_sources EXCLUDE REGEX "/drivers/virtio[^/]*\\.c$")
+    if(KVAR_VIRT)
+        list(FILTER variant_sources EXCLUDE REGEX "/(gpio|mailbox)\\.c$")
+    else()
+        list(FILTER variant_sources EXCLUDE REGEX "/platform/")
+    endif()
+    add_executable(${target} ${variant_sources})
 
     set_target_properties(${target} PROPERTIES
         OUTPUT_NAME ${KVAR_OUTPUT_NAME}
@@ -256,6 +263,10 @@ function(add_kernel_variant VARIANT)
     )
 
     target_compile_definitions(${target} PRIVATE RPI_VERSION=${RPI_VERSION})
+    if(KVAR_VIRT)
+        target_compile_definitions(${target} PRIVATE KORAOS_VIRT)
+        target_link_options(${target} PRIVATE --defsym=KERNEL_LOAD_ADDRESS=0x40080000)
+    endif()
     if(KVAR_QEMU)
         target_compile_definitions(${target} PRIVATE QEMU_TESTING)
     endif()
@@ -282,7 +293,7 @@ function(add_kernel_variant VARIANT)
 
     # For hardware builds, also stage the GPU boot firmware and device trees next
     # to the kernel so the boot partition is complete and serves both boards.
-    if(NOT KVAR_QEMU)
+    if(NOT KVAR_QEMU AND NOT KVAR_VIRT)
         add_custom_command(TARGET ${target} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy ${BOOT_FIRMWARE_FILES} ${CMAKE_BINARY_DIR}/boot/
             COMMENT "Staging Raspberry Pi boot firmware into local boot directory"
@@ -299,7 +310,7 @@ function(add_kernel_variant VARIANT)
 
     # Hardware install also delivers the firmware and device trees (idempotent, so
     # installing the Pi 3 and Pi 4 builds in turn populates one card for both).
-    if(NOT KVAR_QEMU)
+    if(NOT KVAR_QEMU AND NOT KVAR_VIRT)
         add_custom_command(TARGET install_${VARIANT} POST_BUILD
             COMMAND ${CMAKE_COMMAND} -E copy ${BOOT_FIRMWARE_FILES} ${BOOTMNT}/
             COMMENT "Copying Raspberry Pi boot firmware to boot mount: ${BOOTMNT}"
@@ -320,6 +331,14 @@ if(BUILD_QEMU_VARIANT)
     )
 endif()
 
+if(BUILD_VIRT_VARIANT)
+    add_kernel_variant(virt QEMU VIRT
+        OUTPUT_NAME kernel-virt
+        IMAGE_NAME kernel-virt.img
+        BOOT_IMAGE_NAME kernel-virt.img
+        MAP_NAME kernel-virt.map)
+endif()
+
 if(BUILD_HW_VARIANT)
     add_kernel_variant(hw
         OUTPUT_NAME kernel8-hw
@@ -331,7 +350,7 @@ endif()
 
 get_property(_kernel_targets GLOBAL PROPERTY KERNEL_VARIANT_TARGETS)
 if(NOT _kernel_targets)
-    message(FATAL_ERROR "No kernel variants are enabled. Enable at least one of BUILD_QEMU_VARIANT or BUILD_HW_VARIANT.")
+    message(FATAL_ERROR "No kernel variants are enabled. Enable at least one of BUILD_QEMU_VARIANT or BUILD_HW_VARIANT or BUILD_VIRT_VARIANT.")
 endif()
 
 get_property(_kernel_install_targets GLOBAL PROPERTY KERNEL_INSTALL_TARGETS)
@@ -342,6 +361,9 @@ endif()
 set(enabled_variants)
 if(BUILD_QEMU_VARIANT)
     list(APPEND enabled_variants "QEMU")
+endif()
+if(BUILD_VIRT_VARIANT)
+    list(APPEND enabled_variants "QEMU virt")
 endif()
 if(BUILD_HW_VARIANT)
     list(APPEND enabled_variants "hardware")
@@ -369,6 +391,7 @@ endif()
 # KoraOS) are compiled together with the vendored code so they share Circle's
 # include path and build flags while also seeing KoraOS headers.
 file(GLOB CIRCLE_BRIDGE_SOURCES "${SRC_DIR}/circle/*.cpp")
+if(BUILD_QEMU_VARIANT OR BUILD_HW_VARIANT)
 add_library(circle_usb STATIC ${CIRCLE_SOURCES} ${CIRCLE_BRIDGE_SOURCES})
 target_include_directories(circle_usb PRIVATE "${CIRCLE_DIR}/include" "${INCLUDE_DIR}")
 target_compile_options(circle_usb PRIVATE
@@ -419,8 +442,12 @@ target_compile_definitions(circle_usb PRIVATE DEFAULT_KEYMAP="${KORAOS_KEYMAP}")
 # frame allocator, printf) which are provided by the kernel objects at link time.
 get_property(_circle_link_targets GLOBAL PROPERTY KERNEL_VARIANT_TARGETS)
 foreach(_t ${_circle_link_targets})
-    target_link_libraries(${_t} PRIVATE circle_usb)
+    if(NOT _t STREQUAL "kernel_virt")
+        target_link_libraries(${_t} PRIVATE circle_usb)
+    endif()
 endforeach()
+
+endif() # Raspberry Pi Circle libraries
 
 # Print configuration
 message(STATUS "Building for Raspberry Pi ${RPI_VERSION}")
