@@ -32,66 +32,64 @@ Current suites:
 |------|--------|
 | `term_test.c` | `src/video/term.c`: autowrap, scrollback and its view, scroll regions, insert/delete/erase, alternate screen, status replies, colours (16/256/24-bit, bce), UTF-8 and DEC line drawing, tabs, origin mode, cursor style/visibility, OSC, REP |
 
-## QEMU smoke test (`tests/run-qemu-smoke.py`)
-
-Boots the QEMU kernel on the `raspi3b` machine, drives the shell over the serial
-line and checks the results: boot to the shell, `ls`, `hello`, `echo` (argv and
-exit code), `cat` of a long-filename file, Ctrl-T to the kernel debug console
-and back, and screenshots of `termdemo` (colour tables on screen) and `gfxdemo`
-(gradient pixels). It waits for expected output rather than sleeping, so it
-does not depend on how fast QEMU runs, and fails fast on a kernel fault banner.
+## Build and shared-image regression tests
 
 ```bash
-RPI_VERSION=3 ./build.sh --qemu
-tests/run-qemu-smoke.py
+tests/run-build-tests.py
+tests/run-userfs-tests.py
 ```
 
-Needs Python 3 (standard library only) and `qemu-system-aarch64`. Artifacts
-land in `build/qemu-smoke/`: `serial.log` and a PNG per screenshot.
+The CLI suite uses fake tool binaries to check repeatable/all target selection,
+shared generation, Debug/Release isolation, first-target compilation database,
+paths with spaces, deprecated aliases, validation before cleanup, prepared-image
+consumption, failure-before-install gates and launcher argument forwarding. It
+also exercises lock lifetime when the wrapper receives SIGTERM or SIGKILL.
+It requires Python 3 and runs without cross-compiling or touching an SD volume.
 
-It cannot cover what QEMU does not model: USB, real HDMI output, caches,
-interrupt timing, or the Pi 4 (QEMU's `raspi4b` machine is incomplete). Those
-stay manual hardware tests.
+The producer suite uses real Clang/CMake/mtools in an isolated temporary source
+copy. It verifies no-op reuse, removed program registrations, header/fsroot
+additions/removals, compiler-flag invalidation, Debug/Release userfs reuse and
+atomic image failure that preserves the previous valid filesystem. CI runs it
+in the userfs-producing job.
 
-## QEMU virt
-
-`./build.sh --virt --build-dir build-virt` produces an independent image.
-Run serial/EL0/FAT32/IRQ and ramfb screenshot checks with:
+## QEMU smoke test
 
 ```bash
-tests/run-qemu-smoke.py --machine virt --kernel build-virt/kernel-virt.img --out build-virt/qemu-smoke
+./build.sh --target qemu_raspi3b
+tests/run-qemu-smoke.py --target qemu_raspi3b
+
+./build.sh --target qemu_virt
+tests/run-qemu-smoke.py --target qemu_virt --keyboard --disk build/userfs/aarch64/koraos.img --repeat 256
 ```
 
-Use `--ram 128M` to exercise a different memory size. The retained raspi3b
-smoke and Pi hardware builds continue to run in CI.
+The test boots to the ELF shell, runs filesystem/argv/exit-code checks, switches
+the serial debug console, verifies timer/UART IRQ progress, and checks terminal
+colors and graphics pixels using QEMU screenshots. Virt optionally injects
+Shift/release, Backspace, Enter and scrollback through a VirtIO keyboard. UART
+observes output. `--repeat N` checks a 64 KiB EL0 heap across a nested process,
+then reaping, N times; 256 runs exceed the pool’s cumulative heap capacity.
 
-`--no-graphics` omits ramfb and verifies serial fallback. Host ramfb tests
-check validation and the fw_cfg configuration format under ASan/UBSan.
+Use `--release` and `--build-dir` to match the build configuration. `--kernel`
+and `--out` override the image and artifact locations. Defaults are the selected
+`build/debug/<target>/kernel.img` and its `qemu-smoke/` directory. `--machine`
+remains a deprecated alias for target selection. `--no-graphics` omits ramfb on
+virt and tests serial fallback. `--disk-writable` negotiates writable test media;
+FAT32 itself remains read-only.
 
-External VirtIO rootfs coverage:
+`--expect-root-failure --disk <zeroed-image>` requires a selected VirtIO disk,
+failed mount and failed init load, so silent ramdisk fallback cannot pass.
 
-```bash
-tests/run-qemu-smoke.py --machine virt --kernel build-virt/kernel-virt.img --disk build-virt/fs/koraos.img --out build-virt/qemu-disk
-```
+## CI coverage
 
-The test requires the VirtIO backend boot diagnostic before exercising the
-filesystem and EL0 programs. `--disk-writable` negotiates writable media;
-FAT32 still makes no writes. Host transport/block suites check features,
-queue wraparound, DMA directions, read/write chunking, RO and flush errors,
-corrupt completions and retained-buffer lifetime after failure.
+One producer job publishes `koraos.img` and user ELF symbols under a shared
+AArch64 artifact. Consumers download it and use `--userfs-dir` without invoking
+userland compilation or filesystem generation. The all-target job builds four
+Debug kernels, stages both hardware Release payloads into a temporary directory,
+creates a FAT32 SD image, and runs raspi3b smoke. Separate virt profiles cover
+embedded graphics, 128 MiB external disk/keyboard, 64 MiB serial-only and EL2
+entry. UART/screenshots are uploaded on failure. Pure host sanitizer suites stay
+independent of the producer and kernel jobs.
 
-Add `--keyboard` to a virt smoke run to attach a VirtIO keyboard and inject
-Shift/release, Backspace and Enter through QEMU's monitor, run an EL0 command,
-and exercise scrollback keys. The virtual keyboard is the input source for this
-step; UART observes output. Pure keymap and input queue/IRQ failure scenarios
-also run under host ASan/UBSan. Serial-only profiles still exercise absence.
-
-## Sustained virt CI
-
-Four independent profiles run on PRs and main pushes: embedded graphics,
-128 MiB external disk + keyboard, 64 MiB serial, and EL2 entry. Logs and
-screenshots are uploaded even when a profile fails. `--repeat N` checks the
-64 KiB EL0 heap and nested process fixture N times (256 in the disk profile).
-The same job rejects a zeroed configured FAT32 disk using
-`--expect-root-failure`; it must report disk selection, failed mount and failed
-init load. Hardware and raspi3b build/smoke gates stay enabled separately.
+QEMU cannot validate real Pi USB, HDMI, caches or boot firmware. Hardware testing
+remains separate. Pi 3 USB IRQ counters include idle frame processing; compare
+controller-specific behavior rather than interpreting them as keystroke counts.

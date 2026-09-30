@@ -1,216 +1,163 @@
-#!/bin/bash
-
+#!/usr/bin/env bash
+# SPDX-License-Identifier: GPL-3.0-or-later
+# Assemble a FAT32 boot volume from already-built hardware kernels. No mounts.
 set -euo pipefail
-
 usage() {
-  cat <<'EOF'
+    cat <<'USAGE'
 Usage: ./create-sd-image.sh [options]
-
-Options:
-  -s, --staging DIR    Staging directory with boot files (default: build/sdcard)
-  -o, --output FILE    Output image path (default: build/koraos-boot.img)
-  --kernel FILE        Source kernel image (default: build/kernel8.img)
-  --volume LABEL       Volume label for the FAT32 image (default: KORAOS)
-  --size SIZE_MB       Force image size in megabytes (overrides auto sizing)
-  -h, --help           Show this message
-
-The script copies the freshly built kernel, creates config.txt on demand,
-and assembles a FAT32 boot image suitable for Raspberry Pi Imager.
-EOF
+  --target NAME       Repeatable: hw_raspi3b, hw_raspi4b or all (default: both)
+  --debug | --release Kernel configuration (default: Debug)
+  --build-dir DIR     Build root, as in build.sh
+  --staging DIR       Consume an existing complete boot payload instead
+  --output FILE       Image path (default: BUILD_ROOT/koraos-boot.img)
+  --volume LABEL      FAT label (default: KORAOS; up to 11 ASCII characters)
+  --size SIZE_MB      Volume size in MiB (64..4096; default: automatic)
+  --kernel FILE       Deprecated single-kernel mode, installed as kernel8.img
+  --help              Show this help
+Requires Python3 and mtools (mformat/mcopy); no root, loop device or mount.
+Canonical kernels retain kernel8-rpi3.img / kernel8-rpi4.img firmware names.
+--staging is a read-only source directory, not a staging destination.
+USAGE
 }
-
+fail() { echo "Error: $*" >&2; exit 1; }
+require_value() { [[ $# -ge 2 && -n "$2" && "$2" != --* ]] || fail "$1 requires a value"; }
 script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
-
-staging_dir="$script_dir/build/sdcard"
-image_path="$script_dir/build/koraos-boot.img"
-kernel_src="$script_dir/build/kernel8-hw.img"
-kernel_dest_name="kernel8.img"
-config_name="config.txt"
-volume_label="KORAOS"
-size_override_mb=""
-size_margin_kb=4096
-min_size_mb=8
-
+build_root="${BUILD_DIR:-$script_dir/build}"
+build_type="${BUILD_TYPE:-Debug}"
+staging_source=""
+image_path=""
+kernel_source=""
+volume_label=KORAOS
+size_override=""
+targets=()
+add_target() {
+    local name="$1" existing
+    if [[ "$name" == all ]]; then add_target hw_raspi3b; add_target hw_raspi4b; return; fi
+    case "$name" in hw_raspi3b|hw_raspi4b) ;; *) fail "SD image requires a hardware target: $name" ;; esac
+    for existing in "${targets[@]:-}"; do [[ "$existing" != "$name" ]] || return 0; done
+    targets+=("$name")
+}
 while [[ $# -gt 0 ]]; do
-  case "$1" in
-  -s | --staging)
-    shift
-    [[ $# -gt 0 ]] || {
-      echo "Missing value for --staging" >&2
-      exit 1
-    }
-    staging_dir="$1"
-    ;;
-  -o | --output)
-    shift
-    [[ $# -gt 0 ]] || {
-      echo "Missing value for --output" >&2
-      exit 1
-    }
-    image_path="$1"
-    ;;
-  --kernel)
-    shift
-    [[ $# -gt 0 ]] || {
-      echo "Missing value for --kernel" >&2
-      exit 1
-    }
-    kernel_src="$1"
-    ;;
-  --volume)
-    shift
-    [[ $# -gt 0 ]] || {
-      echo "Missing value for --volume" >&2
-      exit 1
-    }
-    volume_label="$1"
-    ;;
-  --size)
-    shift
-    [[ $# -gt 0 ]] || {
-      echo "Missing value for --size" >&2
-      exit 1
-    }
-    size_override_mb="$1"
-    ;;
-  -h | --help)
-    usage
-    exit 0
-    ;;
-  *)
-    echo "Unknown option: $1" >&2
-    usage
-    exit 1
-    ;;
-  esac
-  shift
+    case "$1" in
+        --target) require_value "$@"; add_target "$2"; shift 2 ;;
+        --debug) build_type=Debug; shift ;;
+        --release) build_type=Release; shift ;;
+        --build-dir) require_value "$@"; build_root="$2"; shift 2 ;;
+        -s|--staging) require_value "$@"; staging_source="$2"; shift 2 ;;
+        -o|--output) require_value "$@"; image_path="$2"; shift 2 ;;
+        --kernel) require_value "$@"; kernel_source="$2"; shift 2 ;;
+        --volume) require_value "$@"; volume_label="$2"; shift 2 ;;
+        --size) require_value "$@"; size_override="$2"; shift 2 ;;
+        --help|-h) usage; exit 0 ;;
+        *) fail "Unknown option: $1" ;;
+    esac
 done
-
-if [[ ! -f "$kernel_src" ]]; then
-  echo "Kernel image not found at $kernel_src" >&2
-  echo "Build the kernel first (e.g. ./build.sh --hw) before creating the SD image." >&2
-  exit 1
-fi
-
-mkdir -p "$staging_dir"
-
-echo "Staging files in $staging_dir"
-cp "$kernel_src" "$staging_dir/$kernel_dest_name"
-
-config_path="$staging_dir/$config_name"
-if [[ ! -f "$config_path" ]]; then
-  cat >"$config_path" <<EOF
-kernel=$kernel_dest_name
-arm_64bit=1
-EOF
-  echo "Created default $config_name"
+[[ -z "$kernel_source" || ${#targets[@]} -eq 0 ]] || fail "--kernel cannot be combined with --target"
+[[ -z "$kernel_source" || -z "$staging_source" ]] || fail "--kernel cannot be combined with --staging"
+[[ ${#targets[@]} -gt 0 ]] || add_target all
+case "$build_type" in Debug|debug) configuration=debug ;; Release|release) configuration=release ;; *) fail "BUILD_TYPE must be Debug or Release" ;; esac
+for tool in python3 mformat mcopy; do command -v "$tool" >/dev/null || fail "Missing $tool (install Python3/mtools)"; done
+normalize_path() { python3 -c 'import os,sys; print(os.path.realpath(os.path.abspath(sys.argv[1])))' "$1"; }
+build_root=$(normalize_path "$build_root")
+image_path=$(normalize_path "${image_path:-$build_root/koraos-boot.img}")
+[[ ! -e "$image_path" || -f "$image_path" ]] || fail "Output must be a regular image file: $image_path"
+python3 - "$volume_label" "$size_override" <<'PY'
+import re, sys
+label, size = sys.argv[1:]
+if not re.fullmatch(r"[A-Za-z0-9_ -]{1,11}", label):
+    sys.exit("Invalid FAT volume label (use 1..11 ASCII letters, digits, spaces, '_' or '-')")
+if size and (not re.fullmatch(r"[0-9]+", size) or not 64 <= int(size) <= 4096):
+    sys.exit("Image size must be an integer from 64 to 4096 MiB")
+PY
+kernel_files=()
+kernel_names=()
+if [[ -n "$staging_source" ]]; then
+    staging_source=$(normalize_path "$staging_source")
+    [[ -d "$staging_source" ]] || fail "Missing boot payload: $staging_source"
+    [[ "$image_path" != "$staging_source/"* ]] || fail "Output image cannot be inside its source payload"
+    firmware_source="$staging_source"
+    for target in "${targets[@]}"; do
+        case "$target" in hw_raspi3b) name=kernel8-rpi3.img ;; hw_raspi4b) name=kernel8-rpi4.img ;; esac
+        [[ -s "$staging_source/$name" && -f "$staging_source/$name" ]] || fail "Missing staged kernel: $staging_source/$name"
+    done
+    [[ -s "$staging_source/config.txt" ]] || fail "Missing staged config.txt"
 else
-  echo "Preserving existing $config_name"
-fi
-
-staging_size_kb=$(du -sk "$staging_dir" | awk '{print $1}')
-if [[ -z "$staging_size_kb" || "$staging_size_kb" -lt 1 ]]; then
-  staging_size_kb=1
-fi
-
-if [[ -n "$size_override_mb" ]]; then
-  total_size_mb=$size_override_mb
-else
-  total_size_kb=$((staging_size_kb + size_margin_kb))
-  total_size_mb=$(((total_size_kb + 1023) / 1024))
-  if [[ "$total_size_mb" -lt "$min_size_mb" ]]; then
-    total_size_mb=$min_size_mb
-  fi
-fi
-
-image_dir=$(dirname "$image_path")
-mkdir -p "$image_dir"
-
-echo "Creating $total_size_mb MiB FAT32 image at $image_path"
-
-cleanup() {
-  if [[ -n "${darwin_device:-}" ]]; then
-    hdiutil detach "$darwin_device" >/dev/null 2>&1 || true
-    unset darwin_device
-  fi
-  if [[ -n "${darwin_mount:-}" ]]; then
-    rm -rf "$darwin_mount" >/dev/null 2>&1 || true
-    unset darwin_mount
-  fi
-  if [[ -n "${linux_mount:-}" ]]; then
-    if command -v umount >/dev/null 2>&1; then
-      ${sudo_cmd:-} umount "$linux_mount" >/dev/null 2>&1 || true
+    firmware_source="$script_dir/firmware"
+    if [[ -n "$kernel_source" ]]; then
+        echo "Deprecated: --kernel; use canonical --target hardware names" >&2
+        kernel_files+=("$(normalize_path "$kernel_source")")
+        kernel_names+=(kernel8.img)
+    else
+        for target in "${targets[@]}"; do
+            kernel_files+=("$build_root/$configuration/$target/kernel.img")
+            case "$target" in hw_raspi3b) kernel_names+=(kernel8-rpi3.img) ;; hw_raspi4b) kernel_names+=(kernel8-rpi4.img) ;; esac
+        done
     fi
-    rmdir "$linux_mount" >/dev/null 2>&1 || true
-    unset linux_mount
-  fi
+    for file in "${kernel_files[@]}"; do [[ -s "$file" && -f "$file" ]] || fail "Missing hardware kernel: $file; build first"; done
+fi
+# Both board generations' firmware is retained, just as install_hw does.
+for file in bootcode.bin start.elf start4.elf fixup.dat fixup4.dat LICENCE.broadcom \
+    bcm2710-rpi-3-b.dtb bcm2711-rpi-4-b.dtb; do
+    [[ -s "$firmware_source/$file" && -f "$firmware_source/$file" ]] || fail "Missing boot firmware: $firmware_source/$file"
+done
+stage_temp=$(mktemp -d "${TMPDIR:-/tmp}/koraos-boot.XXXXXX")
+image_temp=""
+cleanup() {
+    rm -rf -- "$stage_temp"
+    if [[ -n "$image_temp" ]]; then rm -f -- "$image_temp"; fi
 }
 trap cleanup EXIT
-
-case "$(uname -s)" in
-Darwin)
-  rm -f "$image_path"
-  hdiutil create -ov -size "${total_size_mb}m" -fs MS-DOS -volname "$volume_label" "$image_path" >/dev/null
-  if [[ ! -f "$image_path" && -f "$image_path.dmg" ]]; then
-    mv "$image_path.dmg" "$image_path"
-  fi
-  if [[ ! -f "$image_path" ]]; then
-    echo "Failed to create disk image at $image_path" >&2
-    exit 1
-  fi
-  darwin_mount=$(mktemp -d)
-  attach_output=$(hdiutil attach -mountpoint "$darwin_mount" -nobrowse "$image_path")
-  darwin_device=$(echo "$attach_output" | awk 'NR==1 {print $1}')
-  if [[ -z "$darwin_device" ]]; then
-    echo "Failed to attach image with hdiutil" >&2
-    exit 1
-  fi
-  cp -a "$staging_dir/." "$darwin_mount/"
-  sync
-  hdiutil detach "$darwin_device" >/dev/null
-  unset darwin_device
-  rm -rf "$darwin_mount"
-  unset darwin_mount
-  ;;
-Linux)
-  if command -v mkfs.vfat >/dev/null 2>&1; then
-    mkfs_cmd="mkfs.vfat"
-  elif command -v mkfs.fat >/dev/null 2>&1; then
-    mkfs_cmd="mkfs.fat"
-  else
-    echo "Unable to find mkfs.vfat or mkfs.fat. Install dosfstools." >&2
-    exit 1
-  fi
-
-  rm -f "$image_path"
-  truncate -s "${total_size_mb}M" "$image_path"
-  "$mkfs_cmd" -F 32 -n "$volume_label" "$image_path" >/dev/null
-
-  if [[ "$EUID" -ne 0 ]]; then
-    if command -v sudo >/dev/null 2>&1; then
-      sudo_cmd="sudo"
+trap 'exit 130' INT
+trap 'exit 143' TERM
+cp -a "$firmware_source/." "$stage_temp/"
+if [[ -z "$staging_source" ]]; then
+    for ((i = 0; i < ${#kernel_files[@]}; i++)); do
+        cp "${kernel_files[i]}" "$stage_temp/${kernel_names[i]}"
+    done
+    if [[ -z "$kernel_source" ]]; then
+        cp "$script_dir/config.txt" "$stage_temp/config.txt"
     else
-      echo "Root privileges required to mount loop devices. Install sudo or run as root." >&2
-      exit 1
+        cat > "$stage_temp/config.txt" <<'CONFIG'
+arm_64bit=1
+enable_uart=1
+uart_2ndstage=1
+kernel=kernel8.img
+[pi3]
+core_freq=250
+[pi4]
+enable_gic=1
+[all]
+CONFIG
     fi
-  else
-    sudo_cmd=""
-  fi
-
-  linux_mount=$(mktemp -d)
-  ${sudo_cmd:-} mount -o loop "$image_path" "$linux_mount"
-  ${sudo_cmd:-} cp -a "$staging_dir/." "$linux_mount/"
-  sync
-  ${sudo_cmd:-} umount "$linux_mount"
-  rmdir "$linux_mount"
-  unset linux_mount
-  ;;
-*)
-  echo "Unsupported platform: $(uname -s)" >&2
-  exit 1
-  ;;
-esac
-
-trap - EXIT
-
-echo "SD card image ready at $image_path"
+fi
+# Sum logical file sizes, not host filesystem allocation, then reserve enough
+# room for FAT metadata and growth. FAT32 volumes use at least 64 MiB here.
+total_size_mb=$(python3 - "$stage_temp" "$size_override" <<'PY'
+import os, sys
+source, override = sys.argv[1:]
+size = sum(os.path.getsize(os.path.join(root, name)) for root, _, names in os.walk(source) for name in names)
+minimum = max(64, (size + 8 * 1024 * 1024 + 1024 * 1024 - 1) // (1024 * 1024))
+requested = int(override) if override else minimum
+if requested < minimum:
+    sys.exit(f"Image size too small: need at least {minimum} MiB")
+if requested > 4096:
+    sys.exit("Boot payload exceeds maximum 4096 MiB image size")
+print(requested)
+PY
+)
+image_dir=$(dirname "$image_path")
+mkdir -p "$image_dir"
+image_temp=$(mktemp "$image_dir/.koraos-boot-image.XXXXXX")
+python3 - "$image_temp" "$total_size_mb" <<'PY'
+import sys
+with open(sys.argv[1], "wb") as image:
+    image.truncate(int(sys.argv[2]) * 1024 * 1024)
+PY
+mformat -F -v "$volume_label" -i "$image_temp" ::
+shopt -s nullglob dotglob
+entries=("$stage_temp"/*)
+mcopy -s -Q -i "$image_temp" "${entries[@]}" ::/
+# Publish after both formatting and population succeed; preserve an old image
+# if any preparation step fails.
+mv -f -- "$image_temp" "$image_path"
+echo "Hardware FAT32 boot image ready: $image_path ($total_size_mb MiB)"
