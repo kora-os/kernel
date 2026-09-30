@@ -1,7 +1,7 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# Continuous integration: host unit tests, all kernel builds (QEMU, Pi 3, Pi 4)
-# and the QEMU smoke test, on every pull request and every push to main.
+# Continuous integration: host tests, retained Pi builds/raspi3b smoke,
+# and independent virt development profiles, on every pull request and every push to main.
 # Real-hardware behaviour (USB, HDMI, caches, Pi 4 boot) is still tested by
 # hand; see tests/README.md.
 
@@ -48,17 +48,13 @@ jobs:
           sudo apt-get install -y --no-install-recommends \
             clang lld llvm cmake mtools qemu-system-arm
 
-      - name: Build QEMU kernel (raspi3b)
-        run: RPI_VERSION=3 ./build.sh --qemu
+      - name: Build default raspi3b and Pi 4 targets together
+        run: ./build.sh
 
-      - name: Build QEMU virt kernel
-        run: ./build.sh --virt --build-dir build-virt
-
-      - name: QEMU virt framebuffer smoke test
-        run: tests/run-qemu-smoke.py --machine virt --kernel build-virt/kernel-virt.img --out build-virt/qemu-smoke
-
-      - name: QEMU virt external disk smoke test
-        run: tests/run-qemu-smoke.py --machine virt --kernel build-virt/kernel-virt.img --keyboard --disk build-virt/fs/koraos.img --out build-virt/qemu-disk
+      - name: Build all three target families together
+        run: |
+          cmake -S . -B build -DBUILD_VIRT_VARIANT=ON
+          cmake --build build -j2
 
       - name: Build Raspberry Pi 3 kernel
         run: RPI_VERSION=3 ./build.sh --hw --release --build-dir build-rpi3
@@ -92,4 +88,42 @@ jobs:
         with:
           name: qemu-smoke
           path: build/qemu-smoke/
+          if-no-files-found: ignore
+
+  virt-tests:
+    name: QEMU virt (${{ matrix.profile }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - profile: embedded-graphics
+            args: --repeat 64
+          - profile: disk-keyboard
+            args: --ram 128M --disk build-virt/fs/koraos.img --keyboard --repeat 256
+          - profile: serial-small-ram
+            args: --ram 64M --no-graphics --repeat 32
+          - profile: el2-entry
+            args: --el2 --no-graphics --repeat 32
+    steps:
+      - uses: actions/checkout@v7
+      - name: Install toolchain and QEMU
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends clang lld llvm cmake mtools qemu-system-arm
+      - name: Build virt kernel and rootfs
+        run: ./build.sh --virt --build-dir build-virt
+      - name: Exercise development profile
+        run: tests/run-qemu-smoke.py --machine virt --kernel build-virt/kernel-virt.img --out build-virt/qemu-${{ matrix.profile }} ${{ matrix.args }}
+      - name: Reject invalid configured root disk
+        if: matrix.profile == 'disk-keyboard'
+        run: |
+          truncate -s 2M build-virt/invalid.img
+          tests/run-qemu-smoke.py --machine virt --kernel build-virt/kernel-virt.img --disk build-virt/invalid.img --expect-root-failure --no-graphics --out build-virt/qemu-invalid-disk
+      - name: Upload virt serial logs and screenshots
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: virt-${{ matrix.profile }}
+          path: build-virt/qemu-*/
           if-no-files-found: ignore
