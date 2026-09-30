@@ -18,6 +18,9 @@ KoraOS is a bare-metal Raspberry Pi kernel written in C with a small assembly sh
 # Build and boot the independent development target
 ./build.sh --virt --build-dir build-virt
 BUILD_DIR=build-virt ./run-qemu.sh --virt
+
+# Show ramfb and use the VirtIO keyboard
+KORA_QEMU_FB=1 BUILD_DIR=build-virt ./run-qemu.sh --virt
 ```
 
 You need LLVM/Clang, CMake 3.20+, [mtools](https://www.gnu.org/software/mtools/) (to build the embedded filesystem image), and (optionally) QEMU installed on your workstation. The build script produces `build/kernel8.img` for virtualization and `build/kernel8-hw.img` when the hardware variant is enabled. Re-run `./build.sh` whenever you change compiler flags so clangd receives updated metadata via `build/compile_commands.json`.

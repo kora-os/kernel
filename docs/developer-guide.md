@@ -168,7 +168,7 @@ BUILD_DIR=build-virt ./run-qemu.sh --virt
 tests/run-qemu-smoke.py --machine virt --kernel build-virt/kernel-virt.img --out build-virt/qemu-smoke
 ```
 
-The initial profile is one cortex-a72 CPU, GICv2, TCG, and 256 MiB RAM below
+The supported profile is one cortex-a72 CPU, GICv2, TCG, and 256 MiB RAM below
 4 GiB. `KORA_QEMU_RAM=128M` changes RAM. The kernel discovers RAM and device
 addresses from QEMU's DTB; raw Image boot preserves x0. Launch the `.img` with `-kernel`;
 use the matching `.elf` for debugger symbols. Direct ELF launching is not part
@@ -177,7 +177,8 @@ access. Pi GPIO, mailboxes and Circle USB are excluded from virt. The serial
 line starts on the shell; Ctrl-T selects the debug console, where `irqs`
 reports timer and UART interrupt counters. Hardware and raspi3b commands and
 artifacts retain their existing meanings. The launcher attaches `ramfb` by default. `KORA_QEMU_FB=1` shows a display;
-set `KORA_QEMU_DISPLAY=gtk` on Linux (default `cocoa` on macOS). The existing
+The launcher selects `gtk` on Linux and `cocoa` on macOS;
+`KORA_QEMU_DISPLAY` overrides this. The existing
 1024x768 XRGB8888 framebuffer console and `fb_info` syscall work on virt.
 `KORA_QEMU_RAMFB=0` omits the device and leaves a usable serial shell. CI checks
 terminal colors and userland framebuffer pixels. An optional external root disk uses modern VirtIO MMIO (see `filesystem.md`):
@@ -188,3 +189,28 @@ screen terminal; its US layout supports Shift/Ctrl/Caps Lock, editing keys,
 arrows and Shift+PgUp/PgDn scrollback. `KORA_QEMU_KEYBOARD=0` omits it. UART
 continues to mirror shell output and provides input fallback, with Ctrl-T
 switching to the kernel console. Pi USB layouts still use `KORAOS_KEYMAP`.
+
+### Virt regression profiles
+
+CI runs host sanitizer tests, raspi3b graphics smoke and Pi 3/4 builds on every
+PR and push to main. Independent virt jobs exercise embedded root with ramfb,
+external root with keyboard and 128 MiB RAM, serial-only 64 MiB RAM, and EL2
+entry (`--el2`) before dropping to EL1. Each uploads serial logs/screenshots.
+
+`--repeat 256` runs `/bin/allocprobe` repeatedly: each process allocates and
+checks a 64 KiB heap across a nested ELF child, then exits and is reaped. This
+uses more cumulative heap than the 16 MiB pool, catching lifetime regressions.
+A configured invalid FAT32 image is also required to fail without root fallback.
+The fixture lives in `tests/user/`; it adds no syscall or scheduler behavior.
+
+The virt profile does not implement SMP, GICv3, PCI, networking, audio, or a
+VirtIO GPU. ramfb provides a CPU-writable framebuffer. FAT32 remains read-only,
+and scheduling remains cooperative. QEMU checks do not validate real Pi USB,
+HDMI, cache behavior or boot firmware. Use raw `.img` boot and `.elf` symbols.
+
+The raspi3b build always selects Pi 3 drivers, independently of `RPI_VERSION`,
+which chooses the physical hardware board. A default build can therefore build
+raspi3b and Pi 4 together; enabling `BUILD_VIRT_VARIANT=ON` in CMake adds virt
+to that same build. The shared rootfs is generated once before any kernel links.
+Cross-target static libraries use LLVM ar/ranlib; use a fresh build directory or
+`--clean` after changing archive tools in an existing CMake cache.

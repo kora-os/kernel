@@ -85,3 +85,13 @@ Shift/release, Backspace and Enter through QEMU's monitor, run an EL0 command,
 and exercise scrollback keys. The virtual keyboard is the input source for this
 step; UART observes output. Pure keymap and input queue/IRQ failure scenarios
 also run under host ASan/UBSan. Serial-only profiles still exercise absence.
+
+## Sustained virt CI
+
+Four independent profiles run on PRs and main pushes: embedded graphics,
+128 MiB external disk + keyboard, 64 MiB serial, and EL2 entry. Logs and
+screenshots are uploaded even when a profile fails. `--repeat N` checks the
+64 KiB EL0 heap and nested process fixture N times (256 in the disk profile).
+The same job rejects a zeroed configured FAT32 disk using
+`--expect-root-failure`; it must report disk selection, failed mount and failed
+init load. Hardware and raspi3b build/smoke gates stay enabled separately.

@@ -40,3 +40,7 @@ Makefile
 
 # MacOS trash
 .DS_Store
+
+# Python smoke-test bytecode
+__pycache__/
+*.pyc
