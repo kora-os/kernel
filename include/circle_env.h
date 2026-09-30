@@ -13,8 +13,7 @@ extern "C" {
 // Construct the Circle USB stack on the KoraOS HAL bridge. When `enumerate` is
 // nonzero, also initialize the host controller and enumerate devices, then feed
 // an attached USB keyboard into the tty. Enumeration talks to real USB
-// hardware, so callers pass 0 under QEMU and 1 on a real Raspberry Pi. (The Pi
-// 4's xHCI does not enumerate yet: it is only constructed.)
+// hardware, so callers pass 0 under QEMU and 1 on a real Raspberry Pi.
 void circle_usb_init(int enumerate);
 
 #ifdef __cplusplus
