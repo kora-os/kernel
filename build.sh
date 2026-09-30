@@ -8,8 +8,9 @@ usage() {
 Usage: ./build.sh [options]
 
 Options:
-  --variant, -v <qemu|hw|all>   Select kernel variant(s) to build (default: all)
+  --variant, -v <qemu|virt|hw|all>   Select kernel variant(s) to build (default: all)
   --qemu                        Build only the QEMU testing variant
+  --virt                        Build only the QEMU virt variant
   --hw, --hardware              Build only the hardware variant
   --release                     Configure with CMAKE_BUILD_TYPE=Release
   --debug                       Configure with CMAKE_BUILD_TYPE=Debug (default)
@@ -37,6 +38,10 @@ while [[ $# -gt 0 ]]; do
             ;;
         --qemu)
             VARIANT="qemu"
+            shift
+            ;;
+        --virt)
+            VARIANT="virt"
             shift
             ;;
         --hw|--hardware)
@@ -92,10 +97,16 @@ fi
 
 variant_normalized=$(echo "${VARIANT}" | tr '[:upper:]' '[:lower:]')
 
+BUILD_VIRT_VARIANT=OFF
 case "${variant_normalized}" in
     qemu)
         BUILD_QEMU_VARIANT=ON
         BUILD_HW_VARIANT=OFF
+        ;;
+    virt)
+        BUILD_QEMU_VARIANT=OFF
+        BUILD_HW_VARIANT=OFF
+        BUILD_VIRT_VARIANT=ON
         ;;
     hw|hardware)
         BUILD_QEMU_VARIANT=OFF
@@ -113,24 +124,25 @@ case "${variant_normalized}" in
 esac
 
 mkdir -p "${BUILD_DIR}"
-pushd "${BUILD_DIR}" >/dev/null
-
-cmake .. \
+cmake -S . -B "${BUILD_DIR}" \
     -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
     -DRPI_VERSION="${RPI_VERSION}" \
     -DBOOTMNT="${BOOTMNT}" \
     -DBUILD_QEMU_VARIANT="${BUILD_QEMU_VARIANT}" \
     -DBUILD_HW_VARIANT="${BUILD_HW_VARIANT}" \
+    -DBUILD_VIRT_VARIANT="${BUILD_VIRT_VARIANT}" \
     -G "Unix Makefiles"
 
-cmake --build . -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
+cmake --build "${BUILD_DIR}" -j"$(nproc 2>/dev/null || sysctl -n hw.ncpu 2>/dev/null || echo 4)"
 
-popd >/dev/null
 
 echo ""
 echo "Build complete!"
 if [[ ${BUILD_QEMU_VARIANT} == ON ]]; then
     echo "  QEMU kernel image: ${BUILD_DIR}/kernel8.img"
+fi
+if [[ ${BUILD_VIRT_VARIANT} == ON ]]; then
+    echo "  QEMU virt image: ${BUILD_DIR}/kernel-virt.img"
 fi
 if [[ ${BUILD_HW_VARIANT} == ON ]]; then
     echo "  Hardware kernel image: ${BUILD_DIR}/kernel8-hw.img"

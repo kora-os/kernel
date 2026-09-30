@@ -3,7 +3,7 @@
 #include "peripherals/irq.h"
 #include "utils.h"
 
-#ifdef QEMU_TESTING
+#if defined(QEMU_TESTING) || defined(KORAOS_VIRT)
 // Use PL011 UART for QEMU which has better support
 #include "peripherals/pl011.h"
 
@@ -14,6 +14,7 @@ void uart_init(void) {
     // Wait for end of transmission
     while (REGS_PL011->fr & (1 << 3)) { }
     
+#ifndef KORAOS_VIRT
     // Configure GPIO pins 14 and 15 for PL011 UART (Alt0)
     uint32_t selector = REGS_GPIO->func_select[1];
     selector &= ~((7 << 12) | (7 << 15));  // Clear pins 14 and 15
@@ -26,6 +27,8 @@ void uart_init(void) {
     gpio_pin_set_pull(14, GPNone);
     gpio_pin_set_pull(15, GPUp);
     
+#endif
+
     // Clear pending interrupts
     REGS_PL011->icr = 0x7FF;
     
@@ -33,8 +36,14 @@ void uart_init(void) {
     // UART clock = 3MHz, baud = 115200
     // Divisor = 3000000 / (16 * 115200) = 1.627
     // Integer part = 1, Fractional part = 0.627 * 64 = 40
+#ifdef KORAOS_VIRT
+    // QEMU virt exposes a fixed 24 MHz PL011 clock.
+    REGS_PL011->ibrd = 13;
+    REGS_PL011->fbrd = 1;
+#else
     REGS_PL011->ibrd = 1;
     REGS_PL011->fbrd = 40;
+#endif
     
     // Enable FIFO, 8-bit data, 1 stop bit, no parity
     REGS_PL011->lcrh = (1 << 4) | (3 << 5);

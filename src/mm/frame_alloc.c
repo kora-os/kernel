@@ -1,5 +1,8 @@
 #include "mm/frame_alloc.h"
 #include "mm.h"
+#ifdef KORAOS_VIRT
+#include "platform/virt.h"
+#endif
 
 // Defined by the linker script: first byte after the kernel image.
 extern char _end[];
@@ -48,6 +51,17 @@ void frame_alloc_init(void) {
     // alignment above may cost us up to one frame, so derive the count from the
     // aligned base rather than assuming the maximum.
     uintptr_t pool_end = (uintptr_t)_end + POOL_BYTES;
+#ifdef KORAOS_VIRT
+    const struct virt_platform *machine = virt_platform_get();
+    uintptr_t ram_end = machine->ram_base + machine->ram_size;
+    if (pool_base < machine->ram_base || pool_base >= ram_end) {
+        pool_frames = 0;
+        return;
+    }
+    if (pool_end > ram_end) {
+        pool_end = ram_end;
+    }
+#endif
     pool_frames = (pool_end - pool_base) / PAGE_SIZE;
     if (pool_frames > MAX_FRAMES) {
         pool_frames = MAX_FRAMES;
@@ -56,6 +70,23 @@ void frame_alloc_init(void) {
     for (size_t i = 0; i < BITMAP_WORDS; i++) {
         bitmap[i] = 0;
     }
+#ifdef KORAOS_VIRT
+    // Keep the boot device tree intact if it occupies part of the frame pool.
+    uintptr_t dtb_end = machine->dtb_base + machine->dtb_size;
+    for (size_t i = 0; i < pool_frames; i++) {
+        uintptr_t page = pool_base + i * PAGE_SIZE;
+        if (page < dtb_end && page + PAGE_SIZE > machine->dtb_base) {
+            frame_set_used(i);
+        }
+        for (unsigned r = 0; r < machine->reserved_count; r++) {
+            uintptr_t base = machine->reserved[r].base;
+            uintptr_t end = base + machine->reserved[r].size;
+            if (page < end && page + PAGE_SIZE > base) {
+                frame_set_used(i);
+            }
+        }
+    }
+#endif
 }
 
 void *frame_alloc_pages(size_t count) {
