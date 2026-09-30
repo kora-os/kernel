@@ -12,7 +12,7 @@ flat identity mapping and cooperative process model.
 
 - [x] 1. Platform boot: build/launcher selection, DTB discovery, linker/entry,
   MMU/RAM reservations, PL011, GICv2 and generic timer; embedded-rootfs EL0 shell.
-- [ ] 2. Display: fw_cfg DMA and ramfb through the existing framebuffer API;
+- [x] 2. Display: fw_cfg DMA and ramfb through the existing framebuffer API;
   serial fallback and terminal/graphics screenshots.
 - [ ] 3. Storage: modern VirtIO MMIO split queues and block I/O beneath FAT32;
   external disk boot, bounded error paths, embedded-rootfs fallback.
@@ -55,3 +55,11 @@ FAT32 and nonzero timer/UART IRQs. raspi3b full graphics smoke and Pi3/Pi4
 release builds pass. Use raw Image boot; ELF remains the symbol artifact.
 Independent review fixes include edge IRQ metadata, unrelated PCI cell widths,
 RAM/DTB validation and all reserved-memory tuples. Physical Pi not tested.
+
+### Milestone 2 validation
+
+ramfb host tests: 98 sanitizer checks. Actual QEMU ramfb terminal/graphics
+smoke passes (RGB pixel samples and 256/24-bit colors), and absent-ramfb serial
+smoke passes. ELF pixels symbol is 0x40e00000, 2 MiB aligned. Independent review
+found no blocking defects; DMA buffers remain permanently reserved on timeout.
+Milestone 1 upstream PR #38 merged; fork main synchronized.

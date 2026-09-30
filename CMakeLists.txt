@@ -264,7 +264,7 @@ function(add_kernel_variant VARIANT)
 
     target_compile_definitions(${target} PRIVATE RPI_VERSION=${RPI_VERSION})
     if(KVAR_VIRT)
-        target_compile_definitions(${target} PRIVATE KORAOS_VIRT)
+        target_compile_definitions(${target} PRIVATE KORAOS_VIRT KORAOS_RAMFB)
         target_link_options(${target} PRIVATE --defsym=KERNEL_LOAD_ADDRESS=0x40080000)
     endif()
     if(KVAR_QEMU)

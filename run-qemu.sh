@@ -8,7 +8,8 @@ if [[ "${1:-}" == "--raspi3b" ]]; then TARGET=raspi3b; shift; fi
 case "$TARGET" in
     raspi3b) KERNEL_IMG="$BUILD_DIR/kernel8.img"; MACHINE_ARGS=(-M raspi3b) ;;
     virt) KERNEL_IMG="$BUILD_DIR/kernel-virt.img"
-          MACHINE_ARGS=(-M virt,gic-version=2,highmem=off -cpu cortex-a72 -smp 1 -nic none -m "${KORA_QEMU_RAM:-256M}") ;;
+          MACHINE_ARGS=(-M virt,gic-version=2,highmem=off -cpu cortex-a72 -smp 1 -nic none -m "${KORA_QEMU_RAM:-256M}")
+          if [[ "${KORA_QEMU_RAMFB:-1}" == "1" ]]; then MACHINE_ARGS+=(-device ramfb); fi ;;
     *) echo "Unsupported target: $TARGET" >&2; exit 1 ;;
 esac
 [[ -f "$KERNEL_IMG" ]] || { echo "Missing $KERNEL_IMG; build first." >&2; exit 1; }

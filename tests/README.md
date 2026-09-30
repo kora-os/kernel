@@ -56,11 +56,14 @@ stay manual hardware tests.
 ## QEMU virt
 
 `./build.sh --virt --build-dir build-virt` produces an independent image.
-Run serial/EL0/FAT32/IRQ checks with:
+Run serial/EL0/FAT32/IRQ and ramfb screenshot checks with:
 
 ```bash
-tests/run-qemu-smoke.py --machine virt --kernel build-virt/kernel-virt.img --no-graphics --out build-virt/qemu-smoke
+tests/run-qemu-smoke.py --machine virt --kernel build-virt/kernel-virt.img --out build-virt/qemu-smoke
 ```
 
 Use `--ram 128M` to exercise a different memory size. The retained raspi3b
 smoke and Pi hardware builds continue to run in CI.
+
+`--no-graphics` omits ramfb and verifies serial fallback. Host ramfb tests
+check validation and the fw_cfg configuration format under ASan/UBSan.
