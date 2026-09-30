@@ -43,7 +43,7 @@ class Qemu:
         # UNIX socket paths are limited to ~104 bytes and temp dirs are long.
         machine_args = ["-M", "raspi3b"] if machine == "raspi3b" else [
             "-M", "virt,gic-version=2,highmem=off", "-cpu", "cortex-a72",
-            "-smp", "1", "-nic", "none", "-m", ram]
+            "-smp", "1", "-nic", "none", "-global", "virtio-mmio.force-legacy=false", "-m", ram]
         self.proc = subprocess.Popen(
             [qemu, *machine_args, *extra, "-kernel", kernel,
              "-serial", "stdio", "-display", "none",
@@ -275,6 +275,8 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     parser.add_argument("--machine", choices=("raspi3b", "virt"), default="raspi3b")
     parser.add_argument("--ram", default="256M")
+    parser.add_argument("--disk", help="external bare FAT32 image for virt")
+    parser.add_argument("--disk-writable", action="store_true", help="enable raw writes to the supplied test disk")
     parser.add_argument("--no-graphics", action="store_true")
     parser.add_argument("--kernel")
     parser.add_argument("--qemu", default="qemu-system-aarch64")
@@ -289,9 +291,17 @@ def main():
     os.makedirs(args.out, exist_ok=True)
 
     extra = ["-device", "ramfb"] if args.machine == "virt" and not args.no_graphics else []
+    if args.disk:
+        if args.machine != "virt" or not os.path.isfile(args.disk):
+            parser.error("--disk requires virt and an existing image")
+        extra += ["-drive", "if=none,id=root,format=raw,file=%s,readonly=%s" %
+                  (os.path.abspath(args.disk), "off" if args.disk_writable else "on"),
+                  "-device", "virtio-blk-device,drive=root"]
     q = Qemu(args.qemu, os.path.abspath(args.kernel), os.path.abspath(args.out), args.machine, args.ram, extra)
     failed = False
     try:
+        if args.disk:
+            q.expect(rb"\[blkdev\] using VirtIO disk")
         for name, check in run(q, not args.no_graphics):
             try:
                 check()
