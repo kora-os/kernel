@@ -7,8 +7,9 @@ independent binaries read from the filesystem, not embedded in the kernel image.
 
 ## Where the disk comes from
 
-There is no SD/eMMC driver yet. The "disk" is a **ramdisk**: a FAT32 image built
-on the host and embedded into the kernel image as a read-only blob.
+Pi hardware and raspi3b use a **ramdisk**: a FAT32 image built on the host and
+embedded in the kernel. QEMU virt can instead mount one attached VirtIO MMIO
+block disk. No SD/eMMC driver exists yet.
 
 ```
 create-fs-image.sh  ──(mtools)──▶  build/fs/koraos.img  ──(.incbin)──▶  kernel image
@@ -47,8 +48,8 @@ QEMU and real hardware with no extra media or QEMU flags.
 Each layer has a clean seam:
 
 - **Block device** ([`include/fs/blkdev.h`](../include/fs/blkdev.h)), a
-  `blkdev_t` with a `read` function pointer over 512-byte sectors. The only
-  backend today is the in-memory ramdisk; a real SD/eMMC driver can register
+  `blkdev_t` with a `read` function pointer over 512-byte sectors. Backends
+  include the in-memory ramdisk and VirtIO MMIO disk; a future SD/eMMC driver can plug
   itself here later **without any change to the FAT32 code above**.
 - **FAT32** ([`include/fs/fat32.h`](../include/fs/fat32.h)), a single mounted
   volume, absolute paths, directory traversal, file reads, and stat. No VFS.
@@ -84,8 +85,8 @@ Each layer has a clean seam:
 ## Limitations and deferred work
 
 - **Read-only.** No create, write, append, delete, or directory modification.
-- **Ramdisk only.** No SD/eMMC driver, the disk is baked into the kernel. A
-  real driver drops in under the `blkdev_t` seam.
+- **Pi storage is ramdisk only.** virt also supports a bare FAT32 VirtIO disk.
+  No SD/eMMC driver exists.
 - **No partition table.** The image is a bare FAT32 volume; MBR/GPT parsing is
   not implemented.
 - **No VFS.** One filesystem, one mount, a thin file/fd layer.
@@ -93,3 +94,20 @@ Each layer has a clean seam:
   attempted.
 - **Surrogate-pair LFN decoding** is implemented to spec but is not covered by a
   test fixture, because the host `mtools` mis-encodes astral characters.
+
+## VirtIO root disk on virt
+
+```bash
+./build.sh --virt --build-dir build-virt
+KORA_QEMU_DISK=build-virt/fs/koraos.img BUILD_DIR=build-virt ./run-qemu.sh --virt
+```
+
+Attach one bare FAT32 volume (BPB at sector zero, without MBR/GPT). The image
+contains `/bin/init` and `/bin/shell`. The launcher selects modern VirtIO MMIO;
+legacy transport is unsupported. Media defaults to read-only; set
+`KORA_QEMU_DISK_READONLY=off` on a disposable image for raw block experiments.
+The block API supports `blk_read`, `blk_write` and negotiated `blk_flush`.
+FAT32 and file syscalls remain read-only. The driver's capacity is bounded by
+the current 32-bit sector API. Missing disks use the embedded root; a configured
+broken disk does not silently fall back. Timed-out devices retain DMA buffers
+and reject subsequent requests until reboot.

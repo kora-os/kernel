@@ -180,5 +180,7 @@ artifacts retain their existing meanings. The launcher attaches `ramfb` by defau
 set `KORA_QEMU_DISPLAY=gtk` on Linux (default `cocoa` on macOS). The existing
 1024x768 XRGB8888 framebuffer console and `fb_info` syscall work on virt.
 `KORA_QEMU_RAMFB=0` omits the device and leaves a usable serial shell. CI checks
-terminal colors and userland framebuffer pixels. VirtIO devices are tracked in
-`project_doc/virt-plan.md` as separate milestones.
+terminal colors and userland framebuffer pixels. An optional external root disk uses modern VirtIO MMIO (see `filesystem.md`):
+`KORA_QEMU_DISK=build-virt/fs/koraos.img BUILD_DIR=build-virt ./run-qemu.sh --virt`.
+Without an attached disk the embedded root remains available. Media is read-only
+by default. UART remains the fallback keyboard.
