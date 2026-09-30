@@ -23,5 +23,10 @@ struct Pl011Regs {
 };
 
 // PL011 base address on Raspberry Pi (UART0)
+#ifdef KORAOS_VIRT
+#include "platform/virt.h"
+#define REGS_PL011 ((struct Pl011Regs *)virt_platform_get()->uart_base)
+#else
 #define REGS_PL011 ((struct Pl011Regs *)(PBASE + 0x00201000))
+#endif
 

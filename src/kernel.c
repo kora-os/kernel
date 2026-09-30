@@ -2,7 +2,11 @@
 #include "arch/exception.h"
 #include "arch/irq.h"
 #include "arch/systick.h"
+#ifdef KORAOS_VIRT
+#include "platform/virt.h"
+#else
 #include "circle_env.h"
+#endif
 #include "console.h"
 #include "fs/blkdev.h"
 #include "fs/fat32.h"
@@ -25,7 +29,14 @@ void putc(void *p, char c) {
   uart_putc(c);  // kernel log is UART-only; the screen belongs to the tty
 }
 
-void kernel_main(void) {
+void kernel_main(uintptr_t dtb) {
+#ifdef KORAOS_VIRT
+  if (!virt_platform_init(dtb)) {
+    for (;;) { asm volatile("wfi"); }
+  }
+#else
+  (void)dtb;
+#endif
   uart_init();
   uart_putc('K');
   uart_putc('\n');
@@ -59,10 +70,12 @@ void kernel_main(void) {
   // Bring up the vendored Circle USB stack on the KoraOS HAL bridge. Enumeration
   // talks to real USB hardware, which QEMU's raspi3b does not emulate, so only
   // the hardware build initializes and scans for a keyboard.
+#ifndef KORAOS_VIRT
 #ifdef QEMU_TESTING
   circle_usb_init(0);
 #else
   circle_usb_init(1);
+#endif
 #endif
 
   // Bring up the ramdisk block device (embedded FAT32 image) and mount it so
@@ -87,7 +100,9 @@ void kernel_main(void) {
     fb_console_write(&fb_console, "Hello from framebuffer console.\n");
   }
 
-#if RPI_VERSION == 4
+#ifdef KORAOS_VIRT
+  console_log("KoraOS is running on QEMU virt!\n");
+#elif RPI_VERSION == 4
 #if QEMU_TESTING
   console_log("KoraOS is running on a Raspberry Pi 4 in QEMU!\n");
 #else

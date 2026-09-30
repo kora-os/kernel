@@ -1,6 +1,9 @@
 #pragma once
 
-#if RPI_VERSION == 3
+#if defined(KORAOS_VIRT)
+	// BCM peripherals are unavailable on virt; board drivers must be excluded.
+	#define PBASE 0
+#elif RPI_VERSION == 3
 	#define PBASE 0x3F000000
 #elif RPI_VERSION == 4
 	#ifdef QEMU_TESTING

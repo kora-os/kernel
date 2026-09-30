@@ -1,7 +1,7 @@
 ENTRY(_start)
 
 SECTIONS {
-    . = 0x80000;
+    . = DEFINED(KERNEL_LOAD_ADDRESS) ? KERNEL_LOAD_ADDRESS : 0x80000;
     kernel_start = .;
     
     .text : {

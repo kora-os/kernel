@@ -6,7 +6,7 @@
 
 #include "peripherals/irq.h"
 
-#if RPI_VERSION != 4
+#if RPI_VERSION != 4 && !defined(KORAOS_VIRT)
 
 #include "intc.h"
 #include "memory_access.h"

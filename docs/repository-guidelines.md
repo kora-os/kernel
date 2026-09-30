@@ -18,7 +18,8 @@ The legacy `make` command still works and respects the `RPI_VERSION` and `BOOTMN
 Follow the existing clang-flavored C style: four-space indentation, braces on the same line as declarations, and `snake_case` for functions and variables (`gpio_pin_set_func`). Keep headers self-contained and prefer `const` pointers for register blocks defined in `include/`. Preprocessor constants remain uppercase (`RPI_VERSION`, `QEMU_TESTING`). When in doubt, mirror the patterns in `src/gpio.c` and `include/common.h`.
 
 ## Testing Guidelines
-There is no automated test suite yet. Smoke-test changes by booting `build/kernel8.img` on the intended hardware or via your QEMU setup. Use `BOOTMNT=/Volumes/BOOT ./build.sh` (or `make`) to copy artifacts into a mounted SD card image. Include any UART logs or observed regressions in your PR.
+Run `tests/run-host-tests.sh` and the appropriate QEMU smoke profile (see
+`tests/README.md`). CI runs these on PRs and main pushes. Smoke-test changes by booting `build/kernel8.img` on the intended hardware or via your QEMU setup. Use `BOOTMNT=/Volumes/BOOT ./build.sh` (or `make`) to copy artifacts into a mounted SD card image. Include any UART logs or observed regressions in your PR.
 
 ## Commit & Pull Request Guidelines
 Commits follow short, imperative subjects (`Use CMakefile instead of Makefile`). Group related changes and avoid work-in-progress checkpoints. PRs should explain the motivation, list user-visible effects, note the Raspberry Pi model exercised, and attach screenshots or UART output if behavior changes. Link issues when applicable and call out configuration defaults you touched.

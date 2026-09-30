@@ -7,6 +7,8 @@
 .equ CORE_ID_MASK,     0xFF
 
 _start:
+    // Preserve the QEMU/Linux boot ABI device tree pointer across EL changes.
+    mov x20, x0
     // Park secondary cores
     mrs x1, MPIDR_EL1
     and x1, x1, #CORE_ID_MASK
@@ -43,7 +45,8 @@ bss_cleared:
     msr cpacr_el1, x0
     isb
 
-    // Jump to kernel main
+    // Jump to kernel main with the original boot argument.
+    mov x0, x20
     bl kernel_main
     // If kernel_main returns, hang
     b hang
