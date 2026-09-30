@@ -67,3 +67,15 @@ smoke and Pi hardware builds continue to run in CI.
 
 `--no-graphics` omits ramfb and verifies serial fallback. Host ramfb tests
 check validation and the fw_cfg configuration format under ASan/UBSan.
+
+External VirtIO rootfs coverage:
+
+```bash
+tests/run-qemu-smoke.py --machine virt --kernel build-virt/kernel-virt.img --disk build-virt/fs/koraos.img --out build-virt/qemu-disk
+```
+
+The test requires the VirtIO backend boot diagnostic before exercising the
+filesystem and EL0 programs. `--disk-writable` negotiates writable media;
+FAT32 still makes no writes. Host transport/block suites check features,
+queue wraparound, DMA directions, read/write chunking, RO and flush errors,
+corrupt completions and retained-buffer lifetime after failure.
