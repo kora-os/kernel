@@ -1,0 +1,394 @@
+# KoraOS feature status.
+#
+# Machine-readable list of what KoraOS supports and what is coming, consumed by
+# the project website. Validated in CI by tests/check-features.py; update it in
+# the same PR that changes a feature's status.
+#
+# Layout: categories -> features. Category and feature ids are lowercase
+# kebab-case and unique (feature ids across the whole file).
+#
+# Feature fields:
+#   id           required  stable identifier, never reused
+#   name         required  short display name
+#   status       required  wish | planned | in_progress | completed
+#                            wish         an idea, not scheduled
+#                            planned      scheduled in project_doc/roadmap.md
+#                            in_progress  being implemented
+#                            completed    merged to main
+#   description  optional  one sentence for the website
+#   milestone    optional  roadmap milestone number (project_doc/roadmap.md)
+#   platforms    optional  subset of: rpi3, rpi4, qemu-raspi3b, qemu-virt;
+#                          omitted means the feature is platform independent
+#   prs          optional  pull request numbers in `repository`
+#   completed    required for completed features: date merged (YYYY-MM-DD)
+#   version      optional, completed features only: first release containing it
+
+schema: 1
+repository: https://github.com/kora-os/kernel
+
+categories:
+  - id: platforms
+    name: Platforms
+    features:
+      - id: rpi3
+        name: Raspberry Pi 3
+        status: completed
+        description: Boots on real Raspberry Pi 3 hardware from the SD card.
+        platforms: [rpi3]
+        completed: 2026-09-18
+        prs: [19, 20]
+      - id: rpi4
+        name: Raspberry Pi 4
+        status: completed
+        description: Boots on real Raspberry Pi 4 hardware from the SD card.
+        platforms: [rpi4]
+        completed: 2026-09-18
+        prs: [19, 21]
+      - id: qemu-raspi3b
+        name: QEMU raspi3b
+        status: completed
+        description: Runs in QEMU's Raspberry Pi 3 emulation for quick testing.
+        platforms: [qemu-raspi3b]
+        completed: 2025-11-02
+      - id: qemu-virt
+        name: QEMU virt
+        status: completed
+        description: Independent AArch64 development target with VirtIO devices.
+        platforms: [qemu-virt]
+        completed: 2026-09-30
+        prs: [38, 39, 40, 41, 42]
+
+  - id: kernel
+    name: Kernel core
+    features:
+      - id: boot-el1
+        name: Boot and EL1 kernel
+        status: completed
+        description: Drops from EL2/EL3 to EL1 and parks secondary cores.
+        completed: 2026-06-10
+      - id: exceptions
+        name: Exception vectors
+        status: completed
+        description: EL1 vector table with trap handling for kernel and EL0.
+        completed: 2026-06-10
+      - id: interrupts
+        name: Interrupt controllers
+        status: completed
+        description: BCM controller on Pi 3, GIC-400 on Pi 4, GICv2 on virt.
+        completed: 2026-09-30
+        prs: [15, 32, 38]
+      - id: system-timer
+        name: System timer
+        status: completed
+        description: Generic-timer delays and a periodic interrupt tick.
+        completed: 2026-09-17
+        prs: [14, 15]
+      - id: mmu
+        name: MMU with flat identity map
+        status: completed
+        description: One shared address space with no memory protection, by design.
+        completed: 2026-06-10
+      - id: frame-allocator
+        name: Page frame allocator
+        status: completed
+        description: Freeable bitmap allocator for physical pages.
+        completed: 2026-07-23
+        prs: [1]
+      - id: kernel-heap
+        name: Kernel heap
+        status: in_progress
+        description: Small-object kmalloc for the kernel and the USB stack.
+        milestone: 6
+      - id: cxx-runtime
+        name: Freestanding C++ runtime
+        status: completed
+        description: Lets the kernel host C++ code such as the Circle USB stack.
+        completed: 2026-09-17
+        prs: [13]
+
+  - id: multitasking
+    name: Multitasking
+    features:
+      - id: cooperative-processes
+        name: Cooperative processes
+        status: completed
+        description: Nested spawn/wait process model with per-task file tables.
+        completed: 2026-08-12
+        prs: [4]
+      - id: preemptive-scheduler
+        name: Preemptive scheduler
+        status: planned
+        description: Timer-driven task switching with sleeping and wait queues.
+        milestone: 7
+      - id: smp
+        name: Multicore (SMP)
+        status: planned
+        description: User programs run in parallel on all cores under one big kernel lock.
+        milestone: 7
+      - id: core-pinning
+        name: Core placement and pinning
+        status: planned
+        description: Per-core run queues; tasks can be started on a chosen core.
+        milestone: 7
+      - id: threads
+        name: Threads and jobs
+        status: planned
+        description: Threads sharing a process, plus a job API to queue work to a core.
+        milestone: 7
+
+  - id: userland
+    name: Userland
+    features:
+      - id: el0-programs
+        name: User programs in EL0
+        status: completed
+        description: Position-independent ELF64 programs loaded and run in EL0.
+        completed: 2026-07-24
+        prs: [2, 3]
+      - id: syscalls
+        name: System calls
+        status: completed
+        description: I/O, memory, process and file syscalls with a private ABI.
+        completed: 2026-09-16
+        prs: [5, 10]
+      - id: load-from-disk
+        name: Programs loaded from disk
+        status: completed
+        description: The kernel boots /bin/init and programs load from the filesystem.
+        completed: 2026-09-16
+        prs: [11]
+      - id: user-memory
+        name: Growable user memory
+        status: planned
+        description: Page allocation syscalls and a pool-based malloc in libk.
+        milestone: 6
+      - id: libc
+        name: C library
+        status: planned
+        description: A real libc (picolibc or newlib) ported onto KoraOS syscalls.
+        milestone: 12
+
+  - id: shell
+    name: Shell
+    features:
+      - id: interactive-shell
+        name: Interactive shell
+        status: completed
+        description: Runs programs by name with arguments.
+        completed: 2026-09-14
+        prs: [6]
+      - id: os-commands
+        name: OS commands
+        status: completed
+        description: ls, cat, echo and friends.
+        completed: 2026-09-16
+        prs: [10]
+      - id: file-commands
+        name: File management commands
+        status: planned
+        description: cp, rm, mkdir and mv once the filesystem is writable.
+        milestone: 9
+      - id: volume-navigation
+        name: Volume navigation
+        status: planned
+        description: Amiga-style device and volume names, assigns, cd and pwd.
+        milestone: 8
+      - id: job-control
+        name: Background jobs and pinning
+        status: planned
+        description: Run programs in the background or on a chosen core.
+        milestone: 7
+      - id: basic
+        name: BASIC
+        status: wish
+        description: A built-in BASIC interpreter in the home-computer tradition.
+      - id: python
+        name: Python
+        status: wish
+        description: A Python interpreter usable from the shell.
+
+  - id: storage
+    name: Storage and filesystems
+    features:
+      - id: block-layer
+        name: Block device layer
+        status: completed
+        description: Common block device interface with an embedded ramdisk.
+        completed: 2026-09-15
+        prs: [8]
+      - id: fat32-read
+        name: FAT32 read
+        status: completed
+        description: Read-only FAT32 with long filenames.
+        completed: 2026-09-16
+        prs: [9]
+      - id: virtio-block
+        name: VirtIO block storage
+        status: completed
+        description: Disk images attached to QEMU virt.
+        platforms: [qemu-virt]
+        completed: 2026-09-30
+        prs: [40]
+      - id: volumes
+        name: Volumes and assigns
+        status: planned
+        description: Several mounted volumes addressed by device or volume name.
+        milestone: 8
+      - id: partitions
+        name: MBR partitions
+        status: planned
+        description: Each partition of a disk is mounted as its own device.
+        milestone: 8
+      - id: fat32-write
+        name: FAT32 write
+        status: planned
+        description: Create, write, rename and delete files and directories.
+        milestone: 9
+      - id: sd-card
+        name: SD card
+        status: planned
+        description: Native SD card driver, so the boot card is a usable volume.
+        platforms: [rpi3, rpi4]
+        milestone: 10
+      - id: usb-mass-storage
+        name: USB mass storage
+        status: planned
+        description: USB sticks and drives as volumes.
+        platforms: [rpi3, rpi4]
+        milestone: 10
+
+  - id: display
+    name: Display and graphics
+    features:
+      - id: hdmi-framebuffer
+        name: HDMI framebuffer
+        status: completed
+        description: Framebuffer output on HDMI via the VideoCore mailbox.
+        platforms: [rpi3, rpi4, qemu-raspi3b]
+        completed: 2026-09-26
+        prs: [22]
+      - id: ramfb
+        name: ramfb display
+        status: completed
+        description: Framebuffer output on QEMU virt.
+        platforms: [qemu-virt]
+        completed: 2026-09-30
+        prs: [39]
+      - id: terminal
+        name: Screen terminal
+        status: completed
+        description: Scrolling terminal with xterm escape sequences and scrollback.
+        completed: 2026-09-27
+        prs: [23, 25, 26]
+      - id: user-framebuffer
+        name: Framebuffer access from programs
+        status: completed
+        description: Programs can draw directly to the screen.
+        completed: 2026-08-29
+        prs: [5]
+      - id: hdmi-hotplug
+        name: HDMI hotplug
+        status: planned
+        description: Connect or disconnect a display while running.
+        platforms: [rpi3, rpi4]
+        milestone: 11
+      - id: gpu
+        name: GPU acceleration
+        status: wish
+        description: Use the VideoCore GPU for accelerated graphics.
+        platforms: [rpi3, rpi4]
+
+  - id: input
+    name: Input and USB
+    features:
+      - id: uart-console
+        name: Serial console
+        status: completed
+        description: UART kernel log and debug console alongside the shell.
+        completed: 2026-09-27
+        prs: [24, 33]
+      - id: usb-host-pi3
+        name: USB host (Pi 3)
+        status: completed
+        description: DWC2 USB controller through the Circle USB stack.
+        platforms: [rpi3]
+        completed: 2026-09-26
+        prs: [16, 17, 18]
+      - id: usb-host-pi4
+        name: USB host (Pi 4)
+        status: completed
+        description: PCIe and xHCI USB controller through the Circle USB stack.
+        platforms: [rpi4]
+        completed: 2026-09-30
+        prs: [34, 35]
+      - id: usb-keyboard
+        name: USB keyboard
+        status: completed
+        description: USB HID keyboards drive the shell.
+        platforms: [rpi3, rpi4]
+        completed: 2026-09-30
+        prs: [18, 35]
+      - id: virtio-keyboard
+        name: VirtIO keyboard
+        status: completed
+        description: Keyboard input on QEMU virt.
+        platforms: [qemu-virt]
+        completed: 2026-09-30
+        prs: [41]
+      - id: usb-hotplug
+        name: USB hotplug
+        status: planned
+        description: Plug and unplug USB devices while running.
+        platforms: [rpi3, rpi4]
+        milestone: 11
+
+  - id: networking
+    name: Networking
+    features:
+      - id: ethernet
+        name: Ethernet
+        status: wish
+        description: Wired networking (USB LAN on Pi 3, GENET on Pi 4, VirtIO on virt).
+      - id: wifi
+        name: Wi-Fi
+        status: wish
+        description: Wireless networking on the Pi's built-in chip.
+        platforms: [rpi3, rpi4]
+      - id: tcp-ip
+        name: TCP/IP stack
+        status: wish
+        description: IPv4, TCP and UDP for programs.
+
+  - id: development
+    name: Development and testing
+    features:
+      - id: build-system
+        name: Unified build
+        status: completed
+        description: One build script for all targets with a shared userland image.
+        completed: 2026-09-30
+        prs: [43]
+      - id: sd-image
+        name: SD card image
+        status: completed
+        description: Bootable SD card image with pinned Pi firmware.
+        completed: 2026-09-18
+        prs: [19]
+      - id: host-tests
+        name: Host unit tests
+        status: completed
+        description: Sanitizer-checked unit tests that run on the build machine.
+        completed: 2026-09-27
+        prs: [27]
+      - id: qemu-smoke-tests
+        name: QEMU smoke tests
+        status: completed
+        description: Boots each QEMU target and drives the shell automatically.
+        completed: 2026-09-30
+        prs: [28, 42]
+      - id: ci
+        name: Continuous integration
+        status: completed
+        description: GitHub Actions runs tests and builds every target on each PR.
+        completed: 2026-09-27
+        prs: [29, 30]
