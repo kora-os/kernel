@@ -1,41 +1,242 @@
-# Bare-Metal Kernel Roadmap
+# KoraOS Roadmap
 
-This roadmap outlines the minimum feature set needed to turn the current boot + UART prototype into a usable bare-metal console environment on Raspberry Pi hardware (and QEMU). Each milestone is intentionally high-level so we can iterate without locking in implementation details too early.
+High-level milestones for the kernel and userland. Each milestone is delivered as
+a sequence of PRs (one PR per step); detailed per-milestone ledgers can live next
+to this file, as `virt-plan.md` does. Update this roadmap as decisions change.
+Per-feature status (wish, planned, in progress, completed) lives in
+`features.yaml`, which the project website reads.
 
-## Milestone 0 – Validate Boot Chain
-- **Confirm armstub requirements**: Review Raspberry Pi 4 boot flow and decide whether the default `armstub8.bin` suffices or if we need a custom stub to select EL2/EL1, configure the MMU setup window, or hand off extra state.
-- **Document firmware inputs**: Capture the set of registers/memory locations the VideoCore bootloader expects (mailboxes, entry addresses) and what state it provides when jumping into `kernel_main`.
-- **Add boot diagnostics**: Extend the early UART routine to emit build identifiers and system register dumps so we can verify execution level and core state before deeper changes.
+KoraOS is an open machine: a single flat identity map with no memory protection
+between programs or between programs and the kernel. That is the design, not a
+gap, and nothing below tries to change it (see `docs/how-userland-works.md`).
 
-## Milestone 1 – System Register Definitions
-- **Create `include/arch/system_registers.h`** (or similar) with macros/helpers for commonly accessed ARMv8 registers (e.g., `CurrentEL`, `SPSR_EL1`, `SCR_EL3`, `CNTFRQ_EL0`).
-- **Provide read/write intrinsics**: Implement inline wrappers (`mrs`/`msr`) for the registers we rely on so the rest of the kernel avoids hard-coded assembly snippets.
-- **Capture execution context**: Add lightweight helpers to detect the current exception level, core ID, and timing frequency for later initialization steps.
+## Completed foundations
 
-## Milestone 2 – Exception Vector Table
-- **Draft vector table layout**: Build an `exception_vectors.S` with entries for synchronous, IRQ, FIQ, and SError at EL1 (and EL2 if we remain at EL2).
-- **Install vector base**: Update early boot to set `VBAR_EL1` (and `VBAR_EL2`) using the new system register helpers.
-- **Default handlers**: Provide minimal default handlers that log via UART and halt, validating that vector entry works before wiring real interrupt logic.
+- **Boot and early bring-up**: boot chain on Pi 3/Pi 4 and QEMU, EL2/EL3 to EL1
+  drop, system register helpers, boot diagnostics.
+- **Exceptions and interrupts**: vector table, BCM (Pi 3) and GIC-400 / GICv2
+  (Pi 4, virt) controllers, generic timer tick (`systick`).
+- **Console**: unified UART console, `printf`, framebuffer terminal with
+  scrolling, xterm-style escapes and scrollback; UART debug console alongside it.
+- **Userland**: EL0 PIE programs loaded by the ELF loader, cooperative nested
+  spawn/wait, argv, interactive shell.
+- **Filesystem**: read-only FAT32 with long filenames over the `blkdev_t` seam,
+  file syscalls, userland loaded from `/bin`.
+- **Input and video**: Circle USB stack with HID keyboards on Pi 3 and Pi 4,
+  HDMI framebuffer on both.
+- **QEMU virt target**: DTB discovery, PL011, GICv2, ramfb, VirtIO block and
+  keyboard; see `virt-plan.md`.
+- **CI**: host unit tests, QEMU smoke tests (raspi3b and virt profiles), GitHub
+  Actions with required checks.
 
-## Milestone 3 – Interrupt Controller Bring-Up
-- **Select target configuration**: For QEMU (raspi3b) leverage the BCM2836-style interrupt controller; for Pi 4 use the GIC-400. Document the differences and decide on a common abstraction.
-- **Initialize controller**: Map the controller registers, enable the IRQ line used by Mini UART/PL011, and unmask core interrupts.
-- **Interrupt enable path**: Add helpers to toggle `DAIF` mask bits and globally enable IRQ handling after the console is ready.
-- **Smoke tests**: Generate a timer or UART interrupt in QEMU to prove the vector table and controller init are correct.
+## Milestone order
 
-## Milestone 4 – UART Console Refinement
-- **Consolidate drivers**: Refactor the Mini UART and PL011 paths into a single console interface with runtime selection based on build target.
-- **Buffered I/O**: Introduce a simple ring buffer or line buffer so the console survives bursty traffic and supports basic input editing.
-- **Formatted logging**: Provide lightweight `printf`-style formatting (possibly a trimmed-down vsnprintf) for structured debug output.
-- **Interrupt-driven RX/TX**: Optionally enable interrupt-driven receive and transmit to reduce busy-waiting once the interrupt controller is stable.
+| # | Milestone | Depends on |
+|---|-----------|------------|
+| 6 | Kernel heap and user memory | |
+| 7 | Scheduler, SMP and threads | 6 |
+| 8 | Volumes and namespace | 6, 7 |
+| 9 | FAT32 write | 8 |
+| 10 | Storage drivers (SD, USB mass storage) | 8 (9 for writes) |
+| 11 | Hotplug (USB, HDMI) | 7, 10 |
+| 12 | libc port | 6, 7, 8, 9 |
 
-## Milestone 5 – Testing & Tooling
-- **QEMU scripts**: Expand `run-qemu.sh` with flags for enabling the GDB stub (`-s -S`) and redirecting UART output to files for regression captures.
-- **Hardware checklist**: Document a manual test flow (power-on, serial connection, expected boot banner, echo test) and add it to `docs/developer-guide.md`.
-- **Automation hooks**: Investigate integrating a basic CI job or local script that rebuilds both variants and runs the QEMU smoke test to guard against regressions.
+The libc port only depends on milestones 6 to 9, so it can move ahead of 10 and
+11 if a real libc becomes the priority.
 
-This plan should evolve alongside implementation progress; update the roadmap as we discover new requirements or validate assumptions. Until we lock down the interrupt and console stack, keep the focus on instrumentation and observability so debugging remains manageable.
+## Milestone 6 – Kernel heap and user memory
 
+Today the kernel `operator new` (and Circle's `malloc`, which wraps it) hands
+out whole pages, so a 16-byte allocation costs 4 KB, and each task gets a fixed
+64 KB `sbrk` heap. Every later milestone needs small, freeable kernel objects.
+
+1. **Kernel heap**: `kmalloc`/`kfree` with size classes on top of the frame
+   allocator; large requests fall through to whole pages. Route `operator new`
+   and Circle's `malloc` to it. Host unit tests for the allocator (ASan/UBSan),
+   plus a boot-time stress/repetition profile in CI.
+2. **User memory**: an Amiga-style page allocation syscall pair (allocate/free
+   page runs) so userland heaps can grow. With VA == PA, a contiguous `sbrk`
+   cannot grow reliably once neighbouring memory is taken. A pool-based `libk`
+   malloc (TLSF or similar, which handles non-contiguous pools well) sits on
+   top. Whether `sbrk` stays as a compatibility shim is decided in the PR.
+
+## Milestone 7 – Scheduler, SMP and threads
+
+Goal: preemptive multitasking and threads on all cores. Locking follows Linux
+2.0 (one big kernel lock); scheduling follows a hybrid of SMP and TempleOS's
+explicit per-core placement.
+
+**Design decisions**
+
+- **One big kernel lock (BKL)**, taken on kernel entry from EL0 and released on
+  return to EL0 and whenever a task sleeps. User programs run in parallel on all
+  cores; the kernel itself is effectively single-threaded.
+- **Fine-grained kernel locking is an explicit non-goal.** Smaller locks are
+  added only where they are required for correctness (interrupt-shared data,
+  below), not for scalability.
+- **The kernel is not preemptible**: task switches happen on return to EL0 or
+  when a task blocks. Kernel code never needs to defend against being switched
+  out halfway through.
+- **All device interrupts and all Circle code stay on core 0.** Circle's
+  critical sections only mask interrupts on the local core, so it must never run
+  elsewhere.
+- **Interrupt handlers never take the BKL.** Data shared between handlers and
+  the rest of the kernel (tty ring buffers, VirtIO input, timer state) is
+  protected by small IRQ-safe spinlocks, because masking local interrupts on
+  core N does not stop a handler running on core 0.
+- **FP/SIMD state is context switched** (lazily, on first FP use after a
+  switch). Today it is not saved at all because nothing in EL0 uses it.
+- **`Forbid()`/`Permit()` syscalls** let a program take and release the BKL from
+  EL0, so the user/developer can safely poke kernel structures while other cores
+  run.
+- Inter-processor interrupts are deferred: an idle core picks up new work on its
+  next own timer tick.
+
+**Scheduling model (hybrid, inspired by TempleOS)**
+
+KoraOS is not a server OS balancing many similar requests. The expected
+workload is a program that spawns a number of unbalanced sub-processes or
+threads, with the user/developer deciding where work runs. So placement is
+explicit and predictable rather than automatically balanced.
+
+- **Per-core run queues, no migration.** A task stays for life on the core it
+  was started on. Each run queue has its own IRQ-safe spinlock, because
+  wakeups come from interrupt handlers on core 0 (which never take the BKL).
+- **Placement happens once, at spawn.** By default a new task goes to the
+  least-loaded core, so independent programs still spread across cores.
+- **Explicit pinning.** `spawn` and `thread_create` take an optional core
+  number; the shell exposes it too.
+- **No work stealing** at first. If imbalance turns out to matter, "an idle core
+  steals a runnable task" can be added later as a small, separate change.
+- Unlike TempleOS, the kernel is not confined to core 0: any core can make
+  syscalls under the BKL. Only interrupts and Circle are pinned to core 0.
+
+**Threads**
+
+The flat address space makes threads cheap: a thread is a task that shares its
+process's image, heap and file table and has its own user and kernel stacks.
+There is no page-table sharing to manage.
+
+- A process lives until its last thread exits; its resources are freed then.
+- Process exit marks the remaining threads killed; each one dies on its next
+  kernel entry or timer tick on its own core, so no IPI is needed.
+- On top of threads, `libk` provides a TempleOS-style job API: queue a function
+  to a core and collect its result later.
+- The same primitive backs `pthread` in the libc port (milestone 12).
+
+**PRs**
+
+1. **Task model rewrite**: per-task kernel stacks, a saved trap frame and a
+   context switch routine replacing the nested `enter_user`/`kernel_return`
+   model; FP/SIMD save/restore; spawn becomes create plus wait. Still
+   cooperative and single-core, behaviour unchanged, all existing tests pass.
+2. **Preemption and sleeping**: the timer tick requests a reschedule, taken on
+   return to EL0. Wait queues; blocking `read` sleeps and is woken by the UART,
+   VirtIO input and USB keyboard interrupts. A `sleep` syscall; optional `&`
+   background jobs in the shell as the demo.
+3. **Locks and per-CPU data**: spinlocks with ARMv8.0 exclusives (the Cortex-A53
+   has no LSE atomics), IRQ-save variants, per-CPU data via `TPIDR_EL1`, the BKL
+   and `Forbid()`/`Permit()`. Audit every place that masks interrupts for mutual
+   exclusion (`tty.c`, `virtio_input.c`, `irq.c`, `mmu.c`, and Circle glue) and
+   convert interrupt-shared data to IRQ-safe spinlocks. A locked `printf` with a
+   panic bypass. Still one core.
+4. **Secondary core bring-up**: PSCI `CPU_ON` on virt, the firmware spin table on
+   Pi 3/Pi 4. Per-core stack, EL1 drop, shared MMU tables (MMU and caches on
+   before touching any lock), vector table, per-core timer and per-core
+   interrupt controller setup (GIC CPU interface; BCM local interrupt controller
+   on Pi 3). Cores idle in `wfi`. Confirm the vendored Circle configuration
+   before starting.
+5. **Per-core scheduling and placement**: per-core run queues, least-loaded
+   placement at spawn, an optional core argument to `spawn`, shell syntax for
+   pinning, and a `ps`-style command showing which core each task runs on. All
+   device interrupts routed to core 0; idle cores pick up work on their tick.
+6. **Threads and jobs**: `thread_create(fn, arg, core)`, thread exit and join,
+   process lifetime and kill semantics as above; the `libk` job API on top.
+7. **Userland and CI**: atomics in `libk`; demos for a job-parallel computation
+   showing the speedup and for a program driving several unbalanced, pinned
+   sub-processes; CI profiles on `virt -smp 4` and raspi3b (four cores),
+   repeated stress runs, host unit tests for run-queue and placement logic.
+
+**Risk**: PR 4 on real Pi 4 hardware is the least predictable step; QEMU does
+not reproduce every hardware or memory-ordering behaviour.
+
+## Milestone 8 – Volumes and namespace
+
+AmigaDOS-style addressing of storage, instead of mounting everything under one
+Unix root.
+
+**Design decisions**
+
+- **Device names** (for example `df0:`, `df1:`) name a slot; one per mountable
+  partition, not per physical disk. **Volume names** (for example `boot:`,
+  `extras:`) come from the FAT volume label and follow the medium wherever it is
+  attached. Both are matched case-insensitively; a device name always works,
+  even when two media share a label.
+- Typing `name:` alone in the shell changes the current directory to the root
+  of that device or volume.
+- Paths use `/` as the separator and `..` for the parent. A path starting with
+  `/` is relative to the root of the **current volume** (like `\` on DOS
+  drives), so POSIX-style code using `/bin/...` keeps working.
+- **Assigns**: logical names such as `sys:` (the boot volume) and `c:` (the
+  command directory, initially `sys:bin`). `spawn` searches `c:` instead of the
+  hardcoded `/bin`.
+- **Open questions**: the device naming scheme per device type (SD, USB,
+  VirtIO, ramdisk), and whether a synthetic unified tree (`/<volume>/...`) is
+  also wanted alongside volume names.
+
+**PRs**
+
+1. **Block device registry and partitions**: multiple `blkdev_t` instances
+   instead of one active device; MBR partition parsing; ramdisk and VirtIO
+   register through it.
+2. **Multi-volume FAT32 and resolver**: per-volume FAT32 state (allocated from
+   the kernel heap), a volume registry with device and label names, a path
+   resolver handling `name:path`, per-task current directory, `chdir`/`getcwd`
+   syscalls.
+3. **Shell and assigns**: `name:` as a directory change, `cd`, `pwd`, a command
+   listing devices and volumes, assigns (`sys:`, `c:`), program lookup through
+   `c:`.
+
+## Milestone 9 – FAT32 write
+
+Developed and tested on virt with VirtIO block, which already supports writes,
+against scratch images. Never against a card that holds firmware until proven.
+
+1. **Sector cache and data writes**: a small write-back sector cache, cluster
+   allocation and freeing, writing and appending to existing files, truncate,
+   FSInfo updates.
+2. **Namespace operations**: create, unlink, `mkdir`, `rmdir`, rename; long
+   filename and short-name alias generation.
+3. **Sync and tools**: explicit sync, the volume dirty flag, write syscalls
+   exposed to userland, `cp`/`rm`/`mkdir`/`mv` programs. CI runs `fsck.fat` (or
+   `fsck_msdos`) on images after write tests, plus host unit tests on
+   mtools-generated images.
+
+## Milestone 10 – Storage drivers
+
+1. **SD on Pi 3** (Arasan SDHCI) under the `blkdev_t` seam; evaluate reusing
+   Circle's SD driver against writing one (license compatibility checked).
+2. **SD on Pi 4** (EMMC2).
+3. **USB mass storage** through Circle's existing mass storage class driver.
+
+SD volumes mount read-only by default; writes are enabled explicitly until
+milestone 9 has a track record on real cards.
+
+## Milestone 11 – Hotplug
+
+1. **USB plug and play**: drive Circle's plug-and-play updates from a kernel
+   task on core 0; keyboards and mass storage can come and go. Volumes appear
+   and disappear; open files on a removed volume return errors.
+2. **HDMI hotplug**: detect connect/disconnect and re-initialise the
+   framebuffer and console.
+
+## Milestone 12 – libc port
+
+Port a small C library (picolibc or newlib) onto the KoraOS syscalls, using the
+milestone 6 allocator, milestone 7 FP context switching and threads (for
+`pthread`), milestone 8 current
+directory and milestone 9 writes. The kernel syscall ABI stays private; POSIX
+shapes are provided by the library, not the kernel.
 
 ## QEMU virt development platform
 
@@ -44,5 +245,5 @@ generic timer, ramfb, VirtIO MMIO block storage and keyboard. It preserves the
 Pi hardware and raspi3b targets and runs the existing FAT32/EL0 environment.
 See `virt-plan.md` for the completed PR bundles and validation. Automated
 profiles cover embedded/external rootfs, graphics/serial, RAM sizes, EL2 entry,
-and repeated allocation/process lifetime. Scheduler and writable filesystem
-work remain future subsystems; this platform provides their development target.
+and repeated allocation/process lifetime. It is the primary development target
+for milestones 6 to 9 and 12.
