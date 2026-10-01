@@ -32,6 +32,17 @@ Current suites:
 |------|--------|
 | `term_test.c` | `src/video/term.c`: autowrap, scrollback and its view, scroll regions, insert/delete/erase, alternate screen, status replies, colours (16/256/24-bit, bce), UTF-8 and DEC line drawing, tabs, origin mode, cursor style/visibility, OSC, REP |
 
+## Feature status file
+
+```bash
+tests/check-features.py
+```
+
+Validates `project_doc/features.yaml` (field names, statuses, dates, platforms,
+PR numbers, and milestone numbers against `project_doc/roadmap.md`). Needs
+PyYAML: `apt install python3-yaml`, or run it with
+`uv run --no-project --with pyyaml python tests/check-features.py`.
+
 ## Build and shared-image regression tests
 
 ```bash
