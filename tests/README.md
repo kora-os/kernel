@@ -30,6 +30,7 @@ Current suites:
 
 | Test | Covers |
 |------|--------|
+| `kmalloc_test.c` | `src/mm/kmalloc.c`, `src/mm/kmalloc_stress.c`: alignment, zeroing, cache-line separation, block reuse, slab release, page runs, over-aligned blocks, exhaustion, invalid and double frees, balanced IRQ masking, seeded stress |
 | `term_test.c` | `src/video/term.c`: autowrap, scrollback and its view, scroll regions, insert/delete/erase, alternate screen, status replies, colours (16/256/24-bit, bce), UTF-8 and DEC line drawing, tabs, origin mode, cursor style/visibility, OSC, REP |
 
 ## Feature status file
@@ -73,8 +74,10 @@ tests/run-qemu-smoke.py --target qemu_raspi3b
 tests/run-qemu-smoke.py --target qemu_virt --keyboard --disk build/userfs/aarch64/koraos.img --repeat 256
 ```
 
-The test boots to the ELF shell, runs filesystem/argv/exit-code checks, switches
-the serial debug console, verifies timer/UART IRQ progress, and checks terminal
+The test checks the boot-time kernel heap self-test, boots to the ELF shell,
+runs filesystem/argv/exit-code checks, switches to the serial debug console,
+verifies timer/UART IRQ progress, runs `heaptest` (seeded kernel heap stress)
+and checks that `heap` reports no leaks or bad frees, and checks terminal
 colors and graphics pixels using QEMU screenshots. Virt optionally injects
 Shift/release, Backspace, Enter and scrollback through a VirtIO keyboard. UART
 observes output. `--repeat N` checks a 64 KiB EL0 heap across a nested process,
