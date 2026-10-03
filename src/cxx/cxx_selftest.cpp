@@ -2,7 +2,7 @@
 //
 // Boot-time proof that the freestanding C++ toolchain and runtime work end to
 // end: a global object built by a static constructor, virtual dispatch through
-// a vtable, and a heap allocation via operator new (frame allocator). This is
+// a vtable, and a heap allocation via operator new (kernel heap). This is
 // scaffolding for the Circle USB stack landing in a later step; it can be
 // removed once real C++ drivers exercise the same paths.
 

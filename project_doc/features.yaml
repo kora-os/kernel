@@ -96,9 +96,11 @@ categories:
         prs: [1]
       - id: kernel-heap
         name: Kernel heap
-        status: in_progress
+        status: completed
         description: Small-object kmalloc for the kernel and the USB stack.
         milestone: 6
+        completed: 2026-10-03
+        prs: [45]
       - id: cxx-runtime
         name: Freestanding C++ runtime
         status: completed

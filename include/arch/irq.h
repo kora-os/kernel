@@ -32,6 +32,12 @@ void irq_disconnect(unsigned irq);
 void irq_enable(void);
 void irq_disable(void);
 
+// Mask IRQs at the CPU and return the previous mask state, for short critical
+// sections over data an interrupt handler may also touch. Nests: pass the
+// returned value to irq_restore() to put the mask back as it was.
+uint64_t irq_save(void);
+void irq_restore(uint64_t flags);
+
 // Dispatch entry point called from the EL1/EL0 IRQ vectors. Not called directly.
 void handle_irq(void);
 

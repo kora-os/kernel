@@ -4,7 +4,7 @@
 // C++ runtime bring-up hooks. KoraOS is mostly C, but the vendored Circle USB
 // stack (and any future borrowed drivers) are C++, so the kernel provides the
 // minimal freestanding C++ runtime in src/cxx/: global-constructor dispatch,
-// operator new/delete backed by the frame allocator, and a few __cxa stubs.
+// operator new/delete backed by the kernel heap, and a few __cxa stubs.
 
 #ifdef __cplusplus
 extern "C" {

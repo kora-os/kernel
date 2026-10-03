@@ -46,14 +46,22 @@ The libc port only depends on milestones 6 to 9, so it can move ahead of 10 and
 
 ## Milestone 6 – Kernel heap and user memory
 
-Today the kernel `operator new` (and Circle's `malloc`, which wraps it) hands
-out whole pages, so a 16-byte allocation costs 4 KB, and each task gets a fixed
-64 KB `sbrk` heap. Every later milestone needs small, freeable kernel objects.
+Before this milestone the kernel `operator new` (and Circle's `malloc`, which
+wraps it) handed out whole pages, so a 16-byte allocation cost 4 KB, and each
+task gets a fixed 64 KB `sbrk` heap. Every later milestone needs small,
+freeable kernel objects.
 
-1. **Kernel heap**: `kmalloc`/`kfree` with size classes on top of the frame
-   allocator; large requests fall through to whole pages. Route `operator new`
-   and Circle's `malloc` to it. Host unit tests for the allocator (ASan/UBSan),
-   plus a boot-time stress/repetition profile in CI.
+1. **Kernel heap** (done): `kmalloc`/`kmalloc_aligned`/`kfree` in
+   `src/mm/kmalloc.c`. One-page slabs in nine size classes (64 to 1344 bytes,
+   all multiples of 64, so blocks never share a cache line and DMA cache
+   maintenance stays safe for Circle); larger or over-aligned requests take
+   page runs. Each page starts with a 64-byte header found from the freed
+   pointer, so no size is needed on free. Blocks come back zeroed; invalid and
+   double frees are caught and counted. IRQ-safe by masking (Circle allocates
+   in USB completion handlers), as is the frame allocator now. `operator new`
+   (including `std::align_val_t`) and Circle's `malloc` use it. Host unit tests,
+   a boot self-test, and the debug console's `heap` and `heaptest` commands,
+   run by every QEMU smoke profile.
 2. **User memory**: an Amiga-style page allocation syscall pair (allocate/free
    page runs) so userland heaps can grow. With VA == PA, a contiguous `sbrk`
    cannot grow reliably once neighbouring memory is taken. A pool-based `libk`
