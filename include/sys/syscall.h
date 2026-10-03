@@ -10,7 +10,7 @@
 #define SYS_write  0
 #define SYS_exit   1
 #define SYS_read   2
-#define SYS_sbrk   3
+// 3 was sbrk (retired; returns -1)
 #define SYS_spawn  4
 #define SYS_wait   5
 #define SYS_getpid 6
@@ -21,7 +21,9 @@
 #define SYS_lseek   11
 #define SYS_readdir 12
 #define SYS_stat    13
-// Slots 14 through 31 are reserved for task and memory work.
+#define SYS_alloc_pages 14
+#define SYS_free_pages  15
+// Slots 16 through 31 are reserved for task and memory work.
 #define SYS_chdir   32
 #define SYS_getcwd  33
 

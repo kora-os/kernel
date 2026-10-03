@@ -283,13 +283,36 @@ def run(q, graphics=True, keyboard=False, repeat=0, multi_volume=False):
     yield "kernel heap stress leaves no leaks", kernel_heap
 
     if repeat:
+        def kernel_counts():
+            q.send("\x14")
+            q.expect(rb"koraos> ")
+            q.send("heap\r")
+            m = q.expect(rb"^heap: (\d+) live")
+            live = int(m.group(1))
+            m = q.expect(rb"^pages: (\d+) of \d+ free")
+            q.expect(rb"koraos> ")
+            q.send("\x14")
+            q.expect(rb"\[serial -> screen terminal")
+            return live, int(m.group(1))
+
         def allocation_lifetime():
-            for _ in range(repeat):
+            baseline = None
+            for run in range(repeat):
                 q.send("allocprobe\r")
-                q.expect(rb"allocprobe: heap checked")
+                q.expect(rb"allocprobe: heap checked", timeout=60)
                 q.expect(rb"exited with 0")
                 q.expect(PROMPT)
-        yield "repeated EL0 heap and nested-process lifetime (%d runs)" % repeat, allocation_lifetime
+                # After the first run every cache is warm: from then on each
+                # reaped probe, including what it leaked on purpose, must give
+                # back exactly what it took.
+                if run == 0 or run == repeat - 1:
+                    counts = kernel_counts()
+                    if baseline is None:
+                        baseline = counts
+                    elif counts != baseline:
+                        raise Failure("kernel heap/pages (live, free) %s after the first run, "
+                                      "%s after %d runs" % (baseline, counts, repeat))
+        yield "repeated EL0 page runs, malloc heap and nested-process lifetime (%d runs)" % repeat, allocation_lifetime
 
     if keyboard:
         def keyboard_input():
@@ -348,7 +371,7 @@ def main():
     mode.add_argument("--debug", action="store_true")
     parser.add_argument("--ram", default="256M")
     parser.add_argument("--el2", action="store_true", help="enter virt via EL2 before dropping to EL1")
-    parser.add_argument("--repeat", type=int, default=0, help="repeat 64 KiB EL0 heap/nested-process probe")
+    parser.add_argument("--repeat", type=int, default=0, help="repeat the EL0 page/malloc/nested-process probe")
     parser.add_argument("--expect-root-failure", action="store_true", help="require a configured disk mount failure")
     parser.add_argument("--keyboard", action="store_true", help="inject keys through a VirtIO keyboard")
     parser.add_argument("--disk", help="external bare FAT32 or MBR FAT32 disk for virt")

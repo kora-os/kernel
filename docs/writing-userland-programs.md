@@ -9,14 +9,21 @@ onto the FAT32 image under `/bin`, and loaded from there at runtime.
 
 A program runs in EL0 with a deliberately small runtime:
 
-- **No libc.** No `malloc`, no `printf`, no `<string.h>`. You have the syscalls
-  (see [syscalls.md](syscalls.md)) and a handful of inline helpers in
-  [`user/libk/koraos.h`](../user/libk/koraos.h): `kputs`, `kput_int`,
-  `kstrlen`, `kstreq`. Anything else, you write yourself.
+- **No libc.** No `printf`, no `<string.h>`. You have the syscalls (see
+  [syscalls.md](syscalls.md)), a handful of inline helpers in
+  [`user/libk/koraos.h`](../user/libk/koraos.h) (`kputs`, `kput_int`,
+  `kstrlen`, `kstreq`), `memset`/`memcpy`/`memmove`, and a heap. Anything
+  else, you write yourself.
 - **No floating point.** Programs are built with `-mgeneral-regs-only`.
 - **A ~4 KB stack.** Each task gets a single-page user stack, so keep large
-  buffers off the stack (use small chunks, or `sbrk`).
-- **A lazy 64 KB heap** via `sbrk`, if you need dynamic memory.
+  buffers off the stack (use `malloc`, or static arrays).
+- **A heap that grows with the system's free memory.** `malloc`, `free`,
+  `calloc` and `realloc` (16-byte aligned) come from
+  [`user/libk/malloc.c`](../user/libk/malloc.c), a TLSF allocator over 64 KB
+  pools of pages; blocks over 256 KB get page runs of their own. For whole
+  pages, call `alloc_pages`/`free_pages` directly. Whatever you do not free is
+  reclaimed when your program is reaped. `kheap_info()` reports the heap's
+  pools and usage.
 - **A flat identity map.** Pointers are physical addresses; e.g. `fb_info()`
   hands you the framebuffer address and you write pixels to it directly.
 - **Cooperative, nesting processes.** `spawn` runs a child to completion before

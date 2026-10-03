@@ -27,7 +27,7 @@ mkdir -p "$OUT"
 failed=0
 
 # run_test <name> <kernel sources...>: tests/host/<name>_test.c plus the kernel
-# sources it exercises.
+# sources it exercises. Extra compiler flags for one test go in TEST_FLAGS.
 run_test() {
     local name="$1"
     shift
@@ -36,7 +36,7 @@ run_test() {
         sources+=("$ROOT/$src")
     done
     echo "== $name"
-    if ! "$CC" "${CFLAGS[@]}" -o "$OUT/${name}_test" \
+    if ! "$CC" "${CFLAGS[@]}" ${TEST_FLAGS[@]+"${TEST_FLAGS[@]}"} -o "$OUT/${name}_test" \
             "$ROOT/tests/host/${name}_test.c" "${sources[@]}"; then
         echo "   BUILD FAILED"
         failed=1
@@ -52,6 +52,10 @@ run_test term src/video/term.c
 run_test printf src/lib/printf.c
 run_test virt src/platform/virt.c
 run_test kmalloc src/mm/kmalloc.c src/mm/kmalloc_stress.c
+run_test user_mem src/proc/user_mem.c
+TEST_FLAGS=(-DLIBK_HOST_TEST -I "$ROOT/user/libk")
+run_test libk_malloc user/libk/malloc.c
+TEST_FLAGS=()
 "$ROOT/tests/run-filesystem-tests.sh" || failed=1
 "$ROOT/tests/run-ramfb-tests.sh" || failed=1
 "$ROOT/tests/run-virtio-tests.sh" || failed=1
