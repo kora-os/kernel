@@ -241,6 +241,37 @@ def run(q, graphics=True, keyboard=False, repeat=0):
         q.expect(rb"\[serial -> screen terminal")
     yield "irqs shows the system tick and the UART interrupt", irqs
 
+    def kernel_heap():
+        def heap_stats():
+            q.send("heap\r")
+            m = q.expect(rb"^heap: (\d+) live, \d+ allocated, (\d+) failed, (\d+) bad frees")
+            live, failed, bad = (int(g) for g in m.groups())
+            m = q.expect(rb"^pages: (\d+) of (\d+) free")
+            q.expect(rb"koraos> ")
+            return live, failed, bad, int(m.group(1))
+
+        q.send("\x14")
+        q.expect(rb"koraos> ")
+        live, failed, bad, pages = heap_stats()
+        for _ in range(4):  # each run seeds from the uptime
+            q.send("heaptest 3000\r")
+            m = q.expect(rb"^heaptest: (?:3000 rounds ok|FAILED check (\d+))", timeout=60)
+            if m.group(1):
+                raise Failure("heaptest failed check %s" % m.group(1).decode())
+            q.expect(rb"koraos> ")
+        live2, failed2, bad2, pages2 = heap_stats()
+        if (live2, failed2, bad2) != (live, failed, bad):
+            raise Failure("heap changed across heaptest: live/failed/bad %s -> %s"
+                          % ((live, failed, bad), (live2, failed2, bad2)))
+        if bad:
+            raise Failure("%d bad kfree calls since boot" % bad)
+        # At most one cached empty slab per size class may stay behind.
+        if pages2 < pages - 9:
+            raise Failure("heaptest leaked pages: %d -> %d free" % (pages, pages2))
+        q.send("\x14")
+        q.expect(rb"\[serial -> screen terminal")
+    yield "kernel heap stress leaves no leaks", kernel_heap
+
     if repeat:
         def allocation_lifetime():
             for _ in range(repeat):
@@ -356,6 +387,8 @@ def main():
     q = Qemu(args.qemu, os.path.abspath(args.kernel), os.path.abspath(args.out), args.machine, args.ram, extra, args.el2)
     failed = False
     try:
+        # The kernel heap checks itself before any later bring-up step uses it.
+        q.expect(rb"^\[heap\] self-test ok, \d+ of \d+ pages free", timeout=90)
         if args.disk:
             q.expect(rb"\[blkdev\] using VirtIO disk")
         if args.expect_root_failure:

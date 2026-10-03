@@ -1,4 +1,5 @@
 #include "mm/frame_alloc.h"
+#include "arch/irq.h"
 #include "mm.h"
 #ifdef KORAOS_VIRT
 #include "platform/virt.h"
@@ -19,6 +20,7 @@ extern char _end[];
 static uint64_t bitmap[BITMAP_WORDS];
 static uintptr_t pool_base;
 static size_t pool_frames;
+static size_t free_frames;
 
 static uintptr_t align_up(uintptr_t v, uintptr_t a) {
     return (v + a - 1) & ~(a - 1);
@@ -87,6 +89,12 @@ void frame_alloc_init(void) {
         }
     }
 #endif
+    free_frames = 0;
+    for (size_t i = 0; i < pool_frames; i++) {
+        if (!frame_is_used(i)) {
+            free_frames++;
+        }
+    }
 }
 
 void *frame_alloc_pages(size_t count) {
@@ -94,6 +102,11 @@ void *frame_alloc_pages(size_t count) {
         return NULL;
     }
 
+    // The kernel heap allocates from interrupt handlers too (the USB stack's
+    // completion routines), so the bitmap is only touched with IRQs masked.
+    // Zeroing happens afterwards: the run is already ours.
+    uint64_t flags = irq_save();
+    void *page = NULL;
     // Linear first-fit scan for a run of `count` consecutive free frames.
     for (size_t start = 0; start + count <= pool_frames; start++) {
         size_t run = 0;
@@ -104,15 +117,19 @@ void *frame_alloc_pages(size_t count) {
             for (size_t i = 0; i < count; i++) {
                 frame_set_used(start + i);
             }
-            void *page = (void *)(pool_base + start * PAGE_SIZE);
-            zero_pages(page, count);
-            return page;
+            free_frames -= count;
+            page = (void *)(pool_base + start * PAGE_SIZE);
+            break;
         }
         // Skip past the used frame that broke the run.
         start += run;
     }
+    irq_restore(flags);
 
-    return NULL;
+    if (page != NULL) {
+        zero_pages(page, count);
+    }
+    return page;
 }
 
 void *frame_alloc(void) {
@@ -134,11 +151,24 @@ void frame_free_pages(void *pages, size_t count) {
         return;
     }
 
+    uint64_t flags = irq_save();
     for (size_t i = 0; i < count; i++) {
-        frame_set_free(start + i);
+        if (frame_is_used(start + i)) {
+            frame_set_free(start + i);
+            free_frames++;
+        }
     }
+    irq_restore(flags);
 }
 
 void frame_free(void *page) {
     frame_free_pages(page, 1);
+}
+
+size_t frame_alloc_free_count(void) {
+    return free_frames;
+}
+
+size_t frame_alloc_total_count(void) {
+    return pool_frames;
 }

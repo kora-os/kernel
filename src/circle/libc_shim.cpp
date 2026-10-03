@@ -1,9 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Small C-runtime pieces the vendored Circle code expects from its environment
-// that KoraOS does not otherwise provide: malloc/free (routed to the kernel's
-// operator new/delete) and a few string helpers used by option parsing. Circle's
-// DebugHexDump is stubbed out.
+// that KoraOS does not otherwise provide: malloc/free (routed to the kernel
+// heap, whose 64-byte alignment matches Circle's own heap and keeps DMA cache
+// maintenance from touching neighbouring blocks) and a few string helpers used
+// by option parsing. Circle's DebugHexDump is stubbed out.
 
 #include <circle/debug.h>
 
@@ -11,12 +12,15 @@ using size_t = __SIZE_TYPE__;
 
 extern "C" {
 
+void *kmalloc(size_t size);
+void kfree(void *ptr);
+
 void *malloc(size_t size) {
-    return ::operator new(size);
+    return kmalloc(size);
 }
 
 void free(void *ptr) {
-    ::operator delete(ptr);
+    kfree(ptr);
 }
 
 char *strchr(const char *s, int c) {

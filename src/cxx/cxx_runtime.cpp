@@ -6,10 +6,9 @@
 // so the runtime surface we must supply by hand is small:
 //
 //   * cxx_init()          -- run C++ global constructors (.init_array).
-//   * operator new/delete -- dynamic allocation, backed by the page-granular
-//                            frame allocator. This is deliberately simple; when
-//                            Circle's memory system is vendored it can provide a
-//                            real sub-page heap and supersede these.
+//   * operator new/delete -- dynamic allocation, backed by the kernel heap
+//                            (mm/kmalloc.h): 64-byte aligned, zeroed blocks,
+//                            with over-aligned requests honoured exactly.
 //   * __cxa_* stubs       -- symbols the compiler references for static objects
 //                            and pure-virtual guards. The kernel never exits, so
 //                            registered destructors are simply never run.
@@ -18,23 +17,16 @@
 // compiler's built-in types rather than <stddef.h>/<stdint.h>, which would drag
 // in the hosted libc++ configuration.
 using size_t = __SIZE_TYPE__;
-using uint8_t = __UINT8_TYPE__;
 
-// From the frame allocator (mm/frame_alloc.h), declared here to avoid pulling a
-// C header into C++ translation.
-extern "C" void *frame_alloc_pages(size_t count);
-extern "C" void frame_free_pages(void *pages, size_t count);
+// From the kernel heap (mm/kmalloc.h), declared here to avoid pulling a C
+// header into C++ translation.
+extern "C" void *kmalloc(size_t size);
+extern "C" void *kmalloc_aligned(size_t size, size_t align);
+extern "C" void kfree(void *ptr);
 
-namespace {
-
-constexpr size_t kPageSize = 4096;
-
-// Reserve a header the size of the platform's max alignment so the pointer we
-// hand back stays 16-byte aligned (frame pages are page-aligned to start with).
-// The header stores the page count so operator delete can free the right run.
-constexpr size_t kHeader = 16;
-
-}  // namespace
+namespace std {
+enum class align_val_t : size_t {};
+}
 
 // On exhaustion these return nullptr rather than throwing std::bad_alloc: the
 // kernel is built -fno-exceptions, so a null return is the only sensible failure
@@ -44,70 +36,56 @@ constexpr size_t kHeader = 16;
 #pragma clang diagnostic ignored "-Wnonnull"
 
 void *operator new(size_t size) {
-    size_t pages = (size + kHeader + kPageSize - 1) / kPageSize;
-    if (pages == 0) {
-        pages = 1;
-    }
-    auto *base = static_cast<uint8_t *>(frame_alloc_pages(pages));
-    if (base == nullptr) {
-        return nullptr;
-    }
-    *reinterpret_cast<size_t *>(base) = pages;
-    return base + kHeader;
+    return kmalloc(size);
 }
 
 void *operator new[](size_t size) {
-    return operator new(size);
+    return kmalloc(size);
 }
 
-// Over-aligned new (C++17). Circle requests these for some USB structures. The
-// frame-allocator backing already returns page-aligned storage and we hand back
-// a 16-byte-aligned pointer, which satisfies typical alignments; larger explicit
-// alignments are not yet honoured exactly (revisit for DMA-descriptor alignment
-// in Pi 3 bring-up).
-namespace std {
-enum class align_val_t : size_t {};
+// Over-aligned new (C++17). Circle requests these for some USB structures.
+void *operator new(size_t size, std::align_val_t align) {
+    return kmalloc_aligned(size, static_cast<size_t>(align));
 }
 
-void *operator new(size_t size, std::align_val_t) {
-    return operator new(size);
-}
-
-void *operator new[](size_t size, std::align_val_t) {
-    return operator new(size);
+void *operator new[](size_t size, std::align_val_t align) {
+    return kmalloc_aligned(size, static_cast<size_t>(align));
 }
 
 #pragma clang diagnostic pop
 
-void operator delete(void *ptr, std::align_val_t) noexcept {
-    operator delete(ptr);
-}
-
-void operator delete[](void *ptr, std::align_val_t) noexcept {
-    operator delete(ptr);
-}
-
+// kfree() finds the block's size and alignment itself, so every delete form,
+// sized or aligned, is the same call.
 void operator delete(void *ptr) noexcept {
-    if (ptr == nullptr) {
-        return;
-    }
-    auto *base = static_cast<uint8_t *>(ptr) - kHeader;
-    size_t pages = *reinterpret_cast<size_t *>(base);
-    frame_free_pages(base, pages);
+    kfree(ptr);
 }
 
 void operator delete[](void *ptr) noexcept {
-    operator delete(ptr);
+    kfree(ptr);
 }
 
-// Sized-deallocation overloads (C++14+). The size is ignored; the page count in
-// the header is authoritative.
 void operator delete(void *ptr, size_t) noexcept {
-    operator delete(ptr);
+    kfree(ptr);
 }
 
 void operator delete[](void *ptr, size_t) noexcept {
-    operator delete(ptr);
+    kfree(ptr);
+}
+
+void operator delete(void *ptr, std::align_val_t) noexcept {
+    kfree(ptr);
+}
+
+void operator delete[](void *ptr, std::align_val_t) noexcept {
+    kfree(ptr);
+}
+
+void operator delete(void *ptr, size_t, std::align_val_t) noexcept {
+    kfree(ptr);
+}
+
+void operator delete[](void *ptr, size_t, std::align_val_t) noexcept {
+    kfree(ptr);
 }
 
 extern "C" {

@@ -13,6 +13,7 @@
 #include "fs/fat32.h"
 #include "mm.h"
 #include "mm/frame_alloc.h"
+#include "mm/kmalloc.h"
 #include "mm/mmu.h"
 #include "proc/task.h"
 #include "lib/printf.h"
@@ -56,8 +57,17 @@ void kernel_main(uintptr_t dtb) {
   mmu_init();
   frame_alloc_init();
 
+  // Exercise the kernel heap once before anything depends on it.
+  int heap_rc = kmalloc_stress(2000, 1);
+  if (heap_rc != 0) {
+    printf("[heap] self-test FAILED (check %d)\n", heap_rc);
+  } else {
+    printf("[heap] self-test ok, %u of %u pages free\n",
+           (unsigned)frame_alloc_free_count(), (unsigned)frame_alloc_total_count());
+  }
+
   // Prove the freestanding C++ toolchain and runtime work end to end (static
-  // ctors, virtual dispatch, operator new via the frame allocator). This is
+  // ctors, virtual dispatch, operator new via the kernel heap). This is
   // scaffolding for the Circle USB stack; remove once real C++ drivers land.
   cxx_selftest();
 
