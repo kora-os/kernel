@@ -4,6 +4,7 @@
 #include "mm.h"
 #include "mm/frame_alloc.h"
 #include "mm/kmalloc.h"
+#include "proc/user_mem.h"
 #include "lib/printf.h"
 
 static task_t tasks[MAX_TASKS];
@@ -25,11 +26,7 @@ static task_t *task_alloc(void) {
             t->image = NULL;
             t->image_pages = 0;
             t->stack = NULL;
-            t->heap = NULL;
-            t->heap_pages = 0;
-            t->heap_base = 0;
-            t->heap_brk = 0;
-            t->heap_end = 0;
+            t->runs = NULL;
             t->arg0 = 0;
             t->arg1 = 0;
             for (int f = 0; f < MAX_OPEN_FILES; f++) {
@@ -51,10 +48,7 @@ static void task_free(task_t *t) {
         frame_free(t->stack);
         t->stack = NULL;
     }
-    if (t->heap != NULL) {
-        frame_free_pages(t->heap, t->heap_pages);
-        t->heap = NULL;
-    }
+    user_pages_release_all(t);
     t->pid = 0;
     t->state = TASK_UNUSED;
 }

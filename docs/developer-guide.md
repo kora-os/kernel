@@ -184,7 +184,7 @@ CI builds shared userfs once and passes its artifact to kernel jobs. It builds
 all four targets, both hardware release targets, a complete SD payload, and
 retains host sanitizer/CLI tests and raspi3b smoke. Independent virt profiles
 cover embedded graphics, external disk/keyboard at 128 MiB, serial-only 64 MiB,
-EL2 entry, and repeated 64 KiB EL0 allocation/nested-process lifetime. Logs and
+EL2 entry, and repeated EL0 page/malloc allocation and nested-process lifetime. Logs and
 screenshots are retained on failure. QEMU does not validate real Pi USB, HDMI,
 cache behavior or firmware. The current virt profile has no SMP, GICv3, PCI,
 networking, audio or VirtIO GPU; scheduling remains cooperative.

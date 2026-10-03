@@ -22,7 +22,7 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
 | 0 | `write` | `ssize_t write(int fd, const void *buf, size_t len)` | bytes written, or `-1` |
 | 1 | `exit` | `void exit(int status)` | does not return |
 | 2 | `read` | `ssize_t read(int fd, void *buf, size_t len)` | bytes read, `0` at EOF, or `-1` |
-| 3 | `sbrk` | `void *sbrk(long increment)` | previous break, or `(void*)-1` |
+| 3 | (retired) | was `sbrk` | `-1` |
 | 4 | `spawn` | `int spawn(const char *name, int argc, char *const argv[])` | child pid, or `-1` |
 | 5 | `wait` | `int wait(int pid)` | child exit code, or `-1` |
 | 6 | `getpid` | `int getpid(void)` | current pid |
@@ -33,6 +33,8 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
 | 11 | `lseek` | `long lseek(int fd, long offset, int whence)` | new offset, or `-1` |
 | 12 | `readdir` | `int readdir(int fd, struct dirent *out)` | `1` entry, `0` end, `-1` error |
 | 13 | `stat` | `int stat(const char *path, struct stat *out)` | `0`, or `-1` |
+| 14 | `alloc_pages` | `void *alloc_pages(size_t count)` | base of `count` zeroed pages, or `NULL` |
+| 15 | `free_pages` | `int free_pages(void *base)` | `0`, or `-1` |
 | 32 | `chdir` | `int chdir(const char *path)` | `0`, or `-1` |
 | 33 | `getcwd` | `int getcwd(char *buf, size_t size)` | `0`, or `-1` |
 
@@ -42,8 +44,15 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
   console (UART + framebuffer).
 - **`read`**: `fd` 0 reads a line from the console (echoed, backspace honoured,
   returns at newline or when the buffer fills). `fd ≥ 3` reads from an open file.
-- **`sbrk`**: grows (or shrinks) the caller's heap, allocated lazily on first
-  use; returns the previous break so `sbrk(0)` reads the current break.
+- **`alloc_pages`** / **`free_pages`**: Amiga-style memory: a run of `count`
+  contiguous, zeroed 4 KB pages (`KORAOS_PAGE_SIZE`) anywhere in RAM, returned
+  by its base address. The kernel records each run against the calling task, so
+  `free_pages` needs no size, rejects addresses the task does not own, and
+  everything still allocated is reclaimed when the task is reaped. libk's
+  `malloc` builds on these (see
+  [writing-userland-programs.md](writing-userland-programs.md)). There is no
+  `sbrk`: with one flat address space, memory after a heap is usually someone
+  else's, so a contiguous break cannot grow reliably.
 - **`spawn`**: the process model is **cooperative and nesting**: `spawn` loads
   the program and runs it to completion in EL0 while the caller is suspended,
   then returns the (now-exited) child's pid. Call `wait(pid)` afterwards to reap

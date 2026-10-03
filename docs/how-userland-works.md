@@ -57,9 +57,10 @@ holds three kinds of memory, all from the same pool:
 |--------|------|-------|
 | image  | a few pages | code + data + BSS, placed by `elf_load` |
 | stack  | 1 page (4 KB) | `SP_EL0` starts at the top; `argv` lives here |
-| heap   | up to 64 KB | allocated lazily on the first `sbrk`, grown by the break |
+| page runs | any number | from `alloc_pages`, recorded per task; libk's `malloc` pools live here |
 
-When a task is reaped, all three are returned to the pool.
+When a task is reaped, all of them are returned to the pool, including page
+runs the program never freed.
 
 ## Several programs at once
 
