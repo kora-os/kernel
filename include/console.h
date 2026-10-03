@@ -5,7 +5,8 @@
 // Kernel debug console on the UART ("koraos> "). It is not a task: it is fed one
 // byte at a time by the serial input router (tty.c), from the UART interrupt or
 // from the terminal's idle loop, so it runs alongside the shell on the screen.
-// Commands execute in that context and must not block or allocate.
+// Commands execute in that context: they must not block, and may use the kernel
+// heap (it is interrupt safe) only briefly.
 
 #define CONSOLE_MAX_CMD_LEN 64
 

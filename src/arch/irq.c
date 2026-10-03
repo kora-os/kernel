@@ -103,3 +103,14 @@ void irq_enable(void) {
 void irq_disable(void) {
     asm volatile("msr daifset, #2" ::: "memory");  // set PSTATE.I
 }
+
+uint64_t irq_save(void) {
+    uint64_t daif;
+    asm volatile("mrs %0, daif" : "=r"(daif));
+    asm volatile("msr daifset, #2" ::: "memory");
+    return daif;
+}
+
+void irq_restore(uint64_t flags) {
+    asm volatile("msr daif, %0" ::"r"(flags) : "memory");
+}

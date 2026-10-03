@@ -6,6 +6,8 @@
 #include "lib/printf.h"
 #include "lib/string.h"
 #include "mini_uart.h"
+#include "mm/frame_alloc.h"
+#include "mm/kmalloc.h"
 #include "utils.h"
 
 void console_init(void) {
@@ -24,6 +26,8 @@ void console_cmd_help(const char *args) {
   uart_puts("  get_el - Get current Exception Level\n");
   uart_puts("  version - Print current KoraOS version\n");
   uart_puts("  irqs - Show interrupt counters and the system tick\n");
+  uart_puts("  heap - Show kernel heap and page pool usage\n");
+  uart_puts("  heaptest [rounds] - Stress the kernel heap (default 2000 rounds)\n");
   uart_puts("Ctrl-T switches the serial line between this console and the\n");
   uart_puts("screen terminal (the shell).\n");
 }
@@ -55,18 +59,76 @@ void console_cmd_irqs(const char *args) {
   }
 }
 
+// Kernel heap usage per size class, page runs, and the frame pool under both.
+void console_cmd_heap(const char *args) {
+  (void)args;
+  struct kmalloc_stats st;
+  kmalloc_get_stats(&st);
+  printf("  class  slabs   used / capacity\n");
+  for (unsigned i = 0; i < KMALLOC_CLASSES; i++) {
+    printf("  %5u  %5u  %5u / %u\n", (unsigned)st.classes[i].block_size,
+           (unsigned)st.classes[i].slabs, (unsigned)st.classes[i].used,
+           (unsigned)st.classes[i].capacity);
+  }
+  printf("large: %u allocations in %u pages\n", (unsigned)st.large_allocs,
+         (unsigned)st.large_pages);
+  printf("heap: %u live, %u allocated, %u failed, %u bad frees\n",
+         (unsigned)st.live_allocs, (unsigned)st.total_allocs,
+         (unsigned)st.failed_allocs, (unsigned)st.bad_frees);
+  printf("pages: %u of %u free\n", (unsigned)frame_alloc_free_count(),
+         (unsigned)frame_alloc_total_count());
+}
+
+// Run the deterministic heap stress; the seed follows the uptime so repeated
+// runs cover different sequences. Runs with interrupts masked (the console is
+// fed from the UART interrupt), so keep the round count modest.
+void console_cmd_heaptest(const char *args) {
+  unsigned rounds = 0;
+  for (; *args >= '0' && *args <= '9'; args++) {
+    rounds = rounds * 10 + (unsigned)(*args - '0');
+    if (rounds > 100000) {
+      rounds = 100000;
+    }
+  }
+  if (rounds == 0) {
+    rounds = 2000;
+  }
+  size_t free_before = frame_alloc_free_count();
+  uint32_t seed = (uint32_t)timer_us() | 1u;
+  int rc = kmalloc_stress(rounds, seed);
+  if (rc != 0) {
+    printf("heaptest: FAILED check %d with seed 0x%x\n", rc, (unsigned)seed);
+    return;
+  }
+  printf("heaptest: %u rounds ok, seed 0x%x, pages free %u -> %u\n", rounds,
+         (unsigned)seed, (unsigned)free_before, (unsigned)frame_alloc_free_count());
+}
+
 console_command_t commands[] = {
     {"help", "Show available commands", console_cmd_help},
     {"get_el", "Get the current Exception Level", console_cmd_get_el},
     {"version", "Get current KoraOS version", console_cmd_version},
     {"irqs", "Show interrupt counters and the system tick", console_cmd_irqs},
+    {"heap", "Show kernel heap and page pool usage", console_cmd_heap},
+    {"heaptest", "Stress the kernel heap", console_cmd_heaptest},
     {NULL, NULL, NULL},
 };
 
+// The first word names the command; the handler gets the rest of the line
+// with leading spaces skipped.
 void console_parse_and_execute(const char *input) {
+  size_t len = 0;
+  while (input[len] != '\0' && input[len] != ' ') {
+    len++;
+  }
+  const char *args = input + len;
+  while (*args == ' ') {
+    args++;
+  }
   for (int i = 0; commands[i].name != NULL; i++) {
-    if (strcmp(input, commands[i].name) == 0) {
-      commands[i].handler(input);
+    if ((size_t)strlen(commands[i].name) == len &&
+        strncmp(input, commands[i].name, len) == 0) {
+      commands[i].handler(args);
       return;
     }
   }
