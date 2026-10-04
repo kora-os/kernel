@@ -155,7 +155,7 @@ static void corrupt_media(void) {
                   "invalid LFN falls back to short alias");
             entries++;
         }
-        CHECK(rc == 0 && entries == 4, "malformed LFN neither hides nor adds real entries");
+        CHECK(rc == 0 && entries == 5, "malformed LFN neither hides nor adds real entries");
         fat32_unmount(volume);
         free(backend.ctx);
     }
@@ -320,6 +320,104 @@ static void namespace_path_boundaries(void) {
     CHECK(live_allocations == 0, "boundary path resolution leaks no scratch state");
 }
 
+static void assign_semantics(void) {
+    blkdev_t alpha, beta;
+    if (!load_backend("alpha.img", &alpha) || !load_backend("beta.img", &beta)) return;
+    blkdev_registry_reset();
+    CHECK(blkdev_register(&alpha, BLKDEV_RAMDISK) == 0 &&
+          blkdev_register(&beta, BLKDEV_VIRTIO) == 0, "register assign fixtures");
+    CHECK(fs_mount_registered(blkdev_partition_io(0)) == 0, "mount assign fixtures");
+    fs_cwd_t cwd, resolved;
+    CHECK(fs_boot_cwd(&cwd) == 0, "assign boot cwd");
+    CHECK(fs_assign_count() == 2 && fs_assign_get(2) == NULL, "default assigns enumerated");
+    CHECK(fs_volume_get(0)->boot && !fs_volume_get(1)->boot &&
+          fs_volume_get(0)->read_only && fs_volume_get(1)->read_only,
+          "volume metadata identifies boot and read-only views");
+    CHECK(fs_assign_get(0)->immutable && strcmp(fs_assign_get(0)->name, "sys") == 0,
+          "sys boot assign immutable");
+    CHECK(fs_chdir(&cwd, "beta:docs") == 0, "set different current volume");
+    fat32_file_t command;
+    CHECK(fs_program_open(&cwd, "bootcmd", &command) == 0 &&
+          command.volume == fs_volume_get(0)->volume, "default c selects boot bin independently of cwd");
+    CHECK(fs_program_open(&cwd, "extrahello", &command) == FS_ERR_NOTFOUND,
+          "bare command does not search current volume bin");
+    CHECK(fs_assign_set(&cwd, "C:", "beta:bin") == 0, "replace c using case-insensitive name");
+    CHECK(fs_program_open(&cwd, "extrahello", &command) == 0 &&
+          command.volume == fs_volume_get(1)->volume, "bare command searches new c target");
+    CHECK(fs_program_open(&cwd, "c:/extrahello", &command) == 0 &&
+          command.volume == fs_volume_get(1)->volume, "leading slash after assign retains bin anchor");
+    CHECK(fs_program_open(&cwd, "bootcmd", &command) == FS_ERR_NOTFOUND,
+          "bare command has no hidden boot-bin fallback");
+    CHECK(fs_assign_set(&cwd, "c", NULL) == 0 &&
+          fs_program_open(&cwd, "bootcmd", &command) == FS_ERR_NOTFOUND,
+          "missing c fails instead of using boot bin");
+    CHECK(fs_assign_set(&cwd, "c", "sys:bin") == 0, "c restored through sys target");
+    CHECK(fs_assign_set(&cwd, "sys", "beta:") < 0 && fs_assign_set(&cwd, "SYS:", NULL) < 0,
+          "sys cannot be replaced or removed");
+    CHECK(fs_resolve(&cwd, "sys:", &resolved, NULL) == 0 &&
+          resolved.volume == fs_volume_get(0)->volume && strcmp(resolved.path, "/") == 0,
+          "sys remains the original boot root");
+    CHECK(fs_assign_set(&cwd, "WoRk:", ".") == 0 &&
+          fs_resolve(&cwd, "work:", &resolved, NULL) == 0 && strcmp(resolved.path, "/docs") == 0,
+          "relative target captured against setter cwd");
+    CHECK(fs_assign_set(&cwd, "nested", "WORK:/child") == 0,
+          "assign slash retains target anchor");
+    CHECK(fs_assign_set(&cwd, "work", "alpha:docs") == 0 &&
+          fs_resolve(&cwd, "nested:", &resolved, NULL) == 0 &&
+          resolved.volume == fs_volume_get(1)->volume && strcmp(resolved.path, "/docs/child") == 0,
+          "resolved nested target remains stable after source replacement");
+    CHECK(fs_assign_set(&cwd, "work", NULL) == 0 &&
+          fs_resolve(&cwd, "nested:", &resolved, NULL) == 0,
+          "resolved nested target remains stable after source removal");
+    CHECK(fs_assign_set(&cwd, "alpha", "df0:docs") == 0 && fs_chdir(&cwd, "df0:docs") == 0,
+          "assign can shadow same-volume label with a subdirectory");
+    char path[FS_QUALIFIED_PATH_MAX];
+    CHECK(fs_getcwd(&cwd, path, sizeof(path)) == 0 && strcmp(path, "df0:docs") == 0,
+          "shadowed subdirectory label makes getcwd use device");
+    CHECK(fs_chdir(&cwd, path) == 0 && strcmp(cwd.path, "/docs") == 0,
+          "shadowed-label getcwd round-trips without repeating anchor");
+    CHECK(fs_assign_set(&cwd, "alpha", NULL) == 0 &&
+          fs_getcwd(&cwd, path, sizeof(path)) == 0 && strcmp(path, "alpha:docs") == 0,
+          "removing assign restores label addressing");
+    CHECK(fs_assign_set(&cwd, "bad", "alpha:marker.txt") == FS_ERR_NOTDIR,
+          "file cannot be assign target");
+    CHECK(fs_assign_set(&cwd, "bad", "missing:") == FS_ERR_NOTFOUND,
+          "missing prefix cannot be assign target");
+    CHECK(fs_assign_set(&cwd, "bad", "missing/..") == FS_ERR_NOTFOUND,
+          "invalid target component cannot be normalized away");
+    const char *bad_names[] = {"", "bad/name", "a:b", "white space", "df0", "DF999"};
+    for (unsigned i = 0; i < sizeof(bad_names) / sizeof(bad_names[0]); i++) {
+        CHECK(fs_assign_set(&cwd, bad_names[i], "beta:docs") < 0,
+              "invalid/reserved assign name rejected: %s", bad_names[i]);
+    }
+    char too_long[FS_PREFIX_MAX + 2];
+    for (unsigned i = 0; i < FS_PREFIX_MAX + 1; i++) too_long[i] = 'a';
+    too_long[FS_PREFIX_MAX + 1] = 0;
+    CHECK(fs_assign_set(&cwd, too_long, "beta:docs") < 0, "overlong assign name rejected");
+    CHECK(fs_assign_set(&cwd, "retained", "beta:docs") == 0, "assign before allocation failure");
+    fail_allocations = true;
+    CHECK(fs_assign_set(&cwd, "retained", "alpha:docs") < 0, "failed replacement reported");
+    fail_allocations = false;
+    CHECK(fs_resolve(&cwd, "retained:", &resolved, NULL) == 0 &&
+          resolved.volume == fs_volume_get(1)->volume, "failed replacement preserves previous target");
+    for (unsigned i = fs_assign_count(); i < FS_MAX_ASSIGNS; i++) {
+        char name[16];
+        snprintf(name, sizeof(name), "slot%u", i);
+        CHECK(fs_assign_set(&cwd, name, "beta:docs") == 0, "fill bounded assign slot %u", i);
+    }
+    CHECK(fs_assign_count() == FS_MAX_ASSIGNS &&
+          fs_assign_set(&cwd, "overflow", "beta:docs") < 0, "assign capacity enforced");
+    CHECK(fs_assign_set(&cwd, "retained", "alpha:docs") == 0,
+          "replacement remains possible at assign capacity");
+    CHECK(fs_assign_set(&cwd, "retained", NULL) == 0 &&
+          fs_assign_set(&cwd, "reused", "beta:docs") == 0, "removed assign slot reusable");
+    fs_namespace_reset();
+    blkdev_registry_reset();
+    free(alpha.ctx);
+    free(beta.ctx);
+    CHECK(live_allocations == 0, "assign reset releases all target records");
+}
+
 int main(int argc, char **argv) {
     if (argc != 2) return 2;
     fixture_directory = argv[1];
@@ -329,6 +427,7 @@ int main(int argc, char **argv) {
     namespace_paths();
     namespace_collisions();
     namespace_path_boundaries();
+    assign_semantics();
     printf("filesystem_test: %d checks, %d failures\n", test_checks, test_failures);
     return test_failures != 0;
 }

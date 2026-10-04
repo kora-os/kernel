@@ -194,10 +194,11 @@ categories:
         milestone: 9
       - id: volume-navigation
         name: Volume navigation
-        status: in_progress
+        status: completed
         description: Amiga-style device and volume names, assigns, cd and pwd.
         milestone: 8
-        prs: [47]
+        completed: 2026-10-04
+        prs: [47, 49]
       - id: job-control
         name: Background jobs and pinning
         status: planned
@@ -236,10 +237,11 @@ categories:
         prs: [40]
       - id: volumes
         name: Volumes and assigns
-        status: in_progress
+        status: completed
         description: Several mounted volumes addressed by device or volume name.
         milestone: 8
-        prs: [47]
+        completed: 2026-10-04
+        prs: [47, 49]
       - id: partitions
         name: MBR partitions
         status: completed

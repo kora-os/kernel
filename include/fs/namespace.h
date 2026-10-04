@@ -6,6 +6,7 @@
 #define FS_PREFIX_MAX 31 // capacity budget for future assign names, excluding colon
 #define FS_QUALIFIED_PATH_MAX (FS_PATH_MAX + FS_PREFIX_MAX + 1)
 #define FS_DEVICE_NAME_MAX 8
+#define FS_MAX_ASSIGNS 16
 
 typedef struct fs_cwd {
     fat32_volume_t *volume;
@@ -16,7 +17,22 @@ typedef struct fs_volume_info {
     fat32_volume_t *volume;
     char device[FS_DEVICE_NAME_MAX]; // df0, df1, ...; no colon
     const char *label;
+    bool boot;
+    bool read_only;
 } fs_volume_info_t;
+
+typedef struct fs_assign_info {
+    char name[FS_PREFIX_MAX + 1];
+    fs_cwd_t target; // resolved snapshot, independent of other assigns
+    bool immutable;
+} fs_assign_info_t;
+
+unsigned fs_assign_count(void);
+const fs_assign_info_t *fs_assign_get(unsigned index);
+// NULL target removes an assign. sys is immutable; replacing/removing c is
+// allowed. Target paths must resolve to existing directories. Names may carry
+// one trailing colon. Device-slot names df<digits> remain reserved.
+int fs_assign_set(const fs_cwd_t *cwd, const char *name, const char *target);
 
 // Boot/test initialization only. Mounts every valid registered view. Boot must
 // identify the exact preferred view; NULL or an invalid boot fails closed.
@@ -35,5 +51,5 @@ int fs_getcwd(const fs_cwd_t *cwd, char *buf, size_t size); // 0 or FS_ERR_*
 int fs_open(const fs_cwd_t *cwd, const char *path, fat32_file_t *out);
 int fs_opendir(const fs_cwd_t *cwd, const char *path, fat32_file_t *out);
 int fs_stat(const fs_cwd_t *cwd, const char *path, fat32_stat_t *out);
-// Bare commands use the boot volume's /bin until assigns land in step 8.3.
+// Bare commands use c: exclusively; explicit paths use the caller's cwd.
 int fs_program_open(const fs_cwd_t *cwd, const char *name, fat32_file_t *out);
