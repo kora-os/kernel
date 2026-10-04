@@ -18,7 +18,8 @@ it rejects the kernel's own `strlen` declaration under `-Werror`.
 ### Writing a test
 
 - Add `tests/host/<name>_test.c` and a `run_test <name> <kernel sources...>` line
-  in `tests/run-host-tests.sh`.
+  in `tests/run-host-tests.sh`. Set `TEST_FLAGS` around the line for extra
+  compiler flags (the libk malloc test uses it).
 - Include `test.h` and the kernel header under test. Do **not** include system
   headers: the kernel's `common.h` defines its own fixed-width types, which
   clash with `<stdint.h>`. `test.h` declares the few libc functions tests need.
@@ -31,6 +32,8 @@ Current suites:
 
 | Test | Covers |
 |------|--------|
+| `libk_malloc_test.c` | `user/libk/malloc.c` (built with `LIBK_HOST_TEST`, which renames it `libk_malloc` and so on): alignment, neighbour separation, coalescing, pool growth and release, direct page-run blocks, bad and double frees, `realloc`/`calloc`, exhaustion, a 200 000-round stress with `kheap_info` consistency checks |
+| `user_mem_test.c` | `src/proc/user_mem.c`: per-task page-run records behind `alloc_pages`/`free_pages`, foreign and double frees, reclaim on teardown, no leaks on failure |
 | `filesystem_test.c` | `src/fs/fat32.c` and `src/fs/namespace.c` on mtools-made volumes: independent geometry/caches, root/BPB labels, duplicate labels/device collisions, relative paths, cwd isolation, retained handles, malformed geometry/chains/LFN, allocation and I/O errors |
 | `blkdev_test.c` | `src/fs/blkdev.c`: bare FAT32 and mixed MBR discovery, hidden FAT32 types, invalid/range/overlap tables, partition-relative bounded read/write/flush, read-only and unsupported I/O, registry capacity |
 | `kmalloc_test.c` | `src/mm/kmalloc.c`, `src/mm/kmalloc_stress.c`: alignment, zeroing, cache-line separation, block reuse, slab release, page runs, over-aligned blocks, exhaustion, invalid and double frees, balanced IRQ masking, seeded stress |
@@ -99,8 +102,11 @@ verifies timer/UART IRQ progress, runs `heaptest` (seeded kernel heap stress)
 and checks that `heap` reports no leaks or bad frees, and checks terminal
 colors and graphics pixels using QEMU screenshots. Virt optionally injects
 Shift/release, Backspace, Enter and scrollback through a VirtIO keyboard. UART
-observes output. `--repeat N` checks a 64 KiB EL0 heap across a nested process,
-then reaping, N times; 256 runs exceed the pool’s cumulative heap capacity.
+observes output. `--repeat N` runs `allocprobe` N times: page runs, a `malloc`
+heap grown to about 1.5 MiB with churn and `realloc`, a nested child while it is
+live, and deliberate leaks. The kernel heap's live count and the free page count
+must be the same after the last run as after the first, so everything a reaped
+task held, leaked or not, came back.
 
 Use `--release` and `--build-dir` to match the build configuration. `--kernel`
 and `--out` override the image and artifact locations. Defaults are the selected

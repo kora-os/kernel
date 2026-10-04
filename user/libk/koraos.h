@@ -12,6 +12,10 @@
 typedef unsigned long size_t;
 typedef long ssize_t;
 
+#ifndef NULL
+#define NULL ((void *)0)
+#endif
+
 /* Framebuffer geometry, filled by fb_info(). With the flat identity map a user
  * program writes pixels directly to `addr`. */
 struct fb_info {
@@ -62,8 +66,49 @@ int stat(const char *path, struct stat *out);
 int chdir(const char *path);
 int getcwd(char *buf, size_t size);
 
-/* Memory */
-void *sbrk(long increment);
+/* Memory. alloc_pages() returns `count` contiguous zeroed pages (NULL on
+ * failure); free_pages() takes the base address back (0, or -1 if the run is
+ * not yours). Pages a program does not free are reclaimed when it is reaped.
+ * malloc() and friends (user/libk/malloc.c) build a heap on top: 16-byte
+ * aligned blocks from pools of pages, so the heap grows as long as the system
+ * has free pages. */
+#define KORAOS_PAGE_SIZE 4096
+
+#ifdef LIBK_HOST_TEST
+/* Host unit tests link libk's malloc next to the host libc: rename it so it
+ * does not replace the host's own allocator. */
+#define malloc libk_malloc
+#define free libk_free
+#define calloc libk_calloc
+#define realloc libk_realloc
+#endif
+
+void *alloc_pages(size_t count);
+int free_pages(void *base);
+
+void *malloc(size_t size);
+void free(void *ptr);
+void *calloc(size_t count, size_t size);
+void *realloc(void *ptr, size_t size);
+
+/* Heap diagnostics, walked from the pools (for tests and curious programs). */
+struct kheap_info {
+    size_t pools;          /* page-run pools backing malloc */
+    size_t pool_bytes;     /* their total size */
+    size_t used_blocks;    /* live malloc blocks in the pools */
+    size_t used_bytes;     /* their size, headers included */
+    size_t free_bytes;     /* free space in the pools */
+    size_t direct_allocs;  /* large blocks with page runs of their own */
+    size_t direct_bytes;
+    size_t bad_frees;      /* misaligned or double frees ignored */
+    size_t corrupt;        /* inconsistencies found in the pools (should be 0) */
+};
+void kheap_info(struct kheap_info *out);
+
+/* Memory primitives (user/libk/mem.c); the compiler may also emit calls. */
+void *memset(void *dest, int c, size_t n);
+void *memcpy(void *dest, const void *src, size_t n);
+void *memmove(void *dest, const void *src, size_t n);
 
 /* Process control */
 void exit(int status) __attribute__((noreturn));

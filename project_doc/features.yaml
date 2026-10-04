@@ -161,9 +161,11 @@ categories:
         prs: [11]
       - id: user-memory
         name: Growable user memory
-        status: planned
+        status: completed
         description: Page allocation syscalls and a pool-based malloc in libk.
         milestone: 6
+        completed: 2026-10-04
+        prs: [48]
       - id: libc
         name: C library
         status: planned
