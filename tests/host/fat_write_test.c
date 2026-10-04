@@ -404,6 +404,28 @@ static void unsupported_flush(void) {
     fat32_close(&f);
     finish(&d, v);
 }
+static void partition_capabilities(void) {
+    for (unsigned missing = 0; missing < 2; missing++) {
+        blkdev_t backend = clone();
+        if (missing == 0) backend.write = NULL;
+        else backend.flush = NULL;
+        blkdev_registry_reset();
+        CHECK(blkdev_register(&backend, BLKDEV_VIRTIO) == 0 &&
+              blkdev_partition_count() == 1, "register backend with incomplete writable capabilities");
+        blkdev_t *view = blkdev_partition_io(0);
+        CHECK(view && !view->read_only, "partition view retains negotiated read-only state");
+        fat32_volume_t *volume = mount(view);
+        fat32_file_t file = {0};
+        CHECK(fat32_open_flags(volume, "/original.bin", FAT32_O_RDWR, &file) == FS_ERR_UNSUPPORTED &&
+              writes == 0, "partition view rejects missing write or flush before media mutation");
+        CHECK(fat32_sync_volume(volume) == 0, "unsupported write open leaves volume clean");
+        fat32_close(&file);
+        CHECK(fat32_unmount(volume) == 0, "unsupported-capability volume remains healthy for unmount");
+        blkdev_registry_reset();
+        free(backend.ctx);
+        CHECK(allocations == 0, "partition capability checks release all allocations");
+    }
+}
 int main(int argc, char **argv) {
     if (argc != 2) return 2;
     directory = argv[1];
@@ -428,6 +450,7 @@ int main(int argc, char **argv) {
     interrupted_metadata();
     invalid_reserved_geometry();
     unsupported_flush();
+    partition_capabilities();
     free(source);
     printf("fat_write_test: %d checks, %d failures\n", test_checks, test_failures);
     return test_failures != 0;

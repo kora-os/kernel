@@ -40,6 +40,7 @@ static task_t *task_alloc(void) {
 
 // Release a task's held memory and return its slot to the pool.
 static void task_free(task_t *t) {
+    fs_cwd_release(&t->cwd);
     for (int f = 0; f < MAX_OPEN_FILES; f++) {
         if (t->files[f].used) {
             fat32_close(&t->files[f].file);
@@ -140,6 +141,7 @@ static int load_program(const char *name, struct loaded_prog *lp) {
     }
     fat32_file_t f;
     int rc = fs_program_open(cwd, name, &f);
+    fs_cwd_release(initial);
     kfree(initial);
     if (rc != 0) return -1;
     if (f.size == 0) {
@@ -197,9 +199,8 @@ int task_spawn(const char *name, int argc, char *const argv[]) {
         return -1;
     }
     t->parent = current;
-    if (current != NULL) {
-        t->cwd = current->cwd;
-    } else if (fs_boot_cwd(&t->cwd) != 0) {
+    int cwd_rc = current != NULL ? fs_cwd_copy(&t->cwd, &current->cwd) : fs_boot_cwd(&t->cwd);
+    if (cwd_rc != 0) {
         task_free(t);
         frame_free_pages(lp.image, lp.image_pages);
         frame_free(stack);

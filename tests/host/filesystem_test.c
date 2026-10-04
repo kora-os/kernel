@@ -22,6 +22,7 @@ static const char *fixture_directory;
 static unsigned live_allocations;
 static bool fail_allocations;
 static int backend_error;
+static int backend_flush_error;
 
 void *kmalloc(size_t size) {
     if (fail_allocations) return NULL;
@@ -45,6 +46,17 @@ static int memory_read(blkdev_t *dev, uint32_t lba, uint32_t count, void *buf) {
     uint8_t *destination = buf;
     for (size_t i = 0; i < (size_t)count * BLK_SECTOR_SIZE; i++) destination[i] = source[i];
     return 0;
+}
+static int memory_write(blkdev_t *dev, uint32_t lba, uint32_t count, const void *buf) {
+    if ((uint64_t)lba + count > dev->sector_count) return BLK_ERR_RANGE;
+    uint8_t *destination = (uint8_t *)dev->ctx + (size_t)lba * BLK_SECTOR_SIZE;
+    const uint8_t *source = buf;
+    for (size_t i = 0; i < (size_t)count * BLK_SECTOR_SIZE; i++) destination[i] = source[i];
+    return 0;
+}
+static int memory_flush(blkdev_t *dev) {
+    (void)dev;
+    return backend_flush_error;
 }
 static bool load_backend(const char *name, blkdev_t *out) {
     char path[1024];
@@ -206,7 +218,7 @@ static void namespace_paths(void) {
     CHECK(fs_volume_get(2) == NULL, "volume enumeration bounded");
     CHECK(strcmp(fs_volume_get(0)->device, "df0") == 0 &&
           strcmp(fs_volume_get(1)->device, "df1") == 0, "slots span backend types");
-    fs_cwd_t cwd, location;
+    fs_cwd_t cwd = {0}, location;
     char path[FS_PATH_MAX];
     CHECK(fs_boot_cwd(&cwd) == 0 && fs_getcwd(&cwd, path, sizeof(path)) == 0 &&
           strcmp(path, "alpha:") == 0, "initial cwd is unique boot label root");
@@ -226,7 +238,12 @@ static void namespace_paths(void) {
           strcmp(content, "alpha volume\n") == 0, "existing fd retains original volume after chdir");
     CHECK(fs_chdir(&cwd, "/docs") == 0 && fs_getcwd(&cwd, path, sizeof(path)) == 0 &&
           strcmp(path, "beta:docs") == 0, "leading slash roots at current volume");
-    fs_cwd_t child = cwd;
+    fs_cwd_t child = {0};
+    CHECK(fs_cwd_copy(&child, &cwd) == 0, "inherit an independently owned cwd");
+    CHECK(fs_namespace_reset() == FS_ERR_BUSY && fs_volume_count() == 2 &&
+          fs_assign_count() == 2, "busy reset preserves mounts and default assigns");
+    CHECK(fs_getcwd(&cwd, path, sizeof(path)) == 0 && strcmp(path, "beta:docs") == 0,
+          "busy reset retains valid cwd ownership");
     CHECK(fs_chdir(&child, "df0:") == 0 && fs_getcwd(&cwd, path, sizeof(path)) == 0 &&
           strcmp(path, "beta:docs") == 0, "inherited cwd is independently mutable");
     CHECK(fs_chdir(&cwd, "missing/..") == FS_ERR_NOTFOUND,
@@ -251,6 +268,8 @@ static void namespace_paths(void) {
     fail_allocations = false;
     fat32_close(&existing);
     fat32_close(&file);
+    fs_cwd_release(&child);
+    fs_cwd_release(&cwd);
     fs_namespace_reset();
     CHECK(live_allocations == 0, "namespace reset releases mounted volumes and scratch state");
     CHECK(fs_mount_registered(NULL) < 0 && fs_boot_cwd(&cwd) < 0,
@@ -269,7 +288,7 @@ static void namespace_collisions(void) {
         CHECK(blkdev_register(&a, BLKDEV_RAMDISK) == 0 &&
               blkdev_register(&b, BLKDEV_SD) == 0, "register collision fixtures");
         CHECK(fs_mount_registered(blkdev_partition_io(0)) == 0, "mount collision fixtures");
-        fs_cwd_t cwd;
+        fs_cwd_t cwd = {0};
         char path[64];
         CHECK(fs_boot_cwd(&cwd) == 0, "boot cwd available for collision fixtures");
         if (i == 0) {
@@ -284,6 +303,7 @@ static void namespace_collisions(void) {
             CHECK(fs_getcwd(&cwd, path, sizeof(path)) == 0 && strcmp(path, "df1:") == 0,
                   "device-label collision produces usable cwd");
         }
+        fs_cwd_release(&cwd);
         fs_namespace_reset();
         blkdev_registry_reset();
         free(a.ctx);
@@ -298,7 +318,7 @@ static void namespace_path_boundaries(void) {
     blkdev_registry_reset();
     CHECK(blkdev_register(&backend, BLKDEV_RAMDISK) == 0, "register maximal path fixture");
     CHECK(fs_mount_registered(blkdev_partition_io(0)) == 0, "mount maximal path fixture");
-    fs_cwd_t cwd;
+    fs_cwd_t cwd = {0};
     CHECK(fs_boot_cwd(&cwd) == 0, "boundary fixture boot cwd");
     static char canonical[FS_PATH_MAX];
     unsigned used = 0;
@@ -322,6 +342,7 @@ static void namespace_path_boundaries(void) {
     overlong[FS_QUALIFIED_PATH_MAX] = 0;
     CHECK(fs_chdir(&cwd, overlong) == FS_ERR_INVAL && strcmp(cwd.path, canonical) == 0,
           "overlong qualified input rejected without cwd mutation");
+    fs_cwd_release(&cwd);
     fs_namespace_reset();
     blkdev_registry_reset();
     free(backend.ctx);
@@ -335,7 +356,7 @@ static void assign_semantics(void) {
     CHECK(blkdev_register(&alpha, BLKDEV_RAMDISK) == 0 &&
           blkdev_register(&beta, BLKDEV_VIRTIO) == 0, "register assign fixtures");
     CHECK(fs_mount_registered(blkdev_partition_io(0)) == 0, "mount assign fixtures");
-    fs_cwd_t cwd, resolved;
+    fs_cwd_t cwd = {0}, resolved;
     CHECK(fs_boot_cwd(&cwd) == 0, "assign boot cwd");
     CHECK(fs_assign_count() == 2 && fs_assign_get(2) == NULL, "default assigns enumerated");
     CHECK(fs_volume_get(0)->boot && !fs_volume_get(1)->boot &&
@@ -422,6 +443,7 @@ static void assign_semantics(void) {
           "replacement remains possible at assign capacity");
     CHECK(fs_assign_set(&cwd, "retained", NULL) == 0 &&
           fs_assign_set(&cwd, "reused", "beta:docs") == 0, "removed assign slot reusable");
+    fs_cwd_release(&cwd);
     fs_namespace_reset();
     blkdev_registry_reset();
     free(alpha.ctx);
@@ -429,6 +451,93 @@ static void assign_semantics(void) {
     CHECK(live_allocations == 0, "assign reset releases all target records");
 }
 
+static void directory_pin_lifecycle(void) {
+    blkdev_t alpha, beta;
+    if (!load_backend("alpha.img", &alpha) || !load_backend("beta.img", &beta)) return;
+    blkdev_registry_reset();
+    CHECK(blkdev_register(&alpha, BLKDEV_RAMDISK) == 0 &&
+          blkdev_register(&beta, BLKDEV_VIRTIO) == 0, "register directory-pin fixtures");
+    CHECK(fs_mount_registered(blkdev_partition_io(0)) == 0, "mount directory-pin fixtures");
+    fat32_volume_t *volume = fs_volume_get(1)->volume;
+    fat32_dirent_t parent, nested;
+    CHECK(fat32_lookup(volume, "/docs", &parent) == 0 &&
+          fat32_lookup(volume, "/docs/child", &nested) == 0, "resolve pinned directory entries");
+    fs_cwd_t cwd = {0}, child = {0}, snapshot;
+    CHECK(fs_boot_cwd(&cwd) == 0, "owned boot cwd created");
+    CHECK(fs_resolve(&cwd, "beta:docs/child", &snapshot, NULL) == 0 &&
+          !fat32_directory_busy(volume, nested.first_cluster), "resolution snapshots do not pin directories");
+    CHECK(fs_chdir(&cwd, "beta:docs/child") == 0 &&
+          fat32_directory_busy(volume, parent.first_cluster) &&
+          fat32_directory_busy(volume, nested.first_cluster), "cwd pins selected directory and ancestor");
+    CHECK(fs_cwd_copy(&child, &cwd) == 0, "child receives owned ancestor references");
+    fs_cwd_release(&cwd);
+    CHECK(fat32_directory_busy(volume, parent.first_cluster), "child retains ancestor after parent release");
+    fail_allocations = true;
+    CHECK(fs_chdir(&child, "alpha:") < 0, "failed chdir cannot discard old pins");
+    fail_allocations = false;
+    CHECK(fat32_directory_busy(volume, nested.first_cluster), "failed chdir retains current directory pin");
+    fs_cwd_release(&child);
+    CHECK(!fat32_directory_busy(volume, parent.first_cluster) &&
+          !fat32_directory_busy(volume, nested.first_cluster), "last cwd release removes ancestor pins");
+    CHECK(fs_boot_cwd(&cwd) == 0 && fs_assign_set(&cwd, "held", "beta:docs/child") == 0 &&
+          fat32_directory_busy(volume, parent.first_cluster) &&
+          fat32_directory_busy(volume, nested.first_cluster), "assign target pins its ancestor chain");
+    fail_allocations = true;
+    CHECK(fs_assign_set(&cwd, "held", "alpha:docs") < 0, "failed assign replacement reported");
+    fail_allocations = false;
+    CHECK(fat32_directory_busy(volume, nested.first_cluster), "failed assign replacement retains pins");
+    CHECK(fs_assign_set(&cwd, "held", NULL) == 0 &&
+          !fat32_directory_busy(volume, parent.first_cluster), "assign removal releases ancestors");
+    CHECK(fs_assign_set(&cwd, "c", "beta:docs/child") == 0 &&
+          fat32_directory_busy(volume, nested.first_cluster), "command assign owns target pins");
+    CHECK(fs_assign_set(&cwd, "c", "sys:bin") == 0 &&
+          !fat32_directory_busy(volume, nested.first_cluster), "command assign replacement releases old pins");
+    fat32_file_t handle;
+    CHECK(fat32_opendir(volume, "/docs/child", &handle) == 0 &&
+          fat32_directory_busy(volume, nested.first_cluster), "directory handle holds mutation guard");
+    fs_cwd_release(&cwd);
+    CHECK(fs_namespace_reset() == FS_ERR_BUSY && fs_volume_count() == 2 &&
+          fs_assign_count() == 2, "direct FAT handle prevents reset without dropping namespace state");
+    fat32_close(&handle);
+    CHECK(!fat32_directory_busy(volume, nested.first_cluster), "closing directory releases mutation guard");
+    fs_cwd_release(&cwd);
+    CHECK(fs_namespace_reset() == 0, "namespace reset succeeds after last external owner release");
+    blkdev_registry_reset();
+    free(alpha.ctx);
+    free(beta.ctx);
+    CHECK(live_allocations == 0, "directory pins and assigns release every reference");
+}
+static void namespace_sync_failure(void) {
+    blkdev_t backend;
+    if (!load_backend("alpha.img", &backend)) return;
+    // A forced-small FAT32 copy is adequate for reset fault logic, without a
+    // filesystem-integrity claim. Real write integrity uses the 64 MiB suite.
+    backend.read_only = false;
+    backend.write = memory_write;
+    backend.flush = memory_flush;
+    blkdev_registry_reset();
+    CHECK(blkdev_register(&backend, BLKDEV_VIRTIO) == 0 &&
+          fs_mount_registered(blkdev_partition_io(0)) == 0, "mount writable reset-failure fixture");
+    fat32_volume_t *volume = fs_volume_get(0)->volume;
+    fat32_file_t file;
+    CHECK(fat32_open_flags(volume, "/large.bin", FAT32_O_RDWR, &file) == 0 &&
+          fat32_write(&file, "x", 1) == 1, "dirty media before reset flush fault");
+    fat32_close(&file);
+    backend_flush_error = BLK_ERR_IO;
+    CHECK(fs_namespace_reset() == FS_ERR_IO && fs_volume_count() == 1 &&
+          fs_assign_count() == 2, "failed reset sync preserves mounts and assign ownership");
+    backend_flush_error = 0;
+    fs_cwd_t cwd = {0}, snapshot;
+    CHECK(fs_boot_cwd(&cwd) == 0 && fs_resolve(&cwd, "sys:", &snapshot, NULL) == 0 &&
+          snapshot.volume == volume, "namespace remains usable after failed reset");
+    CHECK(fs_program_open(&cwd, "bootcmd", &file) == 0, "command assign retained after failed sync");
+    fat32_close(&file);
+    fs_cwd_release(&cwd);
+    CHECK(fs_namespace_reset() == 0, "retry reset sync succeeds");
+    blkdev_registry_reset();
+    free(backend.ctx);
+    CHECK(live_allocations == 0, "failed reset retry releases all namespace ownership");
+}
 int main(int argc, char **argv) {
     if (argc != 2) return 2;
     fixture_directory = argv[1];
@@ -439,6 +548,8 @@ int main(int argc, char **argv) {
     namespace_collisions();
     namespace_path_boundaries();
     assign_semantics();
+    directory_pin_lifecycle();
+    namespace_sync_failure();
     printf("filesystem_test: %d checks, %d failures\n", test_checks, test_failures);
     return test_failures != 0;
 }

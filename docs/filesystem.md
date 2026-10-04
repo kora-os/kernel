@@ -96,8 +96,13 @@ missing durable flush support fails before media changes.
 Open handles share reference-counted metadata identified by the short directory
 entry's sector and offset. Their byte cursors remain independent. Append selects
 the shared EOF for each write, so a reader opened earlier sees later extensions.
-`fat32_close` releases its handle reference; a volume with live handles cannot
-unmount. Truncate preserves cursor positions. A cursor beyond a new, smaller
+`fat32_close` releases its handle reference. Current directories and assigns
+retain their directory and ancestor references too, so namespace changes can
+reject removal of an in-use path. `fs_cwd_copy` inherits owned cwd references;
+`fs_cwd_release` releases them when a task exits. Resolver results are temporary
+path snapshots. A volume with live references cannot unmount. Namespace reset
+checks external owners and syncs every volume before releasing assigns and
+mounts; busy or failed sync leaves the namespace available for retry. Truncate preserves cursor positions. A cursor beyond a new, smaller
 EOF must seek back before writing because sparse holes are unsupported.
 
 Allocation checks actual FAT entries rather than trusting FSInfo counts or

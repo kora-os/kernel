@@ -251,7 +251,7 @@ categories:
         prs: [46]
       - id: fat32-write
         name: FAT32 write
-        status: planned
+        status: in_progress
         description: Create, write, rename and delete files and directories.
         milestone: 9
       - id: sd-card
