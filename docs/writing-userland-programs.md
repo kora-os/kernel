@@ -29,8 +29,12 @@ A program runs in EL0 with a deliberately small runtime:
   pools and usage.
 - **A flat identity map.** Pointers are physical addresses; e.g. `fb_info()`
   hands you the framebuffer address and you write pixels to it directly.
-- **Cooperative processes.** `spawn` runs a child to completion before
-  returning (then `wait` reaps it). There is no preemption and no threads yet.
+- **Preemptive processes.** Every runnable program gets 10 ms time slices in
+  turn. `spawn` runs a child to completion before returning (then `wait` reaps
+  it); `spawn_flags(..., SPAWN_NOWAIT)` starts it in the background, and
+  `waitpid(-1, &code, WNOHANG)` collects finished children without blocking.
+  `msleep(ms)` sleeps; `uptime_us()` reads a microsecond clock without a
+  syscall. There are no threads yet.
 - **`main` signature.** Either `int main(void)` or `int main(int argc, char
   **argv)`; the entry stub [`user/crt0.S`](../user/crt0.S) calls `main` and
   passes its return value to `exit`.
@@ -120,6 +124,7 @@ a program with `open` / `read` / `close`.
 
 - Names/paths are **UTF-8**; a `struct dirent` name can be up to 765 bytes.
 - `argv` is capped at 16 entries.
-- No preemption: a long-running program blocks its parent (the shell) until it
-  exits. Return from `main` (or call `exit`) to give control back.
+- A program the shell runs in the foreground keeps the shell waiting until it
+  exits; run long jobs with `&`. Only one program should read the console at
+  a time: concurrent readers would take turns getting characters.
 - The filesystem is **read-only**, a program cannot create or modify files yet.

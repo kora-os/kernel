@@ -11,12 +11,14 @@
 // saved registers and stack pointer) that cpu_switch() switches between. The
 // boot thread is task 0: it is not in the table and has no user side.
 //
-// Scheduling is still cooperative and single-core: a task runs until it
-// blocks (spawn waits for its child, wait for an unreaped child) or exits.
-// spawn is create plus wait, so a parent stays suspended until its child
-// exits, as before. A finished task becomes a zombie, its memory still held so
-// its exit code remains valid, until it is reaped by task_wait() or by
-// task_reap_all().
+// Scheduling is preemptive and single-core: the timer tick asks for a
+// reschedule, which happens on the way back to EL0, so each runnable task gets
+// a time slice of one tick in round-robin order. The kernel itself is not
+// preemptible: a task in a syscall runs until it returns or blocks (waiting
+// for a child, sleeping on a wait queue such as console input, or in msleep).
+// spawn is create plus wait unless asked not to wait. A finished task becomes a
+// zombie, its memory still held so its exit code remains valid, until its
+// parent reaps it; a task whose parent exited first is reaped automatically.
 
 #define MAX_TASKS 8
 #define KSTACK_PAGES 4       // 16 KB kernel stack per task
@@ -36,9 +38,21 @@ typedef struct {
 typedef enum {
     TASK_UNUSED = 0,  // free table slot
     TASK_RUNNABLE,    // running, or ready to run
-    TASK_BLOCKED,     // waiting for a child to exit
+    TASK_BLOCKED,     // waiting; see block_reason_t
     TASK_EXITED,      // finished but not yet reaped (memory still held)
 } task_state_t;
+
+typedef enum {
+    BLOCK_NONE = 0,
+    BLOCK_CHILD,      // a child to exit (waiting_for, or any child if NULL)
+    BLOCK_QUEUE,      // a wake-up on a wait queue (wq)
+    BLOCK_SLEEP,      // the tick count to reach wake_tick
+} block_reason_t;
+
+// Tasks sleeping until an event; woken all at once by wait_queue_wake_all().
+struct wait_queue {
+    struct task *head;
+};
 
 // Kernel context saved by cpu_switch(); layout mirrored in src/arch/entry.S.
 struct cpu_context {
@@ -54,7 +68,12 @@ typedef struct task {
     int exit_code;
     char name[TASK_NAME_MAX];
     struct task *parent;              // who spawned this task (NULL: the kernel)
-    struct task *waiting_for;         // BLOCKED: the child, or NULL for any child
+    block_reason_t blocked_on;        // why a BLOCKED task waits
+    struct task *waiting_for;         // BLOCK_CHILD: the child, or NULL for any child
+    struct wait_queue *wq;            // BLOCK_QUEUE: the queue it sleeps on
+    struct task *wq_next;             // next sleeper on that queue
+    uint64_t wake_tick;               // BLOCK_SLEEP: systick count to wake at
+    bool orphan;                      // its parent exited: reaped automatically
     void *image;                      // loaded ELF region (for reclaim)
     size_t image_pages;
     void *stack;                      // user stack region (for reclaim)
@@ -74,14 +93,42 @@ typedef struct task {
 // until the caller blocks or yields. Returns the new task, or NULL.
 task_t *task_create(const char *name, int argc, char *const argv[]);
 
-// Create a task and block until it exits (spawn's historical semantics: the
-// child runs to completion first). Returns the child's pid, or -1 on failure.
-// The child stays an unreaped zombie until task_wait() collects it.
-int task_spawn(const char *name, int argc, char *const argv[]);
+#define SPAWN_NOWAIT 1  // return as soon as the child exists (a background job)
 
-// Reap a child of the current task by pid, blocking until it has exited: free
-// its memory and return its exit code. Returns -1 if there is no such child.
+// Create a task and, unless SPAWN_NOWAIT, block until it exits. Returns the
+// child's pid, or -1 on failure. The child stays an unreaped zombie until its
+// parent collects it with task_wait_ex().
+int task_spawn(const char *name, int argc, char *const argv[], int flags);
+
+#define WAIT_NOHANG 1  // do not block if no matching child has exited
+
+// Reap an exited child of the current task: `pid`, or any child for -1. Blocks
+// until one exits unless WAIT_NOHANG. Stores the exit code in *code (if not
+// NULL) and returns the child's pid; returns 0 for WAIT_NOHANG with nothing to
+// reap yet, and -1 if the task has no such child.
+int task_wait_ex(int pid, int *code, int flags);
+
+// Reap child `pid`, blocking until it exits; returns its exit code, or -1.
 int task_wait(int pid);
+
+// Block the current task for at least `ms` milliseconds (rounded up to ticks).
+void task_msleep(uint64_t ms);
+
+// Sleep on `wq` until wait_queue_wake_all(). Call with IRQs masked, after
+// checking the condition being waited for, so a wake-up cannot slip between
+// the check and the sleep; returns with IRQs still masked.
+void wait_queue_sleep(struct wait_queue *wq);
+
+// Make every task sleeping on `wq` runnable. Safe from interrupt handlers.
+void wait_queue_wake_all(struct wait_queue *wq);
+
+// Called by the timer interrupt on every tick: wakes due sleepers and asks
+// for a reschedule (taken on the way back to EL0).
+void sched_tick(uint64_t now);
+
+// On the way back to EL0 (from src/arch/vectors.S): switch tasks if a
+// reschedule was requested. Called with IRQs masked.
+void sched_preempt_check(void);
 
 // pid of the current task (0 for the kernel's own boot task).
 int task_getpid(void);

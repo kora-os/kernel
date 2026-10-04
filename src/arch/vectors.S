@@ -111,12 +111,16 @@ el1h_sync:
     bl  handle_sync_el1
     kernel_exit
 
+// Every return to EL0 passes sched_preempt_check, which switches tasks if the
+// tick or a wake-up asked for it. The kernel is not preemptible, so this is
+// the only place a running task is switched out against its will.
 el0_sync:
     kernel_entry
     mrs x0, esr_el1
     mrs x1, far_el1
     mov x2, sp
     bl  handle_sync_el0
+    bl  sched_preempt_check
     kernel_exit
 
 // IRQ from the kernel (EL1h) or from userland (EL0): save context, dispatch
@@ -130,6 +134,7 @@ el1h_irq:
 el0_irq:
     kernel_entry
     bl  handle_irq
+    bl  sched_preempt_check
     kernel_exit
 
 // A new task's first return to EL0: cpu_switch() lands here with sp pointing

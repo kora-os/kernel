@@ -157,8 +157,11 @@ rejection followed by a valid command, switches to the debug console,
 verifies timer/UART IRQ progress, runs `heaptest` (seeded kernel heap stress)
 and checks that `heap` reports no leaks or bad frees, runs `fpprobe` (a parent
 and child each fill all 32 vector registers and FPCR; the child must start from
-zeroed registers and the parent's must survive), checks `tasks` (init blocked,
-the shell runnable, kernel stack high-water mark under three quarters), and checks terminal
+zeroed registers and the parent's must survive), checks `tasks` (init and the shell
+asleep, kernel stack high-water mark under three quarters), runs `schedprobe`
+(`msleep(300)` takes at least 300 ms; a background job busy-looping without
+syscalls must not stop the shell from running `echo`, so the tick preempts it;
+the job is reported as done at a later prompt), and checks terminal
 colors and graphics pixels using QEMU screenshots. Virt optionally injects
 Shift/release, Backspace, Enter and scrollback through a VirtIO keyboard. UART
 observes output. `--repeat N` runs `allocprobe` N times: page runs, a `malloc`

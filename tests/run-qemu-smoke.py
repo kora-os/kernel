@@ -392,7 +392,8 @@ def run(q, graphics=True, keyboard=False, repeat=0, multi_volume=False, write_te
         q.expect(PROMPT)
     yield "FP/SIMD registers are per task (lazy switching)", fp_context
 
-    def tasks():
+    def read_tasks():
+        """Run `tasks` on the debug console: ({name: (state, stack)}, peak, size)."""
         q.send("\x14")
         q.expect(rb"koraos> ")
         q.send("tasks\r")
@@ -406,12 +407,62 @@ def run(q, graphics=True, keyboard=False, repeat=0, multi_volume=False, write_te
         q.expect(rb"koraos> ")
         q.send("\x14")
         q.expect(rb"\[serial -> screen terminal")
-        if listed.get("init", ("",))[0] != "blocked" or listed.get("shell", ("",))[0] != "runnable":
-            raise Failure("expected blocked init and runnable shell, got %s" % listed)
+        return listed, peak, size
+
+    def tasks():
+        # The shell sleeps in read() until input arrives; it does not spin. (A
+        # few retries cover the moment between printing its prompt and reading.)
+        for _ in range(5):
+            listed, peak, size = read_tasks()
+            if listed.get("init", ("",))[0] == "blocked" and listed.get("shell", ("",))[0] == "blocked":
+                break
+            time.sleep(0.2)
+        else:
+            raise Failure("expected init and the shell blocked, got %s" % listed)
         # Every task so far, the probes included: keep a quarter of the stack spare.
         if peak == 0 or peak > size * 3 // 4:
             raise Failure("kernel stack peak %d of %d bytes" % (peak, size))
-    yield "tasks lists init and the shell; kernel stacks have headroom", tasks
+    yield "tasks: init and the shell sleep; kernel stacks have headroom", tasks
+
+    def scheduling():
+        q.send("schedprobe sleep 300\r")
+        m = q.expect(rb"^schedprobe: slept (\d+) ms")
+        slept = int(m.group(1))
+        if not 300 <= slept <= 1300:
+            raise Failure("msleep(300) took %d ms" % slept)
+        q.expect(rb"exited with 0")
+        q.expect(PROMPT)
+
+        # A background job that never makes a syscall: the shell only answers
+        # while it runs if the timer tick preempts it.
+        q.send("schedprobe spin 5000 &\r")
+        m = q.expect(rb"^\[(\d+)\] started")
+        pid = m.group(1)
+        q.expect(PROMPT)
+        q.send("echo alive\r")
+        m = q.expect(rb"^(alive|schedprobe: spun)")
+        if m.group(1) != b"alive":
+            raise Failure("the shell did not run while a background job was spinning")
+        q.expect(PROMPT)
+        # The shell may be asleep in read() or, preempted between its prompt and
+        # that read, waiting for its next slice; the spinner is always runnable.
+        listed, _, _ = read_tasks()
+        if listed.get("schedprobe", ("",))[0] != "runnable" or "shell" not in listed:
+            raise Failure("expected a runnable schedprobe next to the shell, got %s" % listed)
+        q.expect(rb"^schedprobe: spun \d+ ms", timeout=60)
+        # The job exits just after printing; the first prompt after that
+        # reports it.
+        for _ in range(50):
+            q.send("\r")
+            m = q.expect(rb"^(?:\[" + pid + rb"\] done, exit (\d+)\r?\n)?\$ ")
+            if m.group(1) is not None:
+                if m.group(1) != b"0":
+                    raise Failure("background job exited with %s" % m.group(1).decode())
+                break
+            time.sleep(0.1)
+        else:
+            raise Failure("the shell never reported the finished background job")
+    yield "msleep, background jobs and preemption of a spinning task", scheduling
 
     if repeat:
         def kernel_counts():

@@ -409,8 +409,10 @@ static long sys_free_pages(uint64_t base) {
 }
 
 // spawn(name, argc, argv): load and run an embedded program with arguments.
-static long sys_spawn(const char *name, int argc, char *const argv[]) {
-    if (!uptr_ok((uint64_t)name, 1)) {
+// spawn(name, argc, argv, flags): load a program and run it as a child; with
+// SPAWN_NOWAIT return at once (a background job), otherwise once it exits.
+static long sys_spawn(const char *name, int argc, char *const argv[], uint64_t flags) {
+    if (!uptr_ok((uint64_t)name, 1) || (flags & ~(uint64_t)SPAWN_NOWAIT) != 0) {
         return -1;
     }
     if (argc < 0) {
@@ -423,9 +425,20 @@ static long sys_spawn(const char *name, int argc, char *const argv[]) {
     if (copy == NULL) {
         return -1;
     }
-    int pid = task_spawn(copy, argc, argv);
+    int pid = task_spawn(copy, argc, argv, (int)flags);
     kfree(copy);
     return pid;
+}
+
+// wait(pid, code, flags): reap an exited child (pid, or any for -1). Returns
+// its pid with the exit code in *code (code may be NULL), 0 with WAIT_NOHANG
+// when no matching child has exited yet, or -1 if there is no such child.
+static long sys_wait(int pid, int *code, uint64_t flags) {
+    if ((code != NULL && !uptr_ok((uint64_t)code, sizeof(*code))) ||
+        (flags & ~(uint64_t)WAIT_NOHANG) != 0) {
+        return -1;
+    }
+    return task_wait_ex(pid, code, (int)flags);
 }
 
 // fb_info(out): report the active screen's framebuffer geometry and address so
@@ -451,6 +464,7 @@ void syscall_handle(struct trapframe *tf) {
     uint64_t a0 = tf->regs[0];
     uint64_t a1 = tf->regs[1];
     uint64_t a2 = tf->regs[2];
+    uint64_t a3 = tf->regs[3];
     long ret = -1;
 
     switch (num) {
@@ -463,11 +477,11 @@ void syscall_handle(struct trapframe *tf) {
     case SYS_read:
         ret = sys_read((int)a0, (char *)a1, a2);
         break;
-    case SYS_spawn:
-        ret = sys_spawn((const char *)a0, (int)a1, (char *const *)a2);
+    case SYS_spawn_flags:
+        ret = sys_spawn((const char *)a0, (int)a1, (char *const *)a2, a3);
         break;
-    case SYS_wait:
-        ret = task_wait((int)a0);
+    case SYS_waitpid:
+        ret = sys_wait((int)a0, (int *)a1, a2);
         break;
     case SYS_getpid:
         ret = task_getpid();
@@ -505,6 +519,10 @@ void syscall_handle(struct trapframe *tf) {
         break;
     case SYS_free_pages:
         ret = sys_free_pages(a0);
+        break;
+    case SYS_msleep:
+        task_msleep(a0);
+        ret = 0;
         break;
     case SYS_volume_info:
         ret = sys_volume_info((unsigned)a0, (struct kvolume_info *)a1);
