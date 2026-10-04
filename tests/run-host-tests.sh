@@ -58,6 +58,7 @@ TEST_FLAGS=(-DLIBK_HOST_TEST -I "$ROOT/user/libk")
 run_test libk_malloc user/libk/malloc.c
 TEST_FLAGS=()
 "$ROOT/tests/run-filesystem-tests.sh" || failed=1
+"$ROOT/tests/run-fat-write-tests.sh" || failed=1
 "$ROOT/tests/run-ramfb-tests.sh" || failed=1
 "$ROOT/tests/run-virtio-tests.sh" || failed=1
 "$ROOT/tests/run-virtio-input-tests.sh" || failed=1

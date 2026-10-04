@@ -8,8 +8,11 @@
 #define FS_DEVICE_NAME_MAX 8
 #define FS_MAX_ASSIGNS 16
 
+typedef struct fs_directory_pins fs_directory_pins_t;
+
 typedef struct fs_cwd {
     fat32_volume_t *volume;
+    fs_directory_pins_t *pins; // owned cwd/assign ancestor refs; resolver snapshots use NULL
     char path[FS_PATH_MAX]; // canonical absolute path within this volume
 } fs_cwd_t;
 
@@ -37,13 +40,20 @@ int fs_assign_set(const fs_cwd_t *cwd, const char *name, const char *target);
 // Boot/test initialization only. Mounts every valid registered view. Boot must
 // identify the exact preferred view; NULL or an invalid boot fails closed.
 int fs_mount_registered(blkdev_t *boot);
-void fs_namespace_reset(void); // only when no handles or tasks remain
+// Reject live tasks/handles and retain registry/assign ownership on sync error.
+int fs_namespace_reset(void);
 unsigned fs_volume_count(void);
 const fs_volume_info_t *fs_volume_get(unsigned index);
 int fs_boot_cwd(fs_cwd_t *out);
+// Boot cwd, chdir and assign targets own directory pins. Clone a cwd into an
+// unowned output and release it before task teardown or namespace reset.
+// Resolver results are unowned snapshots and need no release.
+int fs_cwd_copy(fs_cwd_t *out, const fs_cwd_t *source);
+void fs_cwd_release(fs_cwd_t *cwd);
 
 // Every operation takes its caller's cwd explicitly. Resolution checks each
 // component before processing a following '..'. Failure leaves cwd unchanged.
+// fs_resolve requires an unowned output distinct from cwd.
 int fs_resolve(const fs_cwd_t *cwd, const char *path, fs_cwd_t *out,
                fat32_dirent_t *entry);
 int fs_chdir(fs_cwd_t *cwd, const char *path);

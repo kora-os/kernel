@@ -12,7 +12,7 @@ tests/run-host-tests.sh
 ```
 
 Requires `clang` (the default `CC`; Apple's clang works), Python 3 and mtools
-(`mformat`, `mmd`, `mcopy`) for real FAT32 fixtures. GCC is not supported:
+(`mformat`, `mmd`, `mcopy`) and dosfstools (`fsck.fat`) for real FAT32 fixtures. GCC is not supported:
 it rejects the kernel's own `strlen` declaration under `-Werror`.
 
 ### Writing a test
@@ -32,10 +32,11 @@ Current suites:
 
 | Test | Covers |
 |------|--------|
+| `fat_write_test.c` | Existing-file writes on disposable 64 MiB mtools media: sector preservation, append, fragmented chains, first allocation, shared handle metadata, truncate and freed-cluster reuse, disk full, partition-view write/flush capabilities, FAT mirroring/active FAT/high bits, stale FSInfo, dirty eviction, retry after injected read/write/flush errors, cold remount, fsck and host readback |
 | `libk_malloc_test.c` | `user/libk/malloc.c` (built with `LIBK_HOST_TEST`, which renames it `libk_malloc` and so on): alignment, neighbour separation, coalescing, pool growth and release, direct page-run blocks, bad and double frees, `realloc`/`calloc`, exhaustion, a 200 000-round stress with `kheap_info` consistency checks |
 | `user_mem_test.c` | `src/proc/user_mem.c`: per-task page-run records behind `alloc_pages`/`free_pages`, foreign and double frees, reclaim on teardown, no leaks on failure |
 | `shell_input_test.c` | Real EL0 shell parser with renamed syscall stubs: fragmented reads, maximal complete lines, oversized-line draining, next-command preservation, 16/17-token boundary, terminated arguments and maximal assign target |
-| `filesystem_test.c` | `src/fs/fat32.c` and `src/fs/namespace.c` on mtools-made volumes: independent geometry/caches, root/BPB labels, duplicate labels/device collisions, relative paths, cwd isolation, retained handles, malformed geometry/chains/LFN, allocation and I/O errors, assign snapshots/replacement/removal/capacity, c-only command lookup and shadowed-label cwd |
+| `filesystem_test.c` | `src/fs/fat32.c` and `src/fs/namespace.c` on mtools-made volumes: independent geometry/caches, root/BPB labels, duplicate labels/device collisions, relative paths, cwd isolation, retained handles, malformed geometry/chains/LFN, allocation and I/O errors, assign snapshots/replacement/removal/capacity, c-only command lookup and shadowed-label cwd, owned cwd/assign ancestor pins, busy reset and flush-failed reset preservation/retry |
 | `blkdev_test.c` | `src/fs/blkdev.c`: bare FAT32 and mixed MBR discovery, hidden FAT32 types, invalid/range/overlap tables, partition-relative bounded read/write/flush, read-only and unsupported I/O, registry capacity |
 | `kmalloc_test.c` | `src/mm/kmalloc.c`, `src/mm/kmalloc_stress.c`: alignment, zeroing, cache-line separation, block reuse, slab release, page runs, over-aligned blocks, exhaustion, invalid and double frees, balanced IRQ masking, seeded stress |
 | `term_test.c` | `src/video/term.c`: autowrap, scrollback and its view, scroll regions, insert/delete/erase, alternate screen, status replies, colours (16/256/24-bit, bce), UTF-8 and DEC line drawing, tabs, origin mode, cursor style/visibility, OSC, REP |
@@ -53,6 +54,22 @@ invalid-input rejection and preservation of an existing output on failure.
 2 MiB and 4 MiB mtools images with distinct content and labels, then makes
 narrowly corrupted copies for chain and LFN tests. Fixtures live under
 `build/host-tests/fs-fixtures`; the shared userfs is never used as writable media.
+
+The write suite also runs independently:
+
+```bash
+tests/run-fat-write-tests.sh
+```
+
+It creates a pristine 64 MiB image, hashes it, and mutates disposable in-memory
+copies. Three normal images cover valid, unknown and stale FSInfo metadata;
+24 additional images cover interrupted allocation and shrink transport writes.
+After recovery and cold remount, every exported image must pass `fsck.fat -n`
+and exact mtools content readback. The source SHA256 must remain unchanged.
+Forced disk-full BAD-cluster reservations and corrupt chains are separate
+in-memory fault fixtures with no filesystem-integrity claim. All fixtures live
+under `build/host-tests/write-fixtures`; the immutable shared userfs image is
+never writable media.
 
 ## Feature status file
 
@@ -116,7 +133,8 @@ and `--out` override the image and artifact locations. Defaults are the selected
 `build/debug/<target>/kernel.img` and its `qemu-smoke/` directory. `--machine`
 remains a deprecated alias for target selection. `--no-graphics` omits ramfb on
 virt and tests serial fallback. `--disk-writable` negotiates writable test media;
-FAT32 itself remains read-only.
+file syscalls remain read-only while existing-file data writes are tested
+through the kernel FAT32 API.
 
 An external disk may contain a bare FAT32 volume or primary MBR FAT32
 partitions. The first supported partition supplies the boot root. To exercise

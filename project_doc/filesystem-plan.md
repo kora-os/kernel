@@ -16,7 +16,7 @@ big kernel lock when it arrives. Track B uses syscall slots 32 through 47.
   cwd, chdir/getcwd (32/33), multi-volume and relative-path coverage.
 - [x] 8.3 (PR #49): single-target assigns, sys/c boot defaults, spawn through c, shell
   navigation and volumes listing, boot and inheritance regression coverage.
-- [ ] 9.1: write-back sector cache, FAT allocation/free, existing-file write,
+- [x] 9.1 (PR #50): write-back sector cache, FAT allocation/free, existing-file write,
   append/truncate and FSInfo accounting, scratch-image tests.
 - [ ] 9.2: create/unlink/mkdir/rmdir/rename, UTF-8 LFN encoding and unique 8.3
   aliases, namespace and malformed-input host coverage.
