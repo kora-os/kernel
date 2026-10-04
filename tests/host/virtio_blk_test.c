@@ -202,8 +202,8 @@ static void test_scenario(char selected) {
         return;
     }
     if (selected == 'f') {
-        CHECK(backend->flush(backend) == BLK_ERR_UNSUPPORTED && requests == 0,
-              "FLUSH feature required");
+        CHECK(backend->flush == NULL && requests == 0,
+              "unnegotiated FLUSH capability is not advertised");
         return;
     }
     poll_mode = selected == 't' ? 1 : selected == 'l' ? 4 : 5;

@@ -23,7 +23,7 @@ jobs:
       - name: Install filesystem fixture tools
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends mtools
+          sudo apt-get install -y --no-install-recommends mtools dosfstools
       - name: Host sanitizer suites
         run: tests/run-host-tests.sh
       - name: Scratch MBR image tests

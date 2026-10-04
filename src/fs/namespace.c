@@ -7,6 +7,103 @@ static unsigned volume_count;
 static fat32_volume_t *boot_volume;
 static fs_assign_info_t *assigns[FS_MAX_ASSIGNS];
 static unsigned assign_count;
+static unsigned owned_locations;
+
+struct directory_pin {
+    struct directory_pin *next;
+    fat32_file_t directory;
+};
+
+struct fs_directory_pins {
+    unsigned refs;
+    struct directory_pin *directories;
+};
+
+static void release_pins(fs_directory_pins_t *pins) {
+    if (pins == NULL || --pins->refs != 0) return;
+    while (pins->directories) {
+        struct directory_pin *node = pins->directories;
+        pins->directories = node->next;
+        fat32_close(&node->directory);
+        kfree(node);
+    }
+    kfree(pins);
+}
+
+void fs_cwd_release(fs_cwd_t *cwd) {
+    if (cwd == NULL) return;
+    if (cwd->pins) {
+        owned_locations--;
+        release_pins(cwd->pins);
+    }
+    cwd->pins = NULL;
+    cwd->volume = NULL;
+    cwd->path[0] = 0;
+}
+
+static int pin_directory(fs_directory_pins_t *pins, fat32_volume_t *volume, const char *path) {
+    struct directory_pin *node = kmalloc(sizeof(*node));
+    if (node == NULL) return FS_ERR_IO;
+    int rc = fat32_opendir(volume, path, &node->directory);
+    if (rc != 0) {
+        kfree(node);
+        return rc;
+    }
+    node->next = pins->directories;
+    pins->directories = node;
+    return 0;
+}
+
+static int pin_location(fs_cwd_t *location) {
+    if (location == NULL || location->volume == NULL || location->path[0] != '/') {
+        return FS_ERR_INVAL;
+    }
+    size_t len = 0;
+    while (len < FS_PATH_MAX && location->path[len]) len++;
+    if (len == FS_PATH_MAX) return FS_ERR_INVAL;
+    fs_directory_pins_t *pins = kmalloc(sizeof(*pins));
+    if (pins == NULL) return FS_ERR_IO;
+    pins->refs = 1;
+    char *prefix = kmalloc(len + 1);
+    if (prefix == NULL) {
+        release_pins(pins);
+        return FS_ERR_IO;
+    }
+    memcpy(prefix, location->path, len + 1);
+    char saved = prefix[1];
+    prefix[1] = 0;
+    int rc = pin_directory(pins, location->volume, prefix);
+    prefix[1] = saved;
+    // Pin every ancestor too. Renaming a parent would otherwise invalidate
+    // the canonical paths retained by children and single-target assigns.
+    for (size_t i = 1; rc == 0 && i <= len && len > 1; i++) {
+        if (prefix[i] != '/' && i != len) continue;
+        saved = prefix[i];
+        prefix[i] = 0;
+        rc = pin_directory(pins, location->volume, prefix);
+        prefix[i] = saved;
+    }
+    kfree(prefix);
+    if (rc != 0) {
+        release_pins(pins);
+        return rc;
+    }
+    location->pins = pins;
+    owned_locations++;
+    return 0;
+}
+
+int fs_cwd_copy(fs_cwd_t *out, const fs_cwd_t *source) {
+    if (out == NULL || source == NULL || source->volume == NULL) return FS_ERR_INVAL;
+    if (out == source) return 0;
+    *out = *source;
+    if (out->pins) {
+        out->pins->refs++;
+        owned_locations++;
+        return 0;
+    }
+    return pin_location(out);
+}
 
 static char lower(char c) {
     return c >= 'A' && c <= 'Z' ? (char)(c + 32) : c;
@@ -64,20 +161,48 @@ static int prefix_location(const char *name, size_t len,
     return 0;
 }
 
-void fs_namespace_reset(void) {
+int fs_namespace_reset(void) {
+    // Each assign owns one location. Additional owners include tasks and boot
+    // loader temporaries, even when they share an assign's pin bundle.
+    if (owned_locations != assign_count) return FS_ERR_BUSY;
+    for (unsigned i = 0; i < volume_count; i++) {
+        unsigned assign_handles = 0;
+        for (unsigned a = 0; a < assign_count; a++) {
+            fs_directory_pins_t *pins = assigns[a]->target.pins;
+            for (struct directory_pin *p = pins ? pins->directories : NULL; p; p = p->next) {
+                if (p->directory.volume == volumes[i].volume) assign_handles++;
+            }
+        }
+        if (fat32_handle_count(volumes[i].volume) != assign_handles) return FS_ERR_BUSY;
+    }
+    // Keep every pointer and namespace name intact if durable sync fails.
+    for (unsigned i = 0; i < volume_count; i++) {
+        int rc = fat32_sync_volume(volumes[i].volume);
+        if (rc != 0) return rc;
+    }
     for (unsigned i = 0; i < assign_count; i++) {
+        fs_cwd_release(&assigns[i]->target);
         kfree(assigns[i]);
     }
     assign_count = 0;
+    unsigned retained = 0;
+    int error = 0;
     for (unsigned i = 0; i < volume_count; i++) {
-        fat32_unmount(volumes[i].volume);
+        int rc = fat32_unmount(volumes[i].volume);
+        if (rc != 0) {
+            volumes[retained++] = volumes[i];
+            if (error == 0) error = rc;
+        } else if (volumes[i].volume == boot_volume) {
+            boot_volume = NULL;
+        }
     }
-    volume_count = 0;
-    boot_volume = NULL;
+    volume_count = retained;
+    return error;
 }
 
 int fs_mount_registered(blkdev_t *boot) {
-    fs_namespace_reset();
+    int reset_rc = fs_namespace_reset();
+    if (reset_rc != 0) return reset_rc;
     int boot_error = FS_ERR_NOFS;
     for (unsigned i = 0; i < blkdev_partition_count(); i++) {
         blkdev_t *dev = blkdev_partition_io(i);
@@ -116,9 +241,14 @@ int fs_mount_registered(blkdev_t *boot) {
     }
     memcpy(sys->name, "sys", 4);
     sys->immutable = true;
-    fs_boot_cwd(&sys->target);
+    int rc = fs_boot_cwd(&sys->target);
+    if (rc != 0) {
+        kfree(sys);
+        fs_namespace_reset();
+        return rc;
+    }
     assigns[assign_count++] = sys;
-    int rc = fs_assign_set(&sys->target, "c", "sys:bin");
+    rc = fs_assign_set(&sys->target, "c", "sys:bin");
     if (rc != 0) {
         fs_namespace_reset();
     }
@@ -138,9 +268,10 @@ int fs_boot_cwd(fs_cwd_t *out) {
         return FS_ERR_NOFS;
     }
     out->volume = boot_volume;
+    out->pins = NULL;
     out->path[0] = '/';
     out->path[1] = 0;
-    return 0;
+    return pin_location(out);
 }
 
 struct resolve_scratch {
@@ -150,7 +281,7 @@ struct resolve_scratch {
 
 int fs_resolve(const fs_cwd_t *cwd, const char *path, fs_cwd_t *out,
                fat32_dirent_t *entry) {
-    if (cwd == NULL || cwd->volume == NULL || path == NULL || out == NULL) {
+    if (cwd == NULL || cwd->volume == NULL || path == NULL || out == NULL || out == cwd) {
         return FS_ERR_INVAL;
     }
     size_t path_len = 0;
@@ -165,6 +296,7 @@ int fs_resolve(const fs_cwd_t *cwd, const char *path, fs_cwd_t *out,
         return FS_ERR_IO;
     }
     s->location = *cwd;
+    s->location.pins = NULL; // resolution returns an unowned canonical snapshot
     const char *p = path;
     const char *colon = NULL;
     for (size_t i = 0; i < path_len; i++) {
@@ -274,7 +406,9 @@ int fs_chdir(fs_cwd_t *cwd, const char *path) {
     if (rc == 0 && !s->entry.is_dir) {
         rc = FS_ERR_NOTDIR;
     }
+    if (rc == 0) rc = pin_location(&s->location);
     if (rc == 0) {
+        fs_cwd_release(cwd);
         *cwd = s->location;
     }
     kfree(s);
@@ -370,6 +504,7 @@ int fs_assign_set(const fs_cwd_t *cwd, const char *name, const char *target) {
         if (index == assign_count) {
             return FS_ERR_NOTFOUND;
         }
+        fs_cwd_release(&assigns[index]->target);
         kfree(assigns[index]);
         for (unsigned i = index + 1; i < assign_count; i++) {
             assigns[i - 1] = assigns[i];
@@ -391,11 +526,13 @@ int fs_assign_set(const fs_cwd_t *cwd, const char *name, const char *target) {
     if (rc == 0 && !entry.is_dir) {
         rc = FS_ERR_NOTDIR;
     }
+    if (rc == 0) rc = pin_location(&replacement->target);
     if (rc != 0) {
         kfree(replacement);
         return rc;
     }
     if (index < assign_count) {
+        fs_cwd_release(&assigns[index]->target);
         kfree(assigns[index]);
     } else {
         assign_count++;

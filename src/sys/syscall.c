@@ -236,6 +236,7 @@ static long sys_close(int fd) {
     if (of == NULL) {
         return -1;
     }
+    fat32_close(&of->file);
     of->used = false;
     return 0;
 }
@@ -246,26 +247,8 @@ static long sys_lseek(int fd, long offset, int whence) {
     if (of == NULL || of->file.is_dir) {
         return -1;
     }
-    long base;
-    switch (whence) {
-    case SEEK_SET:
-        base = 0;
-        break;
-    case SEEK_CUR:
-        base = (long)of->file.pos;
-        break;
-    case SEEK_END:
-        base = (long)of->file.size;
-        break;
-    default:
-        return -1;
-    }
-    long np = base + offset;
-    if (np < 0 || (uint64_t)np > of->file.size) {
-        return -1;
-    }
-    of->file.pos = (uint32_t)np;
-    return np;
+    long pos = fat32_seek(&of->file, offset, whence);
+    return pos < 0 ? -1 : pos;
 }
 
 // readdir(fd, out): fetch the next entry from an open directory. Returns 1 for

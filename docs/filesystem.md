@@ -1,6 +1,6 @@
 # Filesystem
 
-KoraOS has a **read-only FAT32 filesystem**. It is what the kernel uses to find
+KoraOS supports **FAT32 reads and existing-file data writes**. It is what the kernel uses to find
 and load userland programs: the kernel boots `/bin/init`, which starts
 `/bin/shell`, which loads `/bin/ls`, `/bin/cat`, and the rest, all as
 independent binaries read from the filesystem, not embedded in the kernel image.
@@ -41,7 +41,7 @@ QEMU and real hardware with no extra media or QEMU flags.
   file syscalls ──▶ open / read / stat / chdir / getcwd           (src/sys/syscall.c)
   namespace     ──▶ device / volume names and per-task cwd       (src/fs/namespace.c)
   ─────────────────────────────────────────────────────────────────────────────
-  FAT32 driver  ──▶ mount, path walk, FAT chains, LFN→UTF-8, read  (src/fs/fat32.c)
+  FAT32 driver  ──▶ mount, path walk, FAT chains, LFN→UTF-8, read/write  (src/fs/fat32.c)
   ─────────────────────────────────────────────────────────────────────────────
   block device  ──▶ blk_read(lba, count, buf), 512-byte sectors    (src/fs/blkdev.c)
   ─────────────────────────────────────────────────────────────────────────────
@@ -58,8 +58,8 @@ Each layer has a clean seam:
   a bounded `blkdev_t` view whose LBA zero is its first sector. Bounds checks
   happen before transport I/O, so reads and writes cannot cross a partition.
 - **FAT32** ([`include/fs/fat32.h`](../include/fs/fat32.h)), per-volume state
-  allocated from the kernel heap, independent geometry and read
-  caches, directory traversal, file reads, and stat. Each open handle retains
+  allocated from the kernel heap, independent geometry and sector
+  caches, directory traversal, file reads and writes, and stat. Each open handle retains
   its volume, so changing cwd does not redirect existing descriptors. No VFS.
 - **File syscalls + per-task fd table**, see [syscalls.md](syscalls.md).
 
@@ -69,7 +69,8 @@ Each layer has a clean seam:
   sectors/cluster, reserved sectors, number of FATs, `FATSz32`, `RootClus`) and
   validates geometry against the partition bounds and FAT capacity before
   caching it. Corrupt or looping chains report errors instead of hanging.
-- **Cluster chains** are followed through the FAT with a one-sector FAT cache.
+- **Cluster chains** use a bounded write-back sector cache. Dirty cache victims
+  remain available after an I/O error so an explicit sync can retry them.
 - **Long filenames (LFN/VFAT)** are decoded from their on-disk **UTF-16** to
   **UTF-8**, including surrogate pairs. UTF-8 is used everywhere names cross the
   syscall boundary, it is lossless versus the UTF-16 source and keeps the whole
@@ -84,6 +85,51 @@ Each layer has a clean seam:
   usual 65525-cluster minimum. The driver only reads the BPB, so this is fine
   and keeps the embedded image tiny.
 
+## Existing-file writes and durability
+
+`fat32_open_flags` accepts read-only, write-only or read/write access, optional
+append and truncate-on-open flags. Ordinary `fat32_open` remains read-only.
+Creation is reserved for the next step. A read-only medium or a FAT read-only
+file rejects mutation. Writable transports must support both writes and flush;
+missing durable flush support fails before media changes.
+
+Open handles share reference-counted metadata identified by the short directory
+entry's sector and offset. Their byte cursors remain independent. Append selects
+the shared EOF for each write, so a reader opened earlier sees later extensions.
+`fat32_close` releases its handle reference. Current directories and assigns
+retain their directory and ancestor references too, so namespace changes can
+reject removal of an in-use path. `fs_cwd_copy` inherits owned cwd references;
+`fs_cwd_release` releases them when a task exits. Resolver results are temporary
+path snapshots. A volume with live references cannot unmount. Namespace reset
+checks external owners and syncs every volume before releasing assigns and
+mounts; busy or failed sync leaves the namespace available for retry. Truncate preserves cursor positions. A cursor beyond a new, smaller
+EOF must seek back before writing because sparse holes are unsupported.
+
+Allocation checks actual FAT entries rather than trusting FSInfo counts or
+hints, zeroes new clusters before publishing links, preserves reserved FAT high
+bits, and follows BPB ExtFlags for active FAT selection or mirroring. Shrink
+validates the full chain before reclaiming any clusters. Directory entries track
+both the new size and first cluster. FSInfo counts and hints are refreshed during
+sync. Exhaustion after progress returns a short write; exhaustion before progress
+returns `FS_ERR_NOSPC`.
+
+`fat32_sync_volume` flushes cached data, FAT copies, directory metadata and
+FSInfo through the block transport. Mutation clears the FAT clean bit before
+writing; only a successful sync sets it again. Read, write and flush failures
+reach the caller. Interrupted mirrored updates, unpublished allocations and
+detached shrink tails remain recoverable for a later retry. This is a serialized
+write path under the kernel lock, with no filesystem blocking waits. It is not a
+journaled filesystem and does not promise power-loss atomicity.
+
+Write tests use disposable 64 MiB mtools images with valid FAT32 cluster counts,
+never the shared producer artifact or a firmware card. The host sanitizer suite
+checks cold remounts and injected transport failures; independent `fsck.fat -n`
+and mtools readback verify the resulting images:
+
+```bash
+tests/run-fat-write-tests.sh
+```
+
 ## Current layout of the image
 
 ```
@@ -95,7 +141,10 @@ Each layer has a clean seam:
 
 ## Limitations and deferred work
 
-- **Read-only.** No create, write, append, delete, or directory modification.
+- **No namespace writes yet.** Existing-file overwrite, append, allocation and
+  shrink are available in the kernel FAT32 API. File syscalls remain read-only
+  until the following write steps. Create, delete and directory changes are
+  deferred. Seeking beyond EOF and truncate growth are unsupported.
 - **Pi storage is ramdisk only.** virt supports bare FAT32 and primary MBR
   FAT32 partitions on a VirtIO disk.
   No SD/eMMC driver exists.
@@ -118,9 +167,10 @@ Attach a bare FAT32 volume or a disk with primary MBR FAT32 partitions. The
 first supported FAT32 partition is the boot root and must contain `/bin/init`
 and `/bin/shell`. The launcher selects modern VirtIO MMIO;
 legacy transport is unsupported. Media defaults to read-only; set
-`KORA_QEMU_DISK_READONLY=off` on a disposable image for raw block experiments.
+`KORA_QEMU_DISK_READONLY=off` only on a disposable image for write tests.
 The block API supports `blk_read`, `blk_write` and negotiated `blk_flush`.
-FAT32 and file syscalls remain read-only. The driver's capacity is bounded by
+The FAT32 kernel API supports existing-file data writes; file syscalls remain
+read-only until write flags and file management operations are exposed. The driver's capacity is bounded by
 the current 32-bit sector API. Missing disks use the embedded root; a configured
 broken disk does not silently fall back. Timed-out devices retain DMA buffers
 and reject subsequent requests until reboot.
@@ -155,7 +205,7 @@ tests/run-qemu-smoke.py --target qemu_virt --disk build/mbr-root.img
 The helper accepts up to four bare FAT32 source images, aligns partitions at
 2048-sector boundaries, and atomically publishes a separate scratch image.
 It preserves source images and never updates the shared producer artifact.
-FAT32 remains read-only. Every valid registered FAT32 view joins the namespace;
+Every valid registered FAT32 view joins the namespace;
 a failed preferred boot mount never substitutes another mounted volume.
 
 ## Volumes, paths and current directory

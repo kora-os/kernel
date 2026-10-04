@@ -198,7 +198,7 @@ blkdev_t *virtio_blk_init(bool *present) {
     }
     block.read = disk_read;
     block.write = disk_write;
-    block.flush = disk_flush;
+    block.flush = (disk.features & BLK_F_FLUSH) ? disk_flush : NULL;
     block.sector_count = capacity;
     block.read_only = !!(disk.features & BLK_F_RO);
     block.ctx = &disk;

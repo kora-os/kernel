@@ -71,8 +71,10 @@ static void add_partition(blkdev_device_t *device, uint32_t start, uint32_t coun
                           unsigned index, uint8_t type) {
     blkdev_partition_t *part = &partitions[partition_count++];
     *part = (blkdev_partition_t){
-        .dev = {.read = partition_read, .write = partition_write,
-                .flush = partition_flush, .sector_count = count, .ctx = part,
+        .dev = {.read = partition_read,
+                .write = device->backend->write ? partition_write : NULL,
+                .flush = device->backend->flush ? partition_flush : NULL,
+                .sector_count = count, .ctx = part,
                 .read_only = device->backend->read_only},
         .device = device, .start_lba = start, .mbr_index = index, .mbr_type = type,
     };
