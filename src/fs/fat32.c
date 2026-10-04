@@ -103,10 +103,9 @@ static int cache_get(fat32_volume_t *vol, uint32_t lba, struct sector_cache **ou
         slot->dirty = false;
     }
     // A failed read must not destroy the previous cached sector.
-    uint8_t bytes[BLK_SECTOR_SIZE];
-    int rc = io_error(blkdev_read(vol->dev, lba, 1, bytes));
+    int rc = io_error(blkdev_read(vol->dev, lba, 1, vol->data_buf));
     if (rc != 0) return rc;
-    memcpy(slot->bytes, bytes, sizeof(bytes));
+    memcpy(slot->bytes, vol->data_buf, BLK_SECTOR_SIZE);
     slot->lba = lba;
     slot->valid = true;
     vol->victim = ((unsigned)(slot - vol->cache) + 1) % FAT32_CACHE_SECTORS;
@@ -605,53 +604,52 @@ static int find_in_dir(fat32_volume_t *vol, uint32_t dir_cluster, const char *co
                        fat32_dirent_t *out) {
     fat32_file_t dir = {.volume = vol, .first_cluster = dir_cluster, .size = 0, .pos = 0,
                         .is_dir = true};
-    fat32_dirent_t de;
     int r;
-    while ((r = fat32_readdir(&dir, &de)) == 1) {
-        if (name_eq(de.name, comp, comp_len)) {
-            memcpy(out, &de, sizeof(*out));
-            return 0;
-        }
+    while ((r = fat32_readdir(&dir, out)) == 1) {
+        if (name_eq(out->name, comp, comp_len)) return 0;
     }
     return r < 0 ? r : FS_ERR_NOTFOUND;
 }
 
 // Resolve an absolute path to its directory entry. "/" resolves to a synthetic
 // root-directory entry.
+struct lookup_scratch {
+    fat32_dirent_t current;
+    fat32_dirent_t found;
+};
+
 int fat32_lookup(fat32_volume_t *vol, const char *path, fat32_dirent_t *out) {
-    if (vol == NULL) {
-        return FS_ERR_NOFS;
-    }
-    if (path == NULL || out == NULL || path[0] != '/') {
-        return FS_ERR_INVAL;
-    }
-    fat32_dirent_t cur = {.name = "/", .size = 0,
-                          .first_cluster = vol->root_cluster, .is_dir = true,
-                          .attributes = 0x10, .entry_sector = 0xffffffffu};
+    if (vol == NULL) return FS_ERR_NOFS;
+    if (path == NULL || out == NULL || path[0] != '/') return FS_ERR_INVAL;
+    // UTF-8 directory entries are large. Keep both traversal entries off the
+    // per-task kernel stack, including unoptimized Debug builds.
+    struct lookup_scratch *scratch = kmalloc(sizeof(*scratch));
+    if (scratch == NULL) return FS_ERR_IO;
+    scratch->current.name[0] = '/';
+    scratch->current.first_cluster = vol->root_cluster;
+    scratch->current.is_dir = true;
+    scratch->current.attributes = 0x10;
+    scratch->current.entry_sector = 0xffffffffu;
     const char *p = path + 1;
+    int rc = 0;
     while (*p) {
         const char *start = p;
-        while (*p && *p != '/') {
-            p++;
-        }
+        while (*p && *p != '/') p++;
         size_t len = (size_t)(p - start);
         if (len > 0) {
-            if (!cur.is_dir) {
-                return FS_ERR_NOTDIR;
+            if (!scratch->current.is_dir) {
+                rc = FS_ERR_NOTDIR;
+                break;
             }
-            fat32_dirent_t de;
-            int r = find_in_dir(vol, cur.first_cluster, start, len, &de);
-            if (r != 0) {
-                return r;
-            }
-            memcpy(&cur, &de, sizeof(cur));
+            rc = find_in_dir(vol, scratch->current.first_cluster, start, len, &scratch->found);
+            if (rc != 0) break;
+            scratch->current = scratch->found;
         }
-        if (*p == '/') {
-            p++;
-        }
+        if (*p == '/') p++;
     }
-    memcpy(out, &cur, sizeof(*out));
-    return 0;
+    if (rc == 0) *out = scratch->current;
+    kfree(scratch);
+    return rc;
 }
 
 static int handle_open(fat32_volume_t *vol, const fat32_dirent_t *de,
