@@ -11,6 +11,7 @@
 #include "console.h"
 #include "fs/blkdev.h"
 #include "fs/fat32.h"
+#include "fs/namespace.h"
 #include "mm.h"
 #include "mm/frame_alloc.h"
 #include "mm/kmalloc.h"
@@ -92,7 +93,7 @@ void kernel_main(uintptr_t dtb) {
   // Bring up the ramdisk block device (embedded FAT32 image) and mount it so
   // the file syscalls have a filesystem to serve.
   blkdev_init();
-  int fs_rc = fat32_mount();
+  int fs_rc = fs_mount_registered(blkdev_root());
   if (fs_rc != 0) {
     printf("fat32: mount failed: %d\n", fs_rc);
   }

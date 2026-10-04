@@ -12,7 +12,7 @@ big kernel lock when it arrives. Track B uses syscall slots 32 through 47.
 
 - [x] 8.1 (PR #46): physical block registry, bounded primary MBR partition views, bare
   FAT32 compatibility, backend registration and MBR QEMU coverage.
-- [ ] 8.2: heap-backed FAT volumes, labels, namespace resolver, inherited task
+- [x] 8.2 (PR #47): heap-backed FAT volumes, labels, namespace resolver, inherited task
   cwd, chdir/getcwd (32/33), multi-volume and relative-path coverage.
 - [ ] 8.3: single-target assigns, sys/c boot defaults, spawn through c, shell
   navigation and volumes listing, boot and inheritance regression coverage.

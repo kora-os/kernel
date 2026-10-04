@@ -7,6 +7,7 @@
 #include "tty.h"
 #include "mm.h"
 #include "mm/frame_alloc.h"
+#include "mm/kmalloc.h"
 #include "video/console_fb.h"
 
 // lseek whence values; must match user/libk/koraos.h.
@@ -54,6 +55,26 @@ static bool uptr_ok(uint64_t addr, uint64_t len) {
         return false;  // beyond the identity map
     }
     return true;
+}
+
+// Copy bounded filesystem paths before resolving them. Each byte is checked
+// against the current flat-map ABI, including the terminating NUL.
+static char *copy_user_path(const char *path) {
+    char *copy = kmalloc(FS_QUALIFIED_PATH_MAX);
+    if (copy == NULL) {
+        return NULL;
+    }
+    for (unsigned i = 0; i < FS_QUALIFIED_PATH_MAX; i++) {
+        if (!uptr_ok((uint64_t)path + i, 1)) {
+            break;
+        }
+        copy[i] = path[i];
+        if (copy[i] == 0) {
+            return copy;
+        }
+    }
+    kfree(copy);
+    return NULL;
 }
 
 // write(fd, buf, len): fd 1 (stdout) and 2 (stderr) go to the terminal.
@@ -155,7 +176,9 @@ static long sys_read(int fd, char *buf, uint64_t len) {
 // open(path, flags): resolve an absolute path to a file or directory and give
 // it an fd in the calling task's table. Only O_RDONLY is supported.
 static long sys_open(const char *path, int flags) {
-    (void)flags;  // read-only filesystem
+    if (flags != 0) {
+        return -1; // only O_RDONLY is supported
+    }
     if (!uptr_ok((uint64_t)path, 1)) {
         return -1;
     }
@@ -173,11 +196,16 @@ static long sys_open(const char *path, int flags) {
     if (idx < 0) {
         return -1;  // fd table full
     }
-    fat32_file_t f;
-    int rc = fat32_open(path, &f);
-    if (rc == FS_ERR_ISDIR) {
-        rc = fat32_opendir(path, &f);  // a directory: open it for readdir
+    char *copy = copy_user_path(path);
+    if (copy == NULL) {
+        return -1;
     }
+    fat32_file_t f;
+    int rc = fs_open(&t->cwd, copy, &f);
+    if (rc == FS_ERR_ISDIR) {
+        rc = fs_opendir(&t->cwd, copy, &f);  // a directory: open it for readdir
+    }
+    kfree(copy);
     if (rc != 0) {
         return -1;
     }
@@ -249,13 +277,41 @@ static long sys_stat(const char *path, struct kstat *out) {
     if (!uptr_ok((uint64_t)path, 1) || !uptr_ok((uint64_t)out, sizeof(*out))) {
         return -1;
     }
+    task_t *t = task_current();
+    char *copy = copy_user_path(path);
+    if (t == NULL || copy == NULL) {
+        kfree(copy);
+        return -1;
+    }
     fat32_stat_t st;
-    if (fat32_stat(path, &st) != 0) {
+    int rc = fs_stat(&t->cwd, copy, &st);
+    kfree(copy);
+    if (rc != 0) {
         return -1;
     }
     out->size = st.size;
     out->is_dir = st.is_dir;
     return 0;
+}
+
+static long sys_chdir(const char *path) {
+    task_t *t = task_current();
+    char *copy = copy_user_path(path);
+    if (t == NULL || copy == NULL) {
+        kfree(copy);
+        return -1;
+    }
+    int rc = fs_chdir(&t->cwd, copy);
+    kfree(copy);
+    return rc == 0 ? 0 : -1;
+}
+
+static long sys_getcwd(char *buf, uint64_t size) {
+    task_t *t = task_current();
+    if (t == NULL || !uptr_ok((uint64_t)buf, size)) {
+        return -1;
+    }
+    return fs_getcwd(&t->cwd, buf, (size_t)size) == 0 ? 0 : -1;
 }
 
 // sbrk(increment): grow (or shrink) the calling task's heap, which is allocated
@@ -296,7 +352,13 @@ static long sys_spawn(const char *name, int argc, char *const argv[]) {
     if (argc > 0 && !uptr_ok((uint64_t)argv, (uint64_t)argc * sizeof(char *))) {
         return -1;
     }
-    return task_spawn(name, argc, argv);
+    char *copy = copy_user_path(name);
+    if (copy == NULL) {
+        return -1;
+    }
+    int pid = task_spawn(copy, argc, argv);
+    kfree(copy);
+    return pid;
 }
 
 // fb_info(out): report the active screen's framebuffer geometry and address so
@@ -366,6 +428,12 @@ void syscall_handle(struct trapframe *tf) {
         break;
     case SYS_stat:
         ret = sys_stat((const char *)a0, (struct kstat *)a1);
+        break;
+    case SYS_chdir:
+        ret = sys_chdir((const char *)a0);
+        break;
+    case SYS_getcwd:
+        ret = sys_getcwd((char *)a0, a1);
         break;
     default:
         ret = -1;

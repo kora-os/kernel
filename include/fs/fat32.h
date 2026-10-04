@@ -1,9 +1,10 @@
 #pragma once
 
 #include "common.h"
+#include "fs/blkdev.h"
 
 // Read-only FAT32 driver over the block device (include/fs/blkdev.h). Supports
-// a single mounted volume, absolute paths, directory traversal with VFAT long
+// multiple mounted volumes, absolute paths, directory traversal with VFAT long
 // filenames (LFN), file reads, and stat. No write support, no VFS -- just
 // enough to read files (and later, load programs) off the embedded ramdisk.
 //
@@ -28,9 +29,12 @@
 #define FS_ERR_CORRUPT  (-7)  // structurally invalid (bad cluster chain)
 #define FS_ERR_INVAL    (-8)  // bad argument (e.g. a relative path)
 
+typedef struct fat32_volume fat32_volume_t;
+
 // An open handle: a byte cursor over a cluster chain. Used for both files and
 // directories (directories ignore `size` and iterate to an end-of-dir marker).
 typedef struct {
+    fat32_volume_t *volume;
     uint32_t first_cluster;
     uint32_t size;  // file size in bytes; 0 and meaningless for directories
     uint32_t pos;   // byte offset of the cursor
@@ -51,20 +55,23 @@ typedef struct {
     bool is_dir;
 } fat32_stat_t;
 
-// Parse the BPB from sector 0 and cache the volume geometry. Returns 0 or a
-// negative FS_ERR_* code. Call once, after blkdev_init().
-int fat32_mount(void);
+// Mount a partition-relative device and allocate independent geometry/caches.
+// Returns 0 or FS_ERR_*; *out is NULL on failure. Unmount only without handles.
+int fat32_mount(blkdev_t *dev, fat32_volume_t **out);
+void fat32_unmount(fat32_volume_t *volume);
+const char *fat32_label(const fat32_volume_t *volume);
+int fat32_lookup(fat32_volume_t *volume, const char *path, fat32_dirent_t *out);
 
 // Open a file by absolute path. Returns 0, or FS_ERR_ISDIR if the path names a
 // directory, or FS_ERR_NOTFOUND / FS_ERR_NOTDIR / negative on other failures.
-int fat32_open(const char *path, fat32_file_t *out);
+int fat32_open(fat32_volume_t *volume, const char *path, fat32_file_t *out);
 
 // Read up to `len` bytes at the handle's cursor, advancing it. Returns the
 // number of bytes read (0 at end of file), or a negative FS_ERR_* code.
 long fat32_read(fat32_file_t *f, void *buf, uint32_t len);
 
 // Open a directory by absolute path ("/" is the root). Returns 0 or negative.
-int fat32_opendir(const char *path, fat32_file_t *out);
+int fat32_opendir(fat32_volume_t *volume, const char *path, fat32_file_t *out);
 
 // Read the next entry from an open directory. Returns 1 and fills `out` for an
 // entry, 0 at end of directory, or a negative FS_ERR_* code. Skips deleted
@@ -72,4 +79,4 @@ int fat32_opendir(const char *path, fat32_file_t *out);
 int fat32_readdir(fat32_file_t *dir, fat32_dirent_t *out);
 
 // Stat an absolute path (file or directory). Returns 0 or negative.
-int fat32_stat(const char *path, fat32_stat_t *out);
+int fat32_stat(fat32_volume_t *volume, const char *path, fat32_stat_t *out);
