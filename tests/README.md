@@ -11,7 +11,8 @@ Raspberry Pi is needed, and a run takes a few seconds.
 tests/run-host-tests.sh
 ```
 
-Requires `clang` (the default `CC`; Apple's clang works). GCC is not supported:
+Requires `clang` (the default `CC`; Apple's clang works), Python 3 and mtools
+(`mformat`, `mmd`, `mcopy`) for real FAT32 fixtures. GCC is not supported:
 it rejects the kernel's own `strlen` declaration under `-Werror`.
 
 ### Writing a test
@@ -30,6 +31,7 @@ Current suites:
 
 | Test | Covers |
 |------|--------|
+| `filesystem_test.c` | `src/fs/fat32.c` and `src/fs/namespace.c` on mtools-made volumes: independent geometry/caches, root/BPB labels, duplicate labels/device collisions, relative paths, cwd isolation, retained handles, malformed geometry/chains/LFN, allocation and I/O errors |
 | `blkdev_test.c` | `src/fs/blkdev.c`: bare FAT32 and mixed MBR discovery, hidden FAT32 types, invalid/range/overlap tables, partition-relative bounded read/write/flush, read-only and unsupported I/O, registry capacity |
 | `kmalloc_test.c` | `src/mm/kmalloc.c`, `src/mm/kmalloc_stress.c`: alignment, zeroing, cache-line separation, block reuse, slab release, page runs, over-aligned blocks, exhaustion, invalid and double frees, balanced IRQ masking, seeded stress |
 | `term_test.c` | `src/video/term.c`: autowrap, scrollback and its view, scroll regions, insert/delete/erase, alternate screen, status replies, colours (16/256/24-bit, bce), UTF-8 and DEC line drawing, tabs, origin mode, cursor style/visibility, OSC, REP |
@@ -42,6 +44,11 @@ tests/run-mbr-image-tests.py
 
 It checks aligned multi-partition layout, byte-for-byte source preservation,
 invalid-input rejection and preservation of an existing output on failure.
+
+`tests/run-filesystem-tests.sh` also runs independently. It creates disposable
+2 MiB and 4 MiB mtools images with distinct content and labels, then makes
+narrowly corrupted copies for chain and LFN tests. Fixtures live under
+`build/host-tests/fs-fixtures`; the shared userfs is never used as writable media.
 
 ## Feature status file
 
@@ -85,7 +92,9 @@ tests/run-qemu-smoke.py --target qemu_virt --keyboard --disk build/userfs/aarch6
 ```
 
 The test checks the boot-time kernel heap self-test, boots to the ELF shell,
-runs filesystem/argv/exit-code checks, switches to the serial debug console,
+runs filesystem/argv/exit-code checks plus an EL0 namespace probe (child cwd
+inheritance and isolation, failed path handling, and descriptors retained across
+chdir), switches to the serial debug console,
 verifies timer/UART IRQ progress, runs `heaptest` (seeded kernel heap stress)
 and checks that `heap` reports no leaks or bad frees, and checks terminal
 colors and graphics pixels using QEMU screenshots. Virt optionally injects
@@ -109,6 +118,16 @@ tests/create-mbr-image.py --output build/mbr-root.img build/userfs/aarch64/korao
 tests/run-qemu-smoke.py --target qemu_virt --disk build/mbr-root.img --repeat 64
 ```
 
+The `--multi-volume` profile additionally requires a second labeled partition:
+
+```bash
+tests/create-multivolume-image.py --output build/multi-root.img build/userfs/aarch64/koraos.img
+tests/run-qemu-smoke.py --target qemu_virt --disk build/multi-root.img --multi-volume
+```
+
+The fixture copies the shared image, relabels its copies as BOOT and EXTRAS,
+forces stale BPB labels, and verifies the source SHA256 remains unchanged.
+
 `--expect-root-failure --disk <zeroed-image>` requires a selected VirtIO disk,
 failed mount and failed init load, so silent ramdisk fallback cannot pass.
 
@@ -119,9 +138,8 @@ AArch64 artifact. Consumers download it and use `--userfs-dir` without invoking
 userland compilation or filesystem generation. The all-target job builds four
 Debug kernels, stages both hardware Release payloads into a temporary directory,
 creates a FAT32 SD image, and runs raspi3b smoke. Separate virt profiles cover
-embedded graphics, 128 MiB external disk/keyboard, primary MBR boot,
-64 MiB serial-only and EL2
-entry. UART/screenshots are uploaded on failure. Pure host sanitizer suites stay
+embedded graphics, 128 MiB external disk/keyboard, primary MBR boot, two labeled
+partitions with namespace navigation, 64 MiB serial-only and EL2 entry. UART/screenshots are uploaded on failure. Pure host sanitizer suites stay
 independent of the producer and kernel jobs.
 
 QEMU cannot validate real Pi USB, HDMI, caches or boot firmware. Hardware testing

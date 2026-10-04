@@ -57,6 +57,11 @@ long lseek(int fd, long offset, int whence);
 int readdir(int fd, struct dirent *out);   /* 1 = entry, 0 = end, <0 = error */
 int stat(const char *path, struct stat *out);
 
+// Change cwd, or copy its volume-qualified canonical spelling (including NUL).
+// Both return 0 on success and -1 on failure; failed chdir preserves cwd.
+int chdir(const char *path);
+int getcwd(char *buf, size_t size);
+
 /* Memory */
 void *sbrk(long increment);
 

@@ -20,6 +20,10 @@ jobs:
       - uses: actions/checkout@v7
       - name: Make AddressSanitizer usable
         run: sudo sysctl -w vm.mmap_rnd_bits=28
+      - name: Install filesystem fixture tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends mtools
       - name: Host sanitizer suites
         run: tests/run-host-tests.sh
       - name: Scratch MBR image tests
@@ -113,6 +117,8 @@ jobs:
             args: --ram 128M --disk build/userfs/aarch64/koraos.img --keyboard --repeat 256
           - profile: mbr-disk
             args: --disk build/mbr-root.img --repeat 64
+          - profile: multi-volume
+            args: --disk build/multi-root.img --multi-volume --repeat 64
           - profile: serial-small-ram
             args: --ram 64M --no-graphics --repeat 32
           - profile: el2-entry
@@ -132,6 +138,9 @@ jobs:
       - name: Wrap shared root in a scratch MBR image
         if: matrix.profile == 'mbr-disk'
         run: tests/create-mbr-image.py --output build/mbr-root.img build/userfs/aarch64/koraos.img
+      - name: Create two labeled scratch partitions
+        if: matrix.profile == 'multi-volume'
+        run: tests/create-multivolume-image.py --output build/multi-root.img build/userfs/aarch64/koraos.img
       - name: Exercise development profile
         run: tests/run-qemu-smoke.py --target qemu_virt --out build/debug/qemu_virt/qemu-${{ matrix.profile }} ${{ matrix.args }}
       - name: Reject invalid configured root disk
