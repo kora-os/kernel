@@ -5,6 +5,8 @@
 static fs_volume_info_t volumes[BLKDEV_MAX_PARTITIONS];
 static unsigned volume_count;
 static fat32_volume_t *boot_volume;
+static fs_assign_info_t *assigns[FS_MAX_ASSIGNS];
+static unsigned assign_count;
 
 static char lower(char c) {
     return c >= 'A' && c <= 'Z' ? (char)(c + 32) : c;
@@ -19,35 +21,54 @@ static bool name_equal(const char *a, const char *b, size_t n) {
     return a[n] == 0;
 }
 
-static fat32_volume_t *prefix_volume(const char *name, size_t len) {
+// Return a volume-local anchor, not merely a volume: assigns can name a
+// subdirectory. Devices precede assigns, which precede unique volume labels.
+static int prefix_location(const char *name, size_t len,
+                            fat32_volume_t **volume, const char **path) {
     for (size_t i = 0; i < len; i++) {
         if (name[i] == ':' || name[i] == '/' || (uint8_t)name[i] < 0x20) {
-            return NULL;
+            return FS_ERR_NOTFOUND;
         }
     }
-    // Device slots take precedence over labels. Reserved assign names cannot
-    // accidentally resolve to a medium label before assigns are implemented.
     for (unsigned i = 0; i < volume_count; i++) {
         if (name_equal(volumes[i].device, name, len)) {
-            return volumes[i].volume;
+            *volume = volumes[i].volume;
+            *path = "/";
+            return 0;
+        }
+    }
+    for (unsigned i = 0; i < assign_count; i++) {
+        if (name_equal(assigns[i]->name, name, len)) {
+            *volume = assigns[i]->target.volume;
+            *path = assigns[i]->target.path;
+            return 0;
         }
     }
     if (name_equal("sys", name, len) || name_equal("c", name, len)) {
-        return NULL;
+        return FS_ERR_NOTFOUND; // reserved defaults never fall through to labels
     }
     fat32_volume_t *match = NULL;
     for (unsigned i = 0; i < volume_count; i++) {
         if (len && name_equal(volumes[i].label, name, len)) {
             if (match != NULL) {
-                return NULL; // duplicate labels are ambiguous
+                return FS_ERR_NOTFOUND; // duplicate labels are ambiguous
             }
             match = volumes[i].volume;
         }
     }
-    return match;
+    if (match == NULL) {
+        return FS_ERR_NOTFOUND;
+    }
+    *volume = match;
+    *path = "/";
+    return 0;
 }
 
 void fs_namespace_reset(void) {
+    for (unsigned i = 0; i < assign_count; i++) {
+        kfree(assigns[i]);
+    }
+    assign_count = 0;
     for (unsigned i = 0; i < volume_count; i++) {
         fat32_unmount(volumes[i].volume);
     }
@@ -71,6 +92,8 @@ int fs_mount_registered(blkdev_t *boot) {
         fs_volume_info_t *info = &volumes[volume_count++];
         info->volume = volume;
         info->label = fat32_label(volume);
+        info->boot = dev == boot;
+        info->read_only = fat32_is_read_only(volume);
         info->device[0] = 'd';
         info->device[1] = 'f';
         unsigned n = 2;
@@ -83,7 +106,23 @@ int fs_mount_registered(blkdev_t *boot) {
             boot_volume = volume;
         }
     }
-    return boot_volume != NULL ? 0 : boot_error;
+    if (boot_volume == NULL) {
+        return boot_error;
+    }
+    fs_assign_info_t *sys = kmalloc(sizeof(*sys));
+    if (sys == NULL) {
+        fs_namespace_reset();
+        return FS_ERR_IO;
+    }
+    memcpy(sys->name, "sys", 4);
+    sys->immutable = true;
+    fs_boot_cwd(&sys->target);
+    assigns[assign_count++] = sys;
+    int rc = fs_assign_set(&sys->target, "c", "sys:bin");
+    if (rc != 0) {
+        fs_namespace_reset();
+    }
+    return rc;
 }
 
 unsigned fs_volume_count(void) {
@@ -139,13 +178,12 @@ int fs_resolve(const fs_cwd_t *cwd, const char *path, fs_cwd_t *out,
     }
     int rc = 0;
     if (colon != NULL) {
-        s->location.volume = prefix_volume(path, (size_t)(colon - path));
-        if (s->location.volume == NULL) {
-            rc = FS_ERR_NOTFOUND;
+        const char *anchor;
+        rc = prefix_location(path, (size_t)(colon - path), &s->location.volume, &anchor);
+        if (rc != 0) {
             goto done;
         }
-        s->location.path[0] = '/';
-        s->location.path[1] = 0;
+        memcpy(s->location.path, anchor, (size_t)strlen(anchor) + 1);
         p = colon + 1;
     } else if (*p == '/') {
         s->location.path[0] = '/';
@@ -258,7 +296,11 @@ int fs_getcwd(const fs_cwd_t *cwd, char *buf, size_t size) {
         return FS_ERR_NOFS;
     }
     const char *name = info->device;
-    if (*info->label && prefix_volume(info->label, (size_t)strlen(info->label)) == cwd->volume) {
+    fat32_volume_t *label_volume;
+    const char *label_path;
+    if (*info->label && prefix_location(info->label, (size_t)strlen(info->label),
+                                      &label_volume, &label_path) == 0 &&
+        label_volume == cwd->volume && strcmp(label_path, "/") == 0) {
         name = info->label;
     }
     size_t n = (size_t)strlen(name);
@@ -269,6 +311,96 @@ int fs_getcwd(const fs_cwd_t *cwd, char *buf, size_t size) {
     memcpy(buf, name, n);
     buf[n] = ':';
     memcpy(buf + n + 1, cwd->path + 1, p + 1);
+    return 0;
+}
+
+unsigned fs_assign_count(void) {
+    return assign_count;
+}
+
+const fs_assign_info_t *fs_assign_get(unsigned index) {
+    return index < assign_count ? assigns[index] : NULL;
+}
+
+static int assign_name(const char *name, char *out) {
+    if (name == NULL) {
+        return FS_ERR_INVAL;
+    }
+    unsigned n = 0;
+    while (n <= FS_PREFIX_MAX + 1 && name[n]) {
+        n++;
+    }
+    if (n && name[n - 1] == ':') {
+        n--;
+    }
+    if (n == 0 || n > FS_PREFIX_MAX) {
+        return FS_ERR_INVAL;
+    }
+    for (unsigned i = 0; i < n; i++) {
+        if ((uint8_t)name[i] <= 0x20 || (uint8_t)name[i] == 0x7f ||
+            name[i] == ':' || name[i] == '/') {
+            return FS_ERR_INVAL;
+        }
+        out[i] = lower(name[i]);
+    }
+    out[n] = 0;
+    if (n > 2 && out[0] == 'd' && out[1] == 'f') {
+        unsigned i = 2;
+        while (i < n && out[i] >= '0' && out[i] <= '9') {
+            i++;
+        }
+        if (i == n) {
+            return FS_ERR_INVAL;
+        }
+    }
+    return 0;
+}
+
+int fs_assign_set(const fs_cwd_t *cwd, const char *name, const char *target) {
+    char normalized[FS_PREFIX_MAX + 1];
+    int rc = assign_name(name, normalized);
+    if (rc != 0 || strcmp(normalized, "sys") == 0) {
+        return FS_ERR_INVAL;
+    }
+    unsigned index = 0;
+    while (index < assign_count && strcmp(assigns[index]->name, normalized) != 0) {
+        index++;
+    }
+    if (target == NULL) {
+        if (index == assign_count) {
+            return FS_ERR_NOTFOUND;
+        }
+        kfree(assigns[index]);
+        for (unsigned i = index + 1; i < assign_count; i++) {
+            assigns[i - 1] = assigns[i];
+        }
+        assign_count--;
+        return 0;
+    }
+    if (index == assign_count && assign_count == FS_MAX_ASSIGNS) {
+        return FS_ERR_INVAL;
+    }
+    fs_assign_info_t *replacement = kmalloc(sizeof(*replacement));
+    if (replacement == NULL) {
+        return FS_ERR_IO;
+    }
+    memcpy(replacement->name, normalized, (size_t)strlen(normalized) + 1);
+    replacement->immutable = false;
+    fat32_dirent_t entry;
+    rc = fs_resolve(cwd, target, &replacement->target, &entry);
+    if (rc == 0 && !entry.is_dir) {
+        rc = FS_ERR_NOTDIR;
+    }
+    if (rc != 0) {
+        kfree(replacement);
+        return rc;
+    }
+    if (index < assign_count) {
+        kfree(assigns[index]);
+    } else {
+        assign_count++;
+    }
+    assigns[index] = replacement;
     return 0;
 }
 
@@ -326,16 +458,16 @@ int fs_program_open(const fs_cwd_t *cwd, const char *name, fat32_file_t *out) {
     if (!bare) {
         return fs_open(cwd, name, out);
     }
-    if (len + 6 > FS_PATH_MAX || boot_volume == NULL) {
+    if (len + 3 > FS_QUALIFIED_PATH_MAX) {
         return FS_ERR_INVAL;
     }
-    char *path = kmalloc(len + 6);
+    char *path = kmalloc(len + 3);
     if (path == NULL) {
         return FS_ERR_IO;
     }
-    memcpy(path, "/bin/", 5);
-    memcpy(path + 5, name, len + 1);
-    int rc = fat32_open(boot_volume, path, out);
+    memcpy(path, "c:", 2);
+    memcpy(path + 2, name, len + 1);
+    int rc = fs_open(cwd, path, out);
     kfree(path);
     return rc;
 }

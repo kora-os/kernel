@@ -26,8 +26,9 @@ struct fb_info {
     unsigned int bpp;     /* bits per pixel */
 };
 
-/* Filesystem. Paths are absolute; names are UTF-8. The kernel mirrors these
- * struct layouts in src/sys/syscall.c -- keep them in sync. */
+/* Filesystem. Paths support cwd, volume/device prefixes and assigns. Names
+ * are UTF-8. The kernel mirrors these struct layouts in src/sys/syscall.c;
+ * keep them in sync. */
 #define O_RDONLY 0
 
 #define SEEK_SET 0
@@ -49,6 +50,23 @@ struct stat {
     int is_dir;
 };
 
+#define KORA_PATH_MAX 4128 // qualified path capacity including NUL
+#define VOLUME_BOOT 1u
+#define VOLUME_READ_ONLY 2u
+#define ASSIGN_IMMUTABLE 1u
+
+struct volume_info {
+    char device[8];
+    char label[12];
+    unsigned int flags;
+};
+
+struct assign_info {
+    char name[32];
+    char target[KORA_PATH_MAX];
+    unsigned int flags;
+};
+
 /* Console / I/O */
 ssize_t write(int fd, const void *buf, size_t len);
 ssize_t read(int fd, void *buf, size_t len);
@@ -65,6 +83,11 @@ int stat(const char *path, struct stat *out);
 // Both return 0 on success and -1 on failure; failed chdir preserves cwd.
 int chdir(const char *path);
 int getcwd(char *buf, size_t size);
+// Enumerators return 1 for an item, 0 at end, -1 on failure.
+int volume_info(unsigned int index, struct volume_info *out);
+int assign_info(unsigned int index, struct assign_info *out);
+// Assign a directory target; NULL target removes an assign. sys is fixed.
+int assign(const char *name, const char *target);
 
 /* Memory. alloc_pages() returns `count` contiguous zeroed pages (NULL on
  * failure); free_pages() takes the base address back (0, or -1 if the run is
