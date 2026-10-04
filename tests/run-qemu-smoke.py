@@ -341,7 +341,7 @@ def main():
     parser.add_argument("--repeat", type=int, default=0, help="repeat 64 KiB EL0 heap/nested-process probe")
     parser.add_argument("--expect-root-failure", action="store_true", help="require a configured disk mount failure")
     parser.add_argument("--keyboard", action="store_true", help="inject keys through a VirtIO keyboard")
-    parser.add_argument("--disk", help="external bare FAT32 image for virt")
+    parser.add_argument("--disk", help="external bare FAT32 or MBR FAT32 disk for virt")
     parser.add_argument("--disk-writable", action="store_true", help="enable raw writes to the supplied test disk")
     parser.add_argument("--no-graphics", action="store_true")
     parser.add_argument("--kernel")

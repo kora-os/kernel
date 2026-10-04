@@ -35,14 +35,18 @@ gap, and nothing below tries to change it (see `docs/how-userland-works.md`).
 |---|-----------|------------|
 | 6 | Kernel heap and user memory | |
 | 7 | Scheduler, SMP and threads | 6 |
-| 8 | Volumes and namespace | 6, 7 |
-| 9 | FAT32 write | 8 |
-| 10 | Storage drivers (SD, USB mass storage) | 8 (9 for writes) |
+| 8 | Volumes and namespace | 6.1; 8.2 follows 8.1 |
+| 9 | FAT32 write | 8.2 |
+| 10 | Storage drivers (SD, USB mass storage) | SD: none; USB: 6.1, 7.5 |
 | 11 | Hotplug (USB, HDMI) | 7, 10 |
 | 12 | libc port | 6, 7, 8, 9 |
 
 The libc port only depends on milestones 6 to 9, so it can move ahead of 10 and
-11 if a real libc becomes the priority.
+11 if a real libc becomes the priority. Filesystem milestones 8 and 9 do not
+depend on the scheduler: filesystem calls remain serial under the big kernel
+lock. SD backends can register through 8.1 when available; SD write enablement
+remains separate. USB mass storage needs the core-0 I/O worker after 7.5.
+Track B delivery and verification are recorded in `filesystem-plan.md`.
 
 ## Milestone 6 – Kernel heap and user memory
 
