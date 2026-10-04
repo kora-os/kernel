@@ -80,6 +80,7 @@ static void check_text(fat32_volume_t *volume, const char *path, const char *exp
     long count = fat32_read(&file, content, sizeof(content) - 1);
     CHECK(count > 0 && strcmp(content, expected) == 0, "content belongs to correct volume");
     CHECK(fat32_read(&file, content, sizeof(content)) == 0, "file EOF is stable");
+    fat32_close(&file);
 }
 static void volume_interleaving(void) {
     blkdev_t alpha, beta;
@@ -110,6 +111,8 @@ static void volume_interleaving(void) {
     check_text(b, "/marker.txt", "beta volume\n");
     check_text(a, "/docs/résumé-notes.txt", "alpha volume\n");
     check_text(a, "/a-long-invalid-name.txt", "alpha volume\n");
+    fat32_close(&files[0]);
+    fat32_close(&files[1]);
     fat32_unmount(b);
     check_text(a, "/marker.txt", "alpha volume\n");
     fat32_unmount(a);
@@ -135,6 +138,7 @@ static void corrupt_media(void) {
         uint8_t content[5000];
         CHECK(fat32_read(&file, content, sizeof(content)) == FS_ERR_CORRUPT,
               "bad or looping cluster chain rejected");
+        fat32_close(&file);
         fat32_unmount(volume);
         free(backend.ctx);
     }
@@ -156,6 +160,7 @@ static void corrupt_media(void) {
             entries++;
         }
         CHECK(rc == 0 && entries == 5, "malformed LFN neither hides nor adds real entries");
+        fat32_close(&file);
         fat32_unmount(volume);
         free(backend.ctx);
     }
@@ -184,6 +189,7 @@ static void error_paths(void) {
     CHECK(fat32_read(&file, content, sizeof(content)) == FS_ERR_IO,
           "data I/O error is not reported as EOF");
     backend_error = 0;
+    fat32_close(&file);
     fat32_unmount(volume);
     free(backend.ctx);
     CHECK(live_allocations == 0, "failure paths release all allocations");
@@ -243,6 +249,8 @@ static void namespace_paths(void) {
     fail_allocations = true;
     CHECK(fs_chdir(&cwd, "docs") < 0, "resolver allocation failure reported");
     fail_allocations = false;
+    fat32_close(&existing);
+    fat32_close(&file);
     fs_namespace_reset();
     CHECK(live_allocations == 0, "namespace reset releases mounted volumes and scratch state");
     CHECK(fs_mount_registered(NULL) < 0 && fs_boot_cwd(&cwd) < 0,
@@ -339,13 +347,16 @@ static void assign_semantics(void) {
     fat32_file_t command;
     CHECK(fs_program_open(&cwd, "bootcmd", &command) == 0 &&
           command.volume == fs_volume_get(0)->volume, "default c selects boot bin independently of cwd");
+    fat32_close(&command);
     CHECK(fs_program_open(&cwd, "extrahello", &command) == FS_ERR_NOTFOUND,
           "bare command does not search current volume bin");
     CHECK(fs_assign_set(&cwd, "C:", "beta:bin") == 0, "replace c using case-insensitive name");
     CHECK(fs_program_open(&cwd, "extrahello", &command) == 0 &&
           command.volume == fs_volume_get(1)->volume, "bare command searches new c target");
+    fat32_close(&command);
     CHECK(fs_program_open(&cwd, "c:/extrahello", &command) == 0 &&
           command.volume == fs_volume_get(1)->volume, "leading slash after assign retains bin anchor");
+    fat32_close(&command);
     CHECK(fs_program_open(&cwd, "bootcmd", &command) == FS_ERR_NOTFOUND,
           "bare command has no hidden boot-bin fallback");
     CHECK(fs_assign_set(&cwd, "c", NULL) == 0 &&
