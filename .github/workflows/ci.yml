@@ -77,6 +77,8 @@ jobs:
         run: ./build.sh --target all --userfs-dir build/userfs/aarch64
       - name: Build and stage both hardware release targets
         run: ./build.sh --target hw_raspi3b --target hw_raspi4b --release --userfs-dir build/userfs/aarch64 --install-to sdcard-boot
+      - name: Kernels never touch FP/SIMD registers
+        run: tests/check-kernel-fp.py build/debug/*/kernel.elf build/release/*/kernel.elf
       - name: QEMU raspi3b smoke
         run: tests/run-qemu-smoke.py --target qemu_raspi3b
       - name: Create boot image with both hardware targets

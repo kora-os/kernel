@@ -1,4 +1,10 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// Tasks, their kernel stacks and the (still cooperative, single-core)
+// scheduler. See proc/task.h.
+
 #include "proc/task.h"
+#include "arch/irq.h"
 #include "user/elf.h"
 #include "fs/fat32.h"
 #include "mm.h"
@@ -6,10 +12,24 @@
 #include "mm/kmalloc.h"
 #include "proc/user_mem.h"
 #include "lib/printf.h"
+#include "lib/string.h"
+
+#define KSTACK_SIZE (KSTACK_PAGES * PAGE_SIZE)
+#define KSTACK_FILL 0x6b6b6b6b6b6b6b6bull  // untouched kernel stack words
+#define KSTACK_GUARD_WORDS 8               // must still hold the fill on a switch
 
 static task_t tasks[MAX_TASKS];
-static task_t *current;
 static int next_pid = 1;
+static size_t kstack_peak_max;  // deepest kernel stack use of any reaped task
+
+// The boot thread: kernel_main runs as task 0 on the boot stack. It spawns
+// init and waits for it like any parent, but has no user side of its own.
+static task_t boot_task = {
+    .pid = 0,
+    .state = TASK_RUNNABLE,
+    .name = "kernel",
+};
+static task_t *current = &boot_task;
 
 // Grab a free table slot and give it a fresh pid. Returns NULL if the table is
 // full. Leaves the slot RUNNABLE; the caller fills in the rest.
@@ -17,29 +37,23 @@ static task_t *task_alloc(void) {
     for (int i = 0; i < MAX_TASKS; i++) {
         task_t *t = &tasks[i];
         if (t->state == TASK_UNUSED) {
+            memset(t, 0, sizeof(*t));
             t->pid = next_pid++;
             t->state = TASK_RUNNABLE;
-            t->exit_code = 0;
-            t->parent = NULL;
-            t->entry = 0;
-            t->user_sp = 0;
-            t->image = NULL;
-            t->image_pages = 0;
-            t->stack = NULL;
-            t->runs = NULL;
-            t->arg0 = 0;
-            t->arg1 = 0;
-            for (int f = 0; f < MAX_OPEN_FILES; f++) {
-                t->files[f].used = false;
-            }
             return t;
         }
     }
     return NULL;
 }
 
-// Release a task's held memory and return its slot to the pool.
+// Release a task's held memory and return its slot to the pool. Never called
+// on the running task: its kernel stack is in use.
 static void task_free(task_t *t) {
+    size_t peak = task_kstack_peak(t);
+    if (peak > kstack_peak_max) {
+        kstack_peak_max = peak;
+    }
+    fpsimd_release(t);
     fs_cwd_release(&t->cwd);
     for (int f = 0; f < MAX_OPEN_FILES; f++) {
         if (t->files[f].used) {
@@ -55,17 +69,81 @@ static void task_free(task_t *t) {
         frame_free(t->stack);
         t->stack = NULL;
     }
+    if (t->kstack != NULL) {
+        frame_free_pages(t->kstack, KSTACK_PAGES);
+        t->kstack = NULL;
+    }
     user_pages_release_all(t);
     t->pid = 0;
     t->state = TASK_UNUSED;
 }
 
-// Run a task in EL0 until it exits, then restore the previous current task.
-static void task_run(task_t *t) {
+static task_t *parent_of(const task_t *t) {
+    return t->parent != NULL ? t->parent : &boot_task;
+}
+
+// Scheduling ---------------------------------------------------------------
+
+// The next runnable task after `from` in round-robin order over the boot task
+// and the table, or `from` itself if nothing else can run, or NULL.
+static task_t *pick_next(task_t *from) {
+    int slots = MAX_TASKS + 1;  // slot 0 is the boot task
+    int start = from == &boot_task ? 0 : (int)(from - tasks) + 1;
+    for (int i = 1; i <= slots; i++) {
+        int slot = (start + i) % slots;
+        task_t *t = slot == 0 ? &boot_task : &tasks[slot - 1];
+        if (t->state == TASK_RUNNABLE) {
+            return t;
+        }
+    }
+    return NULL;
+}
+
+static void check_kstack(const task_t *t) {
+    if (t->kstack == NULL) {
+        return;  // the boot task runs on the boot stack
+    }
+    const uint64_t *guard = t->kstack;
+    for (int i = 0; i < KSTACK_GUARD_WORDS; i++) {
+        if (guard[i] != KSTACK_FILL) {
+            printf("\n*** kernel stack overflow in pid %d (%s) ***\n", t->pid, t->name);
+            for (;;) {
+                asm volatile("wfi");
+            }
+        }
+    }
+}
+
+// Switch to the next runnable task. Returns when the current task is chosen
+// again. With nothing runnable, waits for an interrupt to make something so.
+// The IRQ mask is not part of the saved context: each task keeps its own in
+// `flags`, on its own stack, and gets it back when it is switched in again.
+static void schedule(void) {
+    uint64_t flags = irq_save();
     task_t *prev = current;
-    current = t;
-    enter_user(t->entry, t->user_sp, t->kctx, t->arg0, t->arg1);  // returns on exit
-    current = prev;
+    task_t *next = pick_next(prev);
+    while (next == NULL) {
+        asm volatile("msr daifclr, #2\n\twfi\n\tmsr daifset, #2" ::: "memory");
+        next = pick_next(prev);
+    }
+    if (next != prev) {
+        check_kstack(prev);
+        current = next;
+        fpsimd_switch_to(next);
+        cpu_switch(&prev->ctx, &next->ctx);
+    }
+    irq_restore(flags);
+}
+
+// Block the running task until `child` (or, if NULL, any child) exits.
+static void block_on_child(task_t *child) {
+    current->state = TASK_BLOCKED;
+    current->waiting_for = child;
+    schedule();
+}
+
+void task_yield(void) {
+    schedule();
 }
 
 static size_t cstr_len(const char *s) {
@@ -130,7 +208,7 @@ static bool build_args(void *stack, int argc, char *const argv[],
 // file is reported silently so the caller -- e.g. the shell -- can react).
 static int load_program(const char *name, struct loaded_prog *lp) {
     fs_cwd_t *initial = NULL;
-    const fs_cwd_t *cwd = current != NULL ? &current->cwd : NULL;
+    const fs_cwd_t *cwd = task_current() != NULL ? &current->cwd : NULL;
     if (cwd == NULL) {
         initial = kmalloc(sizeof(*initial));
         if (initial == NULL || fs_boot_cwd(initial) != 0) {
@@ -178,38 +256,41 @@ static int load_program(const char *name, struct loaded_prog *lp) {
     return 0;
 }
 
-int task_spawn(const char *name, int argc, char *const argv[]) {
+task_t *task_create(const char *name, int argc, char *const argv[]) {
     struct loaded_prog lp;
     if (load_program(name, &lp) != 0) {
-        return -1;
+        return NULL;
     }
 
     void *stack = frame_alloc();
-    if (stack == NULL) {
-        frame_free_pages(lp.image, lp.image_pages);
-        printf("spawn: out of memory for '%s' stack\n", name);
-        return -1;
-    }
-
-    task_t *t = task_alloc();
+    void *kstack = frame_alloc_pages(KSTACK_PAGES);
+    task_t *t = stack != NULL && kstack != NULL ? task_alloc() : NULL;
     if (t == NULL) {
         frame_free_pages(lp.image, lp.image_pages);
         frame_free(stack);
-        printf("spawn: task table full\n");
-        return -1;
+        frame_free_pages(kstack, KSTACK_PAGES);
+        printf(stack != NULL && kstack != NULL ? "spawn: task table full\n"
+                                               : "spawn: out of memory for '%s' stacks\n",
+               name);
+        return NULL;
     }
-    t->parent = current;
-    int cwd_rc = current != NULL ? fs_cwd_copy(&t->cwd, &current->cwd) : fs_boot_cwd(&t->cwd);
-    if (cwd_rc != 0) {
-        task_free(t);
-        frame_free_pages(lp.image, lp.image_pages);
-        frame_free(stack);
-        return -1;
-    }
-    t->entry = lp.entry;
+    t->parent = task_current();
     t->image = lp.image;
     t->image_pages = lp.image_pages;
     t->stack = stack;
+    t->kstack = kstack;
+    size_t n = 0;
+    for (; name[n] != '\0' && n < TASK_NAME_MAX - 1; n++) {
+        t->name[n] = name[n];
+    }
+    t->name[n] = '\0';
+
+    int cwd_rc = t->parent != NULL ? fs_cwd_copy(&t->cwd, &t->parent->cwd)
+                                   : fs_boot_cwd(&t->cwd);
+    if (cwd_rc != 0) {
+        task_free(t);
+        return NULL;
+    }
 
     uint64_t sp = (uint64_t)stack + PAGE_SIZE;
     uint64_t argv_child = 0;
@@ -219,51 +300,133 @@ int task_spawn(const char *name, int argc, char *const argv[]) {
     if (argc > 0) {
         if (!build_args(stack, argc, argv, &sp, &argv_child)) {
             printf("spawn: arguments too large for '%s'\n", name);
-            task_free(t);  // releases the image and stack we just took
-            return -1;
+            task_free(t);  // releases the image and stacks we just took
+            return NULL;
         }
     }
-    t->user_sp = sp;
-    t->arg0 = (uint64_t)argc;
-    t->arg1 = argv_child;
+
+    // Fill the kernel stack so its high-water mark can be measured, then put
+    // the initial EL0 state at its top: the first switch to the task "returns"
+    // through ret_to_user and erets to the entry point with x0/x1 = argc/argv.
+    uint64_t *words = kstack;
+    for (size_t i = 0; i < KSTACK_SIZE / sizeof(uint64_t); i++) {
+        words[i] = KSTACK_FILL;
+    }
+    t->tf = (struct trapframe *)((uint8_t *)kstack + KSTACK_SIZE - sizeof(struct trapframe));
+    memset(t->tf, 0, sizeof(*t->tf));
+    t->tf->elr = lp.entry;
+    t->tf->sp = sp;
+    t->tf->spsr = 0;  // EL0t, interrupts unmasked
+    t->tf->regs[0] = (uint64_t)argc;
+    t->tf->regs[1] = argv_child;
+    t->ctx.lr = (uint64_t)ret_to_user;
+    t->ctx.sp = (uint64_t)t->tf;
 
     printf("  [pid %d] run '%s': entry=0x%lx sp=0x%lx (%d image pages)\n",
-           t->pid, name, t->entry, t->user_sp, (int)t->image_pages);
+           t->pid, name, lp.entry, sp, (int)t->image_pages);
+    return t;
+}
 
-    task_run(t);  // suspends us until t exits; t is now an EXITED zombie
-    return t->pid;
+int task_spawn(const char *name, int argc, char *const argv[]) {
+    task_t *child = task_create(name, argc, argv);
+    if (child == NULL) {
+        return -1;
+    }
+    int pid = child->pid;
+    while (child->state != TASK_EXITED) {
+        block_on_child(child);
+    }
+    return pid;
 }
 
 int task_wait(int pid) {
-    for (int i = 0; i < MAX_TASKS; i++) {
-        task_t *t = &tasks[i];
-        if (t->state == TASK_EXITED && t->pid == pid && t->parent == current) {
-            int code = t->exit_code;
-            task_free(t);
+    task_t *me = task_current();
+    for (;;) {
+        task_t *child = NULL;
+        for (int i = 0; i < MAX_TASKS; i++) {
+            task_t *t = &tasks[i];
+            if (t->state != TASK_UNUSED && t->pid == pid && t->parent == me) {
+                child = t;
+                break;
+            }
+        }
+        if (child == NULL) {
+            return -1;
+        }
+        if (child->state == TASK_EXITED) {
+            int code = child->exit_code;
+            task_free(child);
             return code;
         }
+        block_on_child(child);
     }
-    return -1;
 }
 
 int task_getpid(void) {
-    return current != NULL ? current->pid : 0;
+    return current->pid;
 }
 
 task_t *task_current(void) {
+    return current != &boot_task ? current : NULL;
+}
+
+task_t *task_running(void) {
     return current;
 }
 
 void task_exit(int code) {
-    current->state = TASK_EXITED;
-    current->exit_code = code;
-    kernel_return(current->kctx);  // no return
+    task_t *me = current;
+    me->state = TASK_EXITED;
+    me->exit_code = code;
+    fpsimd_release(me);
+
+    task_t *parent = parent_of(me);
+    if (parent->state == TASK_BLOCKED &&
+        (parent->waiting_for == me || parent->waiting_for == NULL)) {
+        parent->state = TASK_RUNNABLE;
+        parent->waiting_for = NULL;
+    }
+    schedule();  // never picks this task again
+    for (;;) {
+        asm volatile("wfi");
+    }
 }
 
 void task_reap_all(void) {
     for (int i = 0; i < MAX_TASKS; i++) {
-        if (tasks[i].state != TASK_UNUSED) {
+        if (tasks[i].state != TASK_UNUSED && &tasks[i] != current) {
             task_free(&tasks[i]);
+        }
+    }
+}
+
+size_t task_kstack_peak(const task_t *t) {
+    if (t->kstack == NULL) {
+        return 0;
+    }
+    const uint64_t *words = t->kstack;
+    size_t n = KSTACK_SIZE / sizeof(uint64_t);
+    size_t i = 0;
+    while (i < n && words[i] == KSTACK_FILL) {
+        i++;
+    }
+    return (n - i) * sizeof(uint64_t);
+}
+
+size_t task_kstack_peak_max(void) {
+    size_t peak = kstack_peak_max;
+    for (int i = 0; i < MAX_TASKS; i++) {
+        if (tasks[i].state != TASK_UNUSED && task_kstack_peak(&tasks[i]) > peak) {
+            peak = task_kstack_peak(&tasks[i]);
+        }
+    }
+    return peak;
+}
+
+void task_for_each(void (*fn)(const task_t *t, void *ctx), void *ctx) {
+    for (int i = 0; i < MAX_TASKS; i++) {
+        if (tasks[i].state != TASK_UNUSED) {
+            fn(&tasks[i], ctx);
         }
     }
 }

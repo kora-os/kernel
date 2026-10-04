@@ -60,6 +60,7 @@
 #define ESR_EC(esr)    (((esr) >> ESR_EC_SHIFT) & ESR_EC_MASK)
 
 // Exception classes we care about during bring-up.
+#define ESR_EC_FP_ASIMD     0x07  // FP/SIMD access trapped by CPACR_EL1.FPEN
 #define ESR_EC_SVC64        0x15  // SVC instruction execution in AArch64
 #define ESR_EC_DABT_LOWER   0x24  // data abort from a lower EL
 #define ESR_EC_DABT_SAME    0x25  // data abort from current EL

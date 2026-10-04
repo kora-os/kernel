@@ -132,6 +132,12 @@ el0_irq:
     bl  handle_irq
     kernel_exit
 
+// A new task's first return to EL0: cpu_switch() lands here with sp pointing
+// at the trap frame task_create() prepared at the top of its kernel stack.
+.global ret_to_user
+ret_to_user:
+    kernel_exit
+
 // --- Invalid / unexpected entries (numbered by vector index) ---
 
 el1t_sync:    handle_invalid 0

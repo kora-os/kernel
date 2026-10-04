@@ -119,7 +119,7 @@ categories:
         prs: [4]
       - id: preemptive-scheduler
         name: Preemptive scheduler
-        status: planned
+        status: in_progress
         description: Timer-driven task switching with sleeping and wait queues.
         milestone: 7
       - id: smp
