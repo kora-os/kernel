@@ -71,6 +71,20 @@ in-memory fault fixtures with no filesystem-integrity claim. All fixtures live
 under `build/host-tests/write-fixtures`; the immutable shared userfs image is
 never writable media.
 
+## Integer-only kernel check
+
+```bash
+tests/check-kernel-fp.py build/debug/*/kernel.elf
+```
+
+Disassembles every object built for each kernel (Circle included) and fails on
+any instruction naming an FP/SIMD register, or FPCR/FPSR, outside the
+save/restore routines in `src/arch/fpsimd.S`. FP/SIMD registers belong to EL0
+tasks and are switched lazily, so kernel code (above all interrupt handlers)
+must not touch them; such a bug would corrupt user registers, typically only on
+real hardware. Needs `llvm-objdump` (or `OBJDUMP=...`). CI runs it on the debug
+and release builds.
+
 ## Feature status file
 
 ```bash
@@ -119,7 +133,10 @@ chdir, volume/assign enumeration and assign syscall updates), checks shell
 `cd`/`pwd`/`volumes`/`assign`, current-directory `ls`, and excess-argument
 rejection followed by a valid command, switches to the debug console,
 verifies timer/UART IRQ progress, runs `heaptest` (seeded kernel heap stress)
-and checks that `heap` reports no leaks or bad frees, and checks terminal
+and checks that `heap` reports no leaks or bad frees, runs `fpprobe` (a parent
+and child each fill all 32 vector registers and FPCR; the child must start from
+zeroed registers and the parent's must survive), checks `tasks` (init blocked,
+the shell runnable, kernel stack high-water mark under three quarters), and checks terminal
 colors and graphics pixels using QEMU screenshots. Virt optionally injects
 Shift/release, Backspace, Enter and scrollback through a VirtIO keyboard. UART
 observes output. `--repeat N` runs `allocprobe` N times: page runs, a `malloc`

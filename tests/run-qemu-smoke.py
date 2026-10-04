@@ -358,6 +358,36 @@ def run(q, graphics=True, keyboard=False, repeat=0, multi_volume=False):
         q.expect(rb"\[serial -> screen terminal")
     yield "kernel heap stress leaves no leaks", kernel_heap
 
+    def fp_context():
+        q.send("fpprobe\r")
+        m = q.expect(rb"^fpprobe: ([^\r\n]*)\r?\n")
+        if m.group(1) != b"registers preserved":
+            raise Failure("fpprobe: %s" % m.group(1).decode(errors="replace"))
+        q.expect(rb"exited with 0")
+        q.expect(PROMPT)
+    yield "FP/SIMD registers are per task (lazy switching)", fp_context
+
+    def tasks():
+        q.send("\x14")
+        q.expect(rb"koraos> ")
+        q.send("tasks\r")
+        listed = {}
+        while True:
+            m = q.expect(rb"^(?:\s+(\d+)\s+(\w+)\s+(\d+)\s+(\S+)|kernel stack peak: (\d+) of (\d+) bytes)\r?\n")
+            if m.group(5):
+                peak, size = int(m.group(5)), int(m.group(6))
+                break
+            listed[m.group(4).decode()] = (m.group(2).decode(), int(m.group(3)))
+        q.expect(rb"koraos> ")
+        q.send("\x14")
+        q.expect(rb"\[serial -> screen terminal")
+        if listed.get("init", ("",))[0] != "blocked" or listed.get("shell", ("",))[0] != "runnable":
+            raise Failure("expected blocked init and runnable shell, got %s" % listed)
+        # Every task so far, the probes included: keep a quarter of the stack spare.
+        if peak == 0 or peak > size * 3 // 4:
+            raise Failure("kernel stack peak %d of %d bytes" % (peak, size))
+    yield "tasks lists init and the shell; kernel stacks have headroom", tasks
+
     if repeat:
         def kernel_counts():
             q.send("\x14")

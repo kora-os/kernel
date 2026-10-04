@@ -26,7 +26,7 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
 | 4 | `spawn` | `int spawn(const char *name, int argc, char *const argv[])` | child pid, or `-1` |
 | 5 | `wait` | `int wait(int pid)` | child exit code, or `-1` |
 | 6 | `getpid` | `int getpid(void)` | current pid |
-| 7 | `yield` | `void yield(void)` | `0` (currently a no-op) |
+| 7 | `yield` | `void yield(void)` | `0`, after letting other runnable tasks run |
 | 8 | `fb_info` | `int fb_info(struct fb_info *out)` | `0`, or `-1` |
 | 9 | `open` | `int open(const char *path, int flags)` | fd (≥ 3), or `-1` |
 | 10 | `close` | `int close(int fd)` | `0`, or `-1` |
@@ -56,9 +56,8 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
   [writing-userland-programs.md](writing-userland-programs.md)). There is no
   `sbrk`: with one flat address space, memory after a heap is usually someone
   else's, so a contiguous break cannot grow reliably.
-- **`spawn`**: the process model is **cooperative and nesting**: `spawn` loads
-  the program and runs it to completion in EL0 while the caller is suspended,
-  then returns the (now-exited) child's pid. Call `wait(pid)` afterwards to reap
+- **`spawn`**: creates a task for the program and blocks the caller until the
+  child has exited (scheduling is cooperative), then returns the child's pid. Call `wait(pid)` afterwards to reap
   it and collect its exit code. `name` is resolved to a filesystem path: a bare
   name is looked up through `c:` (initially `sys:bin`), with no fallback to
   `/bin` if the assign or command is missing; other names use the caller's

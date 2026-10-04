@@ -20,15 +20,20 @@ When something calls `spawn("ls", …)` (the shell) or the kernel starts
 3. **Load the ELF.** [`elf_load`](../src/user/elf.c) parses the buffer and lays
    the program out in memory (details below). The temporary buffer is freed
    immediately afterwards, `elf_load` has copied everything it needs out of it.
-4. **Set up the task.** A one-page user stack is allocated, a task-table slot
-   and pid are assigned, and `argv` is copied onto the top of the new stack.
-5. **Enter EL0.** `enter_user` ([`src/arch/entry.S`](../src/arch/entry.S)) saves
-   the kernel's context and drops to EL0 at the program's entry point, with
-   `SP_EL0` at the stack top and `x0`/`x1` = `argc`/`argv`.
+4. **Set up the task.** A one-page user stack and a 16 KB kernel stack are
+   allocated, a task-table slot and pid are assigned, and `argv` is copied onto
+   the top of the user stack. The task's initial EL0 state (entry point,
+   `SP_EL0` at the stack top, `x0`/`x1` = `argc`/`argv`) is written as a trap
+   frame at the top of its kernel stack.
+5. **Enter EL0.** The parent blocks until the child exits, and the scheduler
+   switches to the child with `cpu_switch`
+   ([`src/arch/entry.S`](../src/arch/entry.S)). A new task's first switch
+   returns into `ret_to_user`, which restores that trap frame and `eret`s to
+   the entry point.
 
 The program runs until it returns from `main` (the entry stub then calls
-`exit`) or calls `exit` directly, which traps back into the kernel and unwinds
-to whoever spawned it.
+`exit`) or calls `exit` directly, which marks it exited, wakes its parent and
+switches away for good.
 
 ## Where a binary is placed
 
@@ -64,13 +69,18 @@ runs the program never freed.
 
 ## Several programs at once
 
-The process model is **cooperative, nesting, and single-core**, with **no
-scheduler and no preemption**:
+Each task has its own kernel stack, with its EL0 registers saved in a trap
+frame at the top and its kernel context (callee-saved registers and stack
+pointer) saved by `cpu_switch` when it is switched out
+([`src/proc/task.c`](../src/proc/task.c)). The boot thread, which runs
+`kernel_main`, is task 0. Scheduling is still **cooperative and single-core**,
+with **no preemption** yet:
 
-- `spawn` is *synchronous*: it suspends the caller, runs the child all the way
-  to completion in EL0, and only then returns the child's pid. So the "process
-  tree" is really a call stack, `kernel → /bin/init → /bin/shell → /bin/ls`,
-  where each parent is parked, waiting for its child.
+- `spawn` is create plus wait: it creates the child, then blocks the caller
+  until the child has exited, and only then returns the child's pid. So the
+  "process tree" still behaves like a call stack,
+  `kernel → /bin/init → /bin/shell → /bin/ls`, where each parent is blocked
+  waiting for its child.
 - A finished task becomes a **zombie** (its memory stays allocated so its exit
   code remains valid) until the parent reaps it with `wait`.
 - Up to `MAX_TASKS` (8) tasks can be live at once, the nesting depth plus any
@@ -79,7 +89,17 @@ scheduler and no preemption**:
 Because of the identity map, **every task's image, stack, and heap are mapped
 and addressable at the same time** (there is no address-space switch between
 tasks). Distinct tasks simply occupy distinct regions of the one pool. `yield`
-currently does nothing, there is nothing to switch to.
+switches to another runnable task if there is one, which with nested spawns
+there never is yet.
+
+**FP/SIMD registers are per task.** The kernel, the Circle USB code included,
+is integer-only, so the registers only ever hold EL0 state, and they are
+switched lazily ([`src/arch/fpsimd.c`](../src/arch/fpsimd.c)): the first
+FP/SIMD instruction a task executes after a switch traps, the kernel saves the
+previous owner's registers and loads this task's (zeroed on its first use), and
+the instruction is retried. Tasks that never use FP never pay for it. The
+debug console's `tasks` command lists the tasks with their state and kernel
+stack high-water mark.
 
 ## Memory model, no protection, by design
 

@@ -411,7 +411,9 @@ void CString::FormatV (const char *pFormat, va_list Args)
 			char NumBuf[MAX_FLOAT_LEN+1];
 			boolean bMinus = FALSE;
 			long lArg = 0;
+#ifndef KORAOS_INTEGER_ONLY  // KoraOS: no floating point in the kernel
 			double fArg;
+#endif
 
 			switch (*pFormat)
 			{
@@ -512,6 +514,7 @@ void CString::FormatV (const char *pFormat, va_list Args)
 				}
 				break;
 
+#ifndef KORAOS_INTEGER_ONLY  // KoraOS: no floating point in the kernel
 			case 'f':
 				fArg = va_arg (Args, double);
 				ftoa (NumBuf, fArg, nPrecision);
@@ -533,6 +536,7 @@ void CString::FormatV (const char *pFormat, va_list Args)
 					PutString (NumBuf);
 				}
 				break;
+#endif
 
 			case 'o':
 				if (bAlternate)
@@ -770,6 +774,7 @@ char *CString::lltoa (char *pDest, unsigned long long ullNumber, unsigned nBase,
 }
 #endif
 
+#ifndef KORAOS_INTEGER_ONLY  // KoraOS: no floating point in the kernel
 char *CString::ftoa (char *pDest, double fNumber, unsigned nPrecision)
 {
 	char *p = pDest;
@@ -826,3 +831,4 @@ char *CString::ftoa (char *pDest, double fNumber, unsigned nPrecision)
 	
 	return pDest;
 }
+#endif

@@ -1,4 +1,5 @@
 #include "arch/exception.h"
+#include "arch/fpsimd.h"
 #include "arch/sysregs.h"
 #include "arch/trapframe.h"
 #include "common.h"
@@ -48,17 +49,24 @@ void handle_invalid_entry(uint64_t type, uint64_t esr, uint64_t far,
 
 void handle_sync_el1(uint64_t esr, uint64_t far, struct trapframe *tf) {
     printf("\n*** Synchronous exception in EL1 (kernel fault) ***\n");
+    if (ESR_EC(esr) == ESR_EC_FP_ASIMD) {
+        printf("  kernel code used FP/SIMD; the kernel must be integer-only\n");
+    }
     printf("  ESR=0x%lx EC=0x%lx FAR=0x%lx ELR=0x%lx\n", esr, ESR_EC(esr), far,
            tf->elr);
     halt();
 }
 
-// Synchronous exception from EL0. SVC handling is wired up in a later step;
-// for now anything reaching here is treated as a user fault.
+// Synchronous exception from EL0: a syscall, the first FP/SIMD use since the
+// task was switched in, or a user fault.
 void handle_sync_el0(uint64_t esr, uint64_t far, struct trapframe *tf) {
     uint64_t ec = ESR_EC(esr);
     if (ec == ESR_EC_SVC64) {
         syscall_handle(tf);
+        return;
+    }
+    if (ec == ESR_EC_FP_ASIMD) {
+        fpsimd_trap();  // the faulting instruction is retried on return
         return;
     }
     printf("\n*** User fault (EL0) ***\n");
