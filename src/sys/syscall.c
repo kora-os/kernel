@@ -450,7 +450,8 @@ void syscall_handle(struct trapframe *tf) {
         ret = task_getpid();
         break;
     case SYS_yield:
-        ret = 0;  // cooperative single-run: nothing to yield to yet
+        task_yield();
+        ret = 0;
         break;
     case SYS_fb_info:
         ret = sys_fb_info((struct fb_info *)a0);

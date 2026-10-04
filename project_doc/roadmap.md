@@ -144,10 +144,15 @@ There is no page-table sharing to manage.
 
 **PRs**
 
-1. **Task model rewrite**: per-task kernel stacks, a saved trap frame and a
-   context switch routine replacing the nested `enter_user`/`kernel_return`
-   model; FP/SIMD save/restore; spawn becomes create plus wait. Still
-   cooperative and single-core, behaviour unchanged, all existing tests pass.
+1. **Task model rewrite** (done): 16 KB per-task kernel stacks with the EL0
+   trap frame at the top, `cpu_switch` and `ret_to_user` replacing the nested
+   `enter_user`/`kernel_return` model, the boot thread as task 0, and a
+   minimal round-robin `schedule()`; spawn is create plus wait. Lazy FP/SIMD
+   switching through CPACR traps. Circle is now built integer-only (one
+   guarded edit in its `string.cpp`), and `tests/check-kernel-fp.py` keeps
+   every kernel object free of FP/SIMD use, so interrupt handlers cannot
+   clobber task registers. `fpprobe` and the `tasks` console command are
+   tested in every smoke profile. Still cooperative and single-core.
 2. **Preemption and sleeping**: the timer tick requests a reschedule, taken on
    return to EL0. Wait queues; blocking `read` sleeps and is woken by the UART,
    VirtIO input and USB keyboard interrupts. A `sleep` syscall; optional `&`

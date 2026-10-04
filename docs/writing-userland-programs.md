@@ -14,7 +14,10 @@ A program runs in EL0 with a deliberately small runtime:
   [`user/libk/koraos.h`](../user/libk/koraos.h) (`kputs`, `kput_int`,
   `kstrlen`, `kstreq`), `memset`/`memcpy`/`memmove`, and a heap. Anything
   else, you write yourself.
-- **No floating point.** Programs are built with `-mgeneral-regs-only`.
+- **No floating point in C, for now.** Programs are built with
+  `-mgeneral-regs-only` (the libc port will lift this). The kernel does keep
+  each task's FP/SIMD registers, so hand-written assembly can use them; see
+  [`tests/user/fpregs.S`](../tests/user/fpregs.S).
 - **A ~4 KB stack.** Each task gets a single-page user stack, so keep large
   buffers off the stack (use `malloc`, or static arrays).
 - **A heap that grows with the system's free memory.** `malloc`, `free`,
@@ -26,8 +29,8 @@ A program runs in EL0 with a deliberately small runtime:
   pools and usage.
 - **A flat identity map.** Pointers are physical addresses; e.g. `fb_info()`
   hands you the framebuffer address and you write pixels to it directly.
-- **Cooperative, nesting processes.** `spawn` runs a child to completion before
-  returning (then `wait` reaps it). There is no preemption and no threads.
+- **Cooperative processes.** `spawn` runs a child to completion before
+  returning (then `wait` reaps it). There is no preemption and no threads yet.
 - **`main` signature.** Either `int main(void)` or `int main(int argc, char
   **argv)`; the entry stub [`user/crt0.S`](../user/crt0.S) calls `main` and
   passes its return value to `exit`.
