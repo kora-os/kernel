@@ -100,7 +100,8 @@ static int probe(blkdev_device_t *device) {
     if (rc) return rc;
     if (sector[510] != 0x55 || sector[511] != 0xaa) return BLK_ERR_INVALID;
     if (bare_fat32(sector)) {
-        uint32_t count = rd32(sector + 32);
+        uint32_t count = rd16(sector + 19);
+        if (!count) count = rd32(sector + 32);
         if (!count || count > device->backend->sector_count) return BLK_ERR_RANGE;
         add_partition(device, 0, count, 0, 0);
         return 0;

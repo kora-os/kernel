@@ -31,9 +31,10 @@ volume root; name:path is absolute in the named root. Initial cwd is the boot
 volume root, inherited by children. No additional filesystem locks or blocking
 waits are introduced. FAT32_NAME_MAX remains 765 bytes.
 
-Proposed defaults pending the user's initial answers: rd/vd/df/ud per device
-kind, no synthetic unified tree, getcwd uses a unique volume label with device
-fallback, and the listing command is volumes.
+The user selected one df0/df1/... device-slot sequence across all backend types.
+Remaining proposed defaults pending answers: no synthetic unified tree, getcwd
+uses a unique volume label with device fallback, and the listing command is
+volumes.
 
 ## Verification
 
