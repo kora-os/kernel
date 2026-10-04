@@ -366,7 +366,8 @@ function(add_circle_library NAME BOARD)
     add_library(${NAME} STATIC ${circle_sources} ${CIRCLE_BRIDGE_SOURCES})
     target_include_directories(${NAME} PRIVATE "${CIRCLE_DIR}/include" "${INCLUDE_DIR}")
     target_compile_definitions(${NAME} PRIVATE
-        RASPPI=${BOARD} RPI_VERSION=${BOARD} DEFAULT_KEYMAP="${KORAOS_KEYMAP}")
+        RASPPI=${BOARD} RPI_VERSION=${BOARD} DEFAULT_KEYMAP="${KORAOS_KEYMAP}"
+        REPEAT_ENABLE)
     target_compile_options(${NAME} PRIVATE
         --target=aarch64-none-elf
         -mcpu=cortex-a72
