@@ -66,11 +66,17 @@ freeable kernel objects.
    (including `std::align_val_t`) and Circle's `malloc` use it. Host unit tests,
    a boot self-test, and the debug console's `heap` and `heaptest` commands,
    run by every QEMU smoke profile.
-2. **User memory**: an Amiga-style page allocation syscall pair (allocate/free
-   page runs) so userland heaps can grow. With VA == PA, a contiguous `sbrk`
-   cannot grow reliably once neighbouring memory is taken. A pool-based `libk`
-   malloc (TLSF or similar, which handles non-contiguous pools well) sits on
-   top. Whether `sbrk` stays as a compatibility shim is decided in the PR.
+2. **User memory** (done): Amiga-style `alloc_pages(count)` /
+   `free_pages(base)` syscalls (14 and 15) hand out zeroed page runs, recorded
+   per task (`src/proc/user_mem.c`) so unfreed runs are reclaimed when the task
+   is reaped. With VA == PA a contiguous break cannot grow reliably once
+   neighbouring memory is taken, so `sbrk` was removed (number 3 is retired).
+   `libk` provides `malloc`/`free`/`calloc`/`realloc`: TLSF over independent
+   64 KB pools, with blocks over 256 KB on their own page runs and one empty
+   pool cached. Host tests cover the allocator and the run records; the
+   repeated `allocprobe` smoke profile checks that the kernel gets every page
+   back. Note that user memory still comes from the frame allocator's fixed
+   16 MB pool.
 
 ## Milestone 7 – Scheduler, SMP and threads
 

@@ -19,7 +19,8 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
     set(USER_DIR "${SOURCE_ROOT}/user")
     set(USER_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/user")
     file(MAKE_DIRECTORY "${USER_BUILD_DIR}")
-    set(USER_RUNTIME_SOURCES "${USER_DIR}/crt0.S" "${USER_DIR}/libk/syscall.S")
+    set(USER_RUNTIME_SOURCES "${USER_DIR}/crt0.S" "${USER_DIR}/libk/syscall.S"
+        "${USER_DIR}/libk/malloc.c" "${USER_DIR}/libk/mem.c")
     file(GLOB_RECURSE USER_HEADERS CONFIGURE_DEPENDS "${USER_DIR}/*.h")
     # Manifest content changes on removals too, ensuring generated outputs are
     # rebuilt even when the remaining dependencies are older than those outputs.

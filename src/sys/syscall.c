@@ -4,6 +4,7 @@
 #include "fs/fat32.h"
 #include "lib/string.h"
 #include "proc/task.h"
+#include "proc/user_mem.h"
 #include "tty.h"
 #include "mm.h"
 #include "mm/frame_alloc.h"
@@ -314,31 +315,25 @@ static long sys_getcwd(char *buf, uint64_t size) {
     return fs_getcwd(&t->cwd, buf, (size_t)size) == 0 ? 0 : -1;
 }
 
-// sbrk(increment): grow (or shrink) the calling task's heap, which is allocated
-// lazily on first use. Returns the previous break, or -1 on failure.
-static long sys_sbrk(long increment) {
+// alloc_pages(count): give the calling task `count` contiguous zeroed pages,
+// tracked so they are reclaimed when the task is reaped. Returns the base
+// address, or 0 on failure.
+static long sys_alloc_pages(uint64_t count) {
+    task_t *t = task_current();
+    if (t == NULL || count > frame_alloc_total_count()) {
+        return 0;
+    }
+    return (long)(uintptr_t)user_pages_alloc(t, (size_t)count);
+}
+
+// free_pages(base): return a run from alloc_pages. Returns 0, or -1 if the
+// caller owns no run starting at `base`.
+static long sys_free_pages(uint64_t base) {
     task_t *t = task_current();
     if (t == NULL) {
         return -1;
     }
-    if (t->heap_base == 0) {
-        void *heap = frame_alloc_pages(USER_HEAP_PAGES);
-        if (heap == NULL) {
-            return -1;
-        }
-        t->heap = heap;
-        t->heap_pages = USER_HEAP_PAGES;
-        t->heap_base = (uint64_t)heap;
-        t->heap_brk = t->heap_base;
-        t->heap_end = t->heap_base + (uint64_t)USER_HEAP_PAGES * PAGE_SIZE;
-    }
-    uint64_t old = t->heap_brk;
-    uint64_t nb = old + (uint64_t)increment;
-    if (nb < t->heap_base || nb > t->heap_end) {
-        return -1;
-    }
-    t->heap_brk = nb;
-    return (long)old;
+    return user_pages_free(t, (void *)(uintptr_t)base);
 }
 
 // spawn(name, argc, argv): load and run an embedded program with arguments.
@@ -396,9 +391,6 @@ void syscall_handle(struct trapframe *tf) {
     case SYS_read:
         ret = sys_read((int)a0, (char *)a1, a2);
         break;
-    case SYS_sbrk:
-        ret = sys_sbrk((long)a0);
-        break;
     case SYS_spawn:
         ret = sys_spawn((const char *)a0, (int)a1, (char *const *)a2);
         break;
@@ -434,6 +426,12 @@ void syscall_handle(struct trapframe *tf) {
         break;
     case SYS_getcwd:
         ret = sys_getcwd((char *)a0, a1);
+        break;
+    case SYS_alloc_pages:
+        ret = sys_alloc_pages(a0);
+        break;
+    case SYS_free_pages:
+        ret = sys_free_pages(a0);
         break;
     default:
         ret = -1;

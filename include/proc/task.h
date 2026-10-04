@@ -12,7 +12,6 @@
 
 #define MAX_TASKS 8
 #define TASK_KCTX_WORDS 13   // x19..x30 (12) + sp; see src/arch/entry.S
-#define USER_HEAP_PAGES 16   // 64 KB per-task heap, allocated lazily on first sbrk
 #define MAX_ARGS 16          // most argv entries a spawned program may receive
 #define MAX_OPEN_FILES 16    // open file/directory handles per task
 #define FD_BASE 3            // fds 0/1/2 are the console; real files start here
@@ -41,11 +40,7 @@ typedef struct task {
     void *image;                      // loaded ELF region (for reclaim)
     size_t image_pages;
     void *stack;                      // user stack region (for reclaim)
-    void *heap;                       // heap region, or NULL until first sbrk
-    size_t heap_pages;
-    uint64_t heap_base;               // heap bounds; brk moves within [base, end]
-    uint64_t heap_brk;
-    uint64_t heap_end;
+    struct user_run *runs;            // pages from alloc_pages (proc/user_mem.h)
     uint64_t arg0;                    // EL0 entry x0 (argc)
     uint64_t arg1;                    // EL0 entry x1 (argv, in the task's stack)
     fs_cwd_t cwd;                     // inherited per-task filesystem location
