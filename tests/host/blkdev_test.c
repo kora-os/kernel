@@ -94,6 +94,12 @@ static void bare_volume(void) {
     CHECK(p->device->type == BLKDEV_RAMDISK, "backend type retained");
     CHECK(blkdev_partition_get(1) == NULL && blkdev_device_get(1) == NULL,
           "enumeration is bounded");
+    put32(image + 32, 0);
+    image[19] = 100;
+    blkdev_registry_reset();
+    CHECK(blkdev_register(&backend, BLKDEV_RAMDISK) == 0 &&
+          view(0)->sector_count == 100, "mtools small FAT32 uses TotalSectors16");
+    image[19] = 0;
     put32(image + 32, 129);
     blkdev_registry_reset();
     check_rejected(BLK_ERR_RANGE);
