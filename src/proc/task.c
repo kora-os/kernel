@@ -40,6 +40,12 @@ static task_t *task_alloc(void) {
 
 // Release a task's held memory and return its slot to the pool.
 static void task_free(task_t *t) {
+    for (int f = 0; f < MAX_OPEN_FILES; f++) {
+        if (t->files[f].used) {
+            fat32_close(&t->files[f].file);
+            t->files[f].used = false;
+        }
+    }
     if (t->image != NULL) {
         frame_free_pages(t->image, t->image_pages);
         t->image = NULL;
@@ -135,13 +141,16 @@ static int load_program(const char *name, struct loaded_prog *lp) {
     fat32_file_t f;
     int rc = fs_program_open(cwd, name, &f);
     kfree(initial);
-    if (rc != 0 || f.size == 0) {
+    if (rc != 0) return -1;
+    if (f.size == 0) {
+        fat32_close(&f);
         return -1;
     }
 
     size_t npages = ((size_t)f.size + PAGE_SIZE - 1) / PAGE_SIZE;
     uint8_t *buf = frame_alloc_pages(npages);
     if (buf == NULL) {
+        fat32_close(&f);
         printf("spawn: out of memory reading '%s'\n", name);
         return -1;
     }
@@ -150,6 +159,7 @@ static int load_program(const char *name, struct loaded_prog *lp) {
         long n = fat32_read(&f, buf + got, f.size - got);
         if (n <= 0) {
             frame_free_pages(buf, npages);
+            fat32_close(&f);
             printf("spawn: read('%s') failed\n", name);
             return -1;
         }
@@ -157,6 +167,7 @@ static int load_program(const char *name, struct loaded_prog *lp) {
     }
 
     rc = elf_load(buf, f.size, lp);
+    fat32_close(&f);
     frame_free_pages(buf, npages);
     if (rc != 0) {
         printf("spawn: elf_load('%s') failed: %d\n", name, rc);
