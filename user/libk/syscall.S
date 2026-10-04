@@ -27,6 +27,8 @@ SYSCALL close,   SYS_CLOSE
 SYSCALL lseek,   SYS_LSEEK
 SYSCALL readdir, SYS_READDIR
 SYSCALL stat,    SYS_STAT
+SYSCALL chdir,   SYS_CHDIR
+SYSCALL getcwd,  SYS_GETCWD
 
 // exit() never returns; if the kernel ever did return here, spin rather than
 // running off into whatever follows.

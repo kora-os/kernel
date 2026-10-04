@@ -2,6 +2,7 @@
 
 #include "common.h"
 #include "fs/fat32.h"
+#include "fs/namespace.h"
 
 // Cooperative, one-at-a-time process model. Tasks nest: spawning a program
 // suspends the caller and runs the child to completion in EL0, then resumes the
@@ -47,6 +48,7 @@ typedef struct task {
     uint64_t heap_end;
     uint64_t arg0;                    // EL0 entry x0 (argc)
     uint64_t arg1;                    // EL0 entry x1 (argv, in the task's stack)
+    fs_cwd_t cwd;                     // inherited per-task filesystem location
     open_file_t files[MAX_OPEN_FILES];  // per-task fd table (indexed fd - FD_BASE)
     uint64_t kctx[TASK_KCTX_WORDS];   // kernel context saved by enter_user
 } task_t;

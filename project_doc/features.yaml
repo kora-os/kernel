@@ -192,7 +192,7 @@ categories:
         milestone: 9
       - id: volume-navigation
         name: Volume navigation
-        status: planned
+        status: in_progress
         description: Amiga-style device and volume names, assigns, cd and pwd.
         milestone: 8
       - id: job-control
@@ -233,7 +233,7 @@ categories:
         prs: [40]
       - id: volumes
         name: Volumes and assigns
-        status: planned
+        status: in_progress
         description: Several mounted volumes addressed by device or volume name.
         milestone: 8
       - id: partitions

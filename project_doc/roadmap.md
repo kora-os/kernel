@@ -179,8 +179,8 @@ Unix root.
 
 **Design decisions**
 
-- **Device names** (for example `df0:`, `df1:`) name a slot; one per mountable
-  partition, not per physical disk. **Volume names** (for example `boot:`,
+- **Device names** (`df0:`, `df1:`, and so on) use one slot sequence across
+  ramdisk, VirtIO, SD and USB; one per mountable partition, not per physical disk. **Volume names** (for example `boot:`,
   `extras:`) come from the FAT volume label and follow the medium wherever it is
   attached. Both are matched case-insensitively; a device name always works,
   even when two media share a label.
@@ -192,9 +192,10 @@ Unix root.
 - **Assigns**: logical names such as `sys:` (the boot volume) and `c:` (the
   command directory, initially `sys:bin`). `spawn` searches `c:` instead of the
   hardcoded `/bin`.
-- **Open questions**: the device naming scheme per device type (SD, USB,
-  VirtIO, ramdisk), and whether a synthetic unified tree (`/<volume>/...`) is
-  also wanted alongside volume names.
+- **Current directory**: each task inherits its parent's cwd. `getcwd` uses a
+  unique volume label when it resolves back to the same root, otherwise the
+  device name. The shell listing command is `volumes`. There is no synthetic
+  unified tree (`/<volume>/...`).
 
 **PRs**
 
