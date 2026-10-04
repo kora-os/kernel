@@ -30,6 +30,22 @@ struct kstat {
     uint32_t is_dir;
 };
 
+// Namespace enumeration ABI mirrors user/libk/koraos.h.
+struct kvolume_info {
+    char device[8];
+    char label[12];
+    uint32_t flags;
+};
+
+struct kassign_info {
+    char name[32];
+    char target[FS_QUALIFIED_PATH_MAX];
+    uint32_t flags;
+};
+
+_Static_assert(sizeof(struct kvolume_info) == 24, "volume info ABI");
+_Static_assert(sizeof(struct kassign_info) == 4164, "assign info ABI");
+
 // Kernel-side mirror of the userland struct fb_info (user/libk/koraos.h). The
 // layout must match exactly: the syscall fills this through a user pointer.
 struct fb_info {
@@ -315,6 +331,56 @@ static long sys_getcwd(char *buf, uint64_t size) {
     return fs_getcwd(&t->cwd, buf, (size_t)size) == 0 ? 0 : -1;
 }
 
+static long sys_volume_info(unsigned index, struct kvolume_info *out) {
+    if (!uptr_ok((uint64_t)out, sizeof(*out))) {
+        return -1;
+    }
+    const fs_volume_info_t *info = fs_volume_get(index);
+    if (info == NULL) {
+        return 0;
+    }
+    memset(out, 0, sizeof(*out));
+    memcpy(out->device, info->device, (size_t)strlen(info->device) + 1);
+    memcpy(out->label, info->label, (size_t)strlen(info->label) + 1);
+    out->flags = (info->boot ? 1u : 0u) | (info->read_only ? 2u : 0u);
+    return 1;
+}
+
+static long sys_assign_info(unsigned index, struct kassign_info *out) {
+    if (!uptr_ok((uint64_t)out, sizeof(*out))) {
+        return -1;
+    }
+    const fs_assign_info_t *info = fs_assign_get(index);
+    if (info == NULL) {
+        return 0;
+    }
+    if (fs_getcwd(&info->target, out->target, sizeof(out->target)) != 0) {
+        return -1;
+    }
+    memset(out->name, 0, sizeof(out->name));
+    memcpy(out->name, info->name, (size_t)strlen(info->name) + 1);
+    out->flags = info->immutable ? 1u : 0u;
+    return 1;
+}
+
+static long sys_assign(const char *name, const char *target) {
+    task_t *t = task_current();
+    if (t == NULL) {
+        return -1;
+    }
+    char *name_copy = copy_user_path(name);
+    char *target_copy = target != NULL ? copy_user_path(target) : NULL;
+    if (name_copy == NULL || (target != NULL && target_copy == NULL)) {
+        kfree(name_copy);
+        kfree(target_copy);
+        return -1;
+    }
+    int rc = fs_assign_set(&t->cwd, name_copy, target_copy);
+    kfree(name_copy);
+    kfree(target_copy);
+    return rc == 0 ? 0 : -1;
+}
+
 // alloc_pages(count): give the calling task `count` contiguous zeroed pages,
 // tracked so they are reclaimed when the task is reaped. Returns the base
 // address, or 0 on failure.
@@ -432,6 +498,15 @@ void syscall_handle(struct trapframe *tf) {
         break;
     case SYS_free_pages:
         ret = sys_free_pages(a0);
+        break;
+    case SYS_volume_info:
+        ret = sys_volume_info((unsigned)a0, (struct kvolume_info *)a1);
+        break;
+    case SYS_assign:
+        ret = sys_assign((const char *)a0, (const char *)a1);
+        break;
+    case SYS_assign_info:
+        ret = sys_assign_info((unsigned)a0, (struct kassign_info *)a1);
         break;
     default:
         ret = -1;

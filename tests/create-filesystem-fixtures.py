@@ -32,12 +32,14 @@ def make_fixture(output, label, size, text, temporary):
     with output.open("wb") as stream:
         stream.truncate(size * 1024 * 1024)
     run("mformat", "-i", str(output), "-F", "-c", "1", "-v", label, "::")
-    run("mmd", "-i", str(output), "::/docs", "::/docs/child")
+    run("mmd", "-i", str(output), "::/docs", "::/docs/child", "::/bin")
     payload = temporary / "payload.txt"
     payload.write_text(text)
     for destination in ("::/marker.txt", "::/docs/child/nested.txt",
                         "::/a-long-invalid-name.txt", "::/docs/résumé-notes.txt"):
         run("mcopy", "-i", str(output), str(payload), destination)
+    command = "bootcmd" if label == "ALPHA" else "extrahello"
+    run("mcopy", "-i", str(output), str(payload), "::/bin/" + command)
     large = temporary / "large.bin"
     large.write_bytes(bytes((index * 37 + 11) % 256 for index in range(5000)))
     run("mcopy", "-i", str(output), str(large), "::/large.bin")

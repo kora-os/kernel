@@ -28,3 +28,6 @@
 
 #define SYS_CHDIR 32
 #define SYS_GETCWD 33
+#define SYS_VOLUME_INFO 34
+#define SYS_ASSIGN      35
+#define SYS_ASSIGN_INFO 36

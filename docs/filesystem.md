@@ -171,8 +171,8 @@ non-ASCII matching.
 
 A unique volume label can select that volume, for example `extras:docs/file.txt`.
 Repeated labels are ambiguous and must be addressed by device slot. Device
-names take precedence over colliding labels. `sys:` and `c:` are reserved for
-assigns introduced in the next step.
+names take precedence over assigns, which take precedence over volume labels.
+A device slot always remains available even when labels or assigns collide.
 
 Each task starts at the boot volume root or inherits its parent's cwd. The
 filesystem receives cwd explicitly; a child's directory change does not alter
@@ -198,9 +198,60 @@ longest valid `getcwd` result can be passed back to `chdir`. A filename
 component retains the existing 765-byte UTF-8 limit.
 
 The file syscalls and explicit program paths use this resolver. Bare program
-names continue to search the boot volume's `/bin` until command assigns arrive
-in step 8.3. Shell navigation built-ins and the `volumes` listing command arrive
-in that step too. The `nsprobe` test program exercises `chdir` and `getcwd` now.
+names search only the `c:` assign. An unavailable `c:` or missing command fails;
+there is no fallback to the boot volume or current volume's `/bin`.
+
+## Assigns and shell navigation
+
+Assigns are global, single-target names bound to existing directories. `sys:`
+is fixed to the boot volume root; it cannot be replaced or removed. `c:` starts
+at `sys:bin` and can be replaced or removed. Mount initialization requires the
+boot command directory to exist. Assign targets are resolved when set, so
+changing cwd or replacing/removing another assign cannot redirect an existing
+assign. Relative targets use the caller's cwd.
+
+There are at most 16 assigns, including defaults. Names occupy up to 31 bytes,
+are matched case-insensitively for ASCII, and may carry an optional trailing
+colon when passed to `assign`. Empty names, whitespace/control bytes, embedded
+colons, slashes and reserved `df<digits>` names are rejected. Targets must exist
+and be directories. A failed replacement preserves the previous target.
+
+An assign path starts at its target directory. `c:hello` and `c:/hello` both
+select `hello` within the command directory; the slash after the colon does
+not discard the assign's directory anchor. `..` still follows the real parent
+within that volume. Assigns can shadow volume labels; `getcwd` then uses a
+device slot whenever the label would resolve to a different directory.
+
+The shell provides these built-ins:
+
+- `cd path` changes cwd; `cd` without arguments and `pwd` print it.
+- `name:` alone changes cwd to that device, volume or assign target.
+- `volumes` lists device slots and labels, marking boot and read-only volumes.
+- `assign` lists assigns; `assign name target` creates or replaces one.
+- `assign name` removes an assign. `sys:` remains fixed.
+
+`ls` defaults to `.`. Other file commands accept the same path syntax, and
+bare programs load through `c:` independently of the shell's cwd. Commands
+allow up to 16 tokens, including the program name. Excess tokens and overlong
+input lines are rejected as a whole; the shell drains an overlong line before
+reading the next command.
+
+```text
+sys:
+cd docs
+pwd
+ls
+assign work sys:docs
+work:
+assign c extras:bin
+extrahello
+assign c sys:bin
+```
+
+The scratch EXTRAS fixture contains an `extrahello` command that is absent from
+the boot image, providing a direct check that `c:` selects its configured
+command directory. The `nsprobe` program checks cwd, descriptor binding, volume
+and assign enumeration, immutable `sys:`, and assign creation/removal.
 
 ```bash
 tests/create-multivolume-image.py --output build/multi-root.img build/userfs/aarch64/koraos.img
@@ -208,8 +259,9 @@ tests/run-qemu-smoke.py --target qemu_virt --disk build/multi-root.img --multi-v
 ```
 
 This fixture relabels separate copies as `BOOT` and `EXTRAS`, deliberately
-leaves their BPB label copies stale, and checks that the original shared userfs
-SHA256 remains unchanged.
+leaves their BPB label copies stale, changes only the EXTRAS README and adds
+its private `extrahello`, then checks that the original shared userfs SHA256
+remains unchanged.
 
 ## Shared producer and dependencies
 

@@ -47,6 +47,7 @@ run_test() {
     fi
 }
 
+run_test shell_input
 run_test blkdev src/fs/blkdev.c
 run_test term src/video/term.c
 run_test printf src/lib/printf.c

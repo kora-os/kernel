@@ -33,6 +33,9 @@ def create_image(source, output):
                 marker.write_text("EXTRAS volume marker: this content differs from the boot disk.\n")
                 subprocess.run(["mcopy", "-o", "-i", str(volume), str(marker), "::/README.TXT"],
                                check=True)
+                command = Path(temporary) / "extrahello"
+                subprocess.run(["mcopy", "-i", str(volume), "::/bin/hello", str(command)], check=True)
+                subprocess.run(["mcopy", "-i", str(volume), str(command), "::/bin/extrahello"], check=True)
             volumes.append(volume)
         mbr_image.create_image(volumes, output)
     if hashlib.sha256(source.read_bytes()).digest() != before:

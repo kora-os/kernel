@@ -359,6 +359,10 @@ const char *fat32_label(const fat32_volume_t *volume) {
     return volume->label;
 }
 
+bool fat32_is_read_only(const fat32_volume_t *volume) {
+    return volume->dev->read_only;
+}
+
 int fat32_readdir(fat32_file_t *dir, fat32_dirent_t *out) {
     if (dir == NULL || out == NULL || dir->volume == NULL) {
         return FS_ERR_INVAL;

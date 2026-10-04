@@ -30,6 +30,9 @@ SYSCALL alloc_pages, SYS_ALLOC_PAGES
 SYSCALL free_pages,  SYS_FREE_PAGES
 SYSCALL chdir,   SYS_CHDIR
 SYSCALL getcwd,  SYS_GETCWD
+SYSCALL volume_info, SYS_VOLUME_INFO
+SYSCALL assign,      SYS_ASSIGN
+SYSCALL assign_info, SYS_ASSIGN_INFO
 
 // exit() never returns; if the kernel ever did return here, spin rather than
 // running off into whatever follows.

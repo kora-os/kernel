@@ -37,6 +37,9 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
 | 15 | `free_pages` | `int free_pages(void *base)` | `0`, or `-1` |
 | 32 | `chdir` | `int chdir(const char *path)` | `0`, or `-1` |
 | 33 | `getcwd` | `int getcwd(char *buf, size_t size)` | `0`, or `-1` |
+| 34 | `volume_info` | `int volume_info(unsigned int index, struct volume_info *out)` | `1` item, `0` end, `-1` error |
+| 35 | `assign` | `int assign(const char *name, const char *target)` | `0`, or `-1` |
+| 36 | `assign_info` | `int assign_info(unsigned int index, struct assign_info *out)` | `1` item, `0` end, `-1` error |
 
 ## Notes per call
 
@@ -57,7 +60,8 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
   the program and runs it to completion in EL0 while the caller is suspended,
   then returns the (now-exited) child's pid. Call `wait(pid)` afterwards to reap
   it and collect its exit code. `name` is resolved to a filesystem path: a bare
-  name is looked up under the boot volume's `/bin`; other names use the caller's
+  name is looked up through `c:` (initially `sys:bin`), with no fallback to
+  `/bin` if the assign or command is missing; other names use the caller's
   volume-aware path resolver (see
   [filesystem.md](filesystem.md)). `argv` entries are copied onto the child's
   stack and delivered as `main(argc, argv)`.
@@ -78,6 +82,18 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
   collides with another namespace name. The supplied byte capacity must include
   the terminator; invalid or undersized buffers return `-1`. Returns `0` on
   success, rather than a pointer.
+
+- **`volume_info`**: enumerate mounted FAT32 volumes by zero-based index. Reports
+  the device slot, volume label, boot-volume flag and read-only flag. Returns
+  `1` for an item and `0` at the end; invalid output pointers return `-1`.
+- **`assign`**: create or replace a global, single-target assign to an existing
+  directory. Relative targets use the caller's cwd. A NULL target removes an
+  assign; removing an unknown assign fails. `sys:` is immutable; `c:` can be
+  replaced or removed. Targets are resolved snapshots, and failed replacements
+  preserve the previous target. Device-slot names remain reserved.
+- **`assign_info`**: enumerate assigns by zero-based index. Reports the name,
+  canonical qualified target and immutable flag. Returns `1` for an item,
+  `0` at the end or `-1` for invalid output pointers.
 
 File paths for `open`, `stat`, `chdir` and explicit `spawn` paths use the same
 namespace rules; `/` selects the current volume's root. Syscall numbers 14 to
@@ -105,6 +121,23 @@ struct dirent {
 struct stat {
     unsigned long size;
     int           is_dir;
+};
+
+#define KORA_PATH_MAX 4128  /* qualified path bytes including NUL */
+#define VOLUME_BOOT 1u
+#define VOLUME_READ_ONLY 2u
+#define ASSIGN_IMMUTABLE 1u
+
+struct volume_info {
+    char device[8];         /* slot name without colon */
+    char label[12];         /* FAT label, or empty */
+    unsigned int flags;
+};
+
+struct assign_info {
+    char name[32];          /* assign name without colon */
+    char target[KORA_PATH_MAX];
+    unsigned int flags;
 };
 
 struct fb_info {           /* filled by fb_info() */
