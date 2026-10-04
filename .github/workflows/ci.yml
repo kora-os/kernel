@@ -22,6 +22,8 @@ jobs:
         run: sudo sysctl -w vm.mmap_rnd_bits=28
       - name: Host sanitizer suites
         run: tests/run-host-tests.sh
+      - name: Scratch MBR image tests
+        run: tests/run-mbr-image-tests.py
       - name: Build and launcher orchestration tests
         run: tests/run-build-tests.py
       - name: Feature status file
@@ -109,6 +111,8 @@ jobs:
             args: --repeat 64
           - profile: disk-keyboard
             args: --ram 128M --disk build/userfs/aarch64/koraos.img --keyboard --repeat 256
+          - profile: mbr-disk
+            args: --disk build/mbr-root.img --repeat 64
           - profile: serial-small-ram
             args: --ram 64M --no-graphics --repeat 32
           - profile: el2-entry
@@ -125,6 +129,9 @@ jobs:
           sudo apt-get install -y --no-install-recommends clang lld llvm cmake mtools qemu-system-arm
       - name: Build virt with prepared userfs
         run: ./build.sh --target qemu_virt --userfs-dir build/userfs/aarch64
+      - name: Wrap shared root in a scratch MBR image
+        if: matrix.profile == 'mbr-disk'
+        run: tests/create-mbr-image.py --output build/mbr-root.img build/userfs/aarch64/koraos.img
       - name: Exercise development profile
         run: tests/run-qemu-smoke.py --target qemu_virt --out build/debug/qemu_virt/qemu-${{ matrix.profile }} ${{ matrix.args }}
       - name: Reject invalid configured root disk
