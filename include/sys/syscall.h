@@ -21,6 +21,9 @@
 #define SYS_lseek   11
 #define SYS_readdir 12
 #define SYS_stat    13
+// Slots 14 through 31 are reserved for task and memory work.
+#define SYS_chdir   32
+#define SYS_getcwd  33
 
 // Dispatch a syscall described by a trap frame from EL0. The return value is
 // written back into the frame's x0.

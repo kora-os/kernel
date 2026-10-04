@@ -1,24 +1,22 @@
 #include "fs/fat32.h"
 #include "fs/blkdev.h"
 #include "lib/string.h"
+#include "mm/kmalloc.h"
 
-// Read-only FAT32. The single-threaded, cooperative kernel makes static scratch
-// buffers safe: FS calls never overlap. Two buffers are kept distinct so a FAT
-// lookup (fat_buf) does not clobber directory/file data mid-read (data_buf).
-
+// Each mounted view owns its geometry and scratch caches. Calls are serialized
+// by the kernel; no task state or additional filesystem locks are required.
 struct fat32_volume {
-    uint32_t sec_per_clus;      // sectors per cluster
-    uint32_t fat_start;         // LBA of the first FAT (== reserved sector count)
-    uint32_t first_data_sector; // LBA of cluster 2
-    uint32_t root_cluster;      // first cluster of the root directory
-    bool mounted;
+    blkdev_t *dev;
+    uint32_t sec_per_clus;
+    uint32_t fat_start;
+    uint32_t first_data_sector;
+    uint32_t root_cluster;
+    uint32_t cluster_count;
+    uint32_t fat_cached_sec;
+    char label[12];
+    uint8_t fat_buf[BLK_SECTOR_SIZE];
+    uint8_t data_buf[BLK_SECTOR_SIZE];
 };
-
-static struct fat32_volume vol;
-
-static uint8_t fat_buf[BLK_SECTOR_SIZE];
-static uint32_t fat_cached_sec = 0xFFFFFFFFu;  // LBA currently in fat_buf
-static uint8_t data_buf[BLK_SECTOR_SIZE];
 
 // --- small local helpers (freestanding: no libc) ---------------------------
 
@@ -35,80 +33,127 @@ static char to_lower(char c) {
     return (c >= 'A' && c <= 'Z') ? (char)(c + 32) : c;
 }
 
-static int read_sector(uint32_t lba, uint8_t *buf) {
-    return blk_read(lba, 1, buf);
+static int read_sector(fat32_volume_t *vol, uint32_t lba, uint8_t *buf) {
+    return blkdev_read(vol->dev, lba, 1, buf);
 }
 
 // A data cluster number is valid if it names a real cluster and is not an
 // end-of-chain / bad marker.
-static bool cluster_valid(uint32_t c) {
-    return c >= 2 && c < 0x0FFFFFF8u;
+static bool cluster_valid(fat32_volume_t *vol, uint32_t c) {
+    return c >= 2 && c < vol->cluster_count + 2;
 }
 
-static uint32_t cluster_to_lba(uint32_t cluster) {
-    return vol.first_data_sector + (cluster - 2) * vol.sec_per_clus;
+static uint32_t cluster_to_lba(fat32_volume_t *vol, uint32_t cluster) {
+    return vol->first_data_sector + (cluster - 2) * vol->sec_per_clus;
 }
 
-// Follow the FAT to the next cluster in a chain. Returns an end-of-chain marker
-// (>= 0x0FFFFFF8) on the last cluster, or 0 on an I/O error (treated as end).
-static uint32_t fat_next(uint32_t cluster) {
+// Follow one FAT link. Preserve I/O failure separately from EOC markers.
+static int fat_next(fat32_volume_t *vol, uint32_t cluster, uint32_t *next) {
     uint32_t fat_off = cluster * 4;
-    uint32_t sec = vol.fat_start + fat_off / BLK_SECTOR_SIZE;
+    uint32_t sec = vol->fat_start + fat_off / BLK_SECTOR_SIZE;
     uint32_t off = fat_off % BLK_SECTOR_SIZE;
-    if (fat_cached_sec != sec) {
-        if (read_sector(sec, fat_buf) != 0) {
-            fat_cached_sec = 0xFFFFFFFFu;
-            return 0;
+    if (vol->fat_cached_sec != sec) {
+        if (read_sector(vol, sec, vol->fat_buf) != 0) {
+            vol->fat_cached_sec = 0xFFFFFFFFu;
+            return FS_ERR_IO;
         }
-        fat_cached_sec = sec;
+        vol->fat_cached_sec = sec;
     }
-    return rd32(fat_buf + off) & 0x0FFFFFFFu;
+    *next = rd32(vol->fat_buf + off) & 0x0FFFFFFFu;
+    return 0;
 }
 
-// Read up to `len` bytes at byte offset `pos` along the cluster chain starting
-// at `first_cluster`. Returns bytes read -- fewer than `len` only at end of the
-// chain -- or a negative FS_ERR_* code.
-static long chain_read(uint32_t first_cluster, uint32_t pos, void *buf,
-                       uint32_t len) {
+// Floyd's detector bounds corrupt cyclic chains promptly, including self loops.
+// Its lookahead reads FAT entries only and preserves transport error codes.
+static int chain_advance(fat32_volume_t *vol, uint32_t *cluster,
+                         uint32_t *slow, uint32_t *fast) {
+    int rc = fat_next(vol, *cluster, cluster);
+    if (rc != 0) {
+        return rc;
+    }
+    if (*cluster >= 0x0ffffff8u) {
+        return 0;
+    }
+    if (!cluster_valid(vol, *cluster)) {
+        return FS_ERR_CORRUPT;
+    }
+    if (cluster_valid(vol, *slow)) {
+        rc = fat_next(vol, *slow, slow);
+        if (rc != 0) {
+            return rc;
+        }
+    }
+    for (unsigned i = 0; i < 2 && cluster_valid(vol, *fast); i++) {
+        rc = fat_next(vol, *fast, fast);
+        if (rc != 0) {
+            return rc;
+        }
+    }
+    if (cluster_valid(vol, *fast) && *slow == *fast) {
+        return FS_ERR_CORRUPT;
+    }
+    return 0;
+}
+
+// Read a byte range from a bounded chain, preserving corruption and I/O errors.
+static long chain_read(fat32_volume_t *vol, uint32_t first_cluster, uint32_t pos,
+                       void *buf, uint32_t len) {
     if (len == 0) {
         return 0;
     }
-    uint32_t cluster_bytes = vol.sec_per_clus * BLK_SECTOR_SIZE;
+    uint32_t cluster_bytes = vol->sec_per_clus * BLK_SECTOR_SIZE;
     uint32_t cluster = first_cluster;
-
-    for (uint32_t skip = pos / cluster_bytes; skip > 0; skip--) {
-        cluster = fat_next(cluster);
-        if (!cluster_valid(cluster)) {
-            return 0;  // pos is past the end of the chain
+    uint32_t slow = cluster, fast = cluster;
+    uint32_t traversed = 0;
+    uint32_t skip = pos / cluster_bytes;
+    if (skip >= vol->cluster_count) {
+        return FS_ERR_CORRUPT;
+    }
+    while (skip--) {
+        if (!cluster_valid(vol, cluster) || ++traversed > vol->cluster_count) {
+            return FS_ERR_CORRUPT;
+        }
+        int rc = chain_advance(vol, &cluster, &slow, &fast);
+        if (rc != 0) {
+            return rc;
+        }
+        if (cluster >= 0x0ffffff8u) {
+            return 0;
         }
     }
     uint32_t off = pos % cluster_bytes;
-
     uint8_t *out = buf;
     uint32_t done = 0;
     while (done < len) {
-        if (!cluster_valid(cluster)) {
-            break;  // reached end of chain
+        if (!cluster_valid(vol, cluster) || ++traversed > vol->cluster_count) {
+            return FS_ERR_CORRUPT;
         }
-        uint32_t lba = cluster_to_lba(cluster);
+        uint32_t lba = cluster_to_lba(vol, cluster);
         while (off < cluster_bytes && done < len) {
             uint32_t si = off / BLK_SECTOR_SIZE;
             uint32_t so = off % BLK_SECTOR_SIZE;
-            if (read_sector(lba + si, data_buf) != 0) {
+            if (read_sector(vol, lba + si, vol->data_buf) != 0) {
                 return FS_ERR_IO;
             }
             uint32_t chunk = BLK_SECTOR_SIZE - so;
             if (chunk > len - done) {
                 chunk = len - done;
             }
-            memcpy(out + done, data_buf + so, chunk);
+            memcpy(out + done, vol->data_buf + so, chunk);
             done += chunk;
             off += chunk;
         }
-        if (off >= cluster_bytes) {
-            cluster = fat_next(cluster);
-            off = 0;
+        if (done == len) {
+            break;
         }
+        int rc = chain_advance(vol, &cluster, &slow, &fast);
+        if (rc != 0) {
+            return rc;
+        }
+        if (cluster >= 0x0ffffff8u) {
+            break;
+        }
+        off = 0;
     }
     return (long)done;
 }
@@ -121,24 +166,28 @@ static long chain_read(uint32_t first_cluster, uint32_t pos, void *buf,
 // Byte offsets of the 13 UTF-16 code units within a 32-byte LFN entry.
 static const uint8_t lfn_off[13] = {1, 3, 5, 7, 9, 14, 16, 18, 20, 22, 24, 28, 30};
 
-// Copy one LFN entry's 13 UTF-16 code units into `units` at their sequenced
-// position. Entries appear in reverse order (highest ordinal first); the entry
-// carrying the 0x40 bit is physically first and its ordinal is the total entry
-// count, so it fixes how many code units the name occupies. Returns that count
-// (unchanged for the non-terminal entries). Checksums are not verified.
-static uint32_t lfn_collect(const uint8_t *ent, uint16_t *units, uint32_t nunits) {
-    uint32_t ord = ent[0] & 0x1F;
-    if (ord == 0 || ord * 13 > FAT32_LFN_MAX_UNITS) {
-        return nunits;  // malformed ordinal; ignore this entry
+static uint8_t short_checksum(const uint8_t *ent) {
+    uint8_t sum = 0;
+    for (unsigned i = 0; i < 11; i++) {
+        sum = (uint8_t)(((sum & 1) << 7) + (sum >> 1) + ent[i]);
     }
-    if (ent[0] & 0x40) {
-        nunits = ord * 13;
+    return sum;
+}
+
+static bool lfn_complete(const uint16_t *units, uint32_t n) {
+    bool terminated = false;
+    for (uint32_t i = 0; i < n; i++) {
+        if (terminated) {
+            if (units[i] != 0xffffu) {
+                return false;
+            }
+        } else if (units[i] == 0) {
+            terminated = true;
+        } else if (i >= 255 || units[i] == 0xffffu) {
+            return false;
+        }
     }
-    uint32_t base = (ord - 1) * 13;
-    for (uint32_t k = 0; k < 13; k++) {
-        units[base + k] = (uint16_t)rd16(ent + lfn_off[k]);
-    }
-    return nunits;
+    return n > 0 && units[0] != 0;
 }
 
 // Decode `n` little-endian UTF-16 code units (possibly with surrogate pairs) to
@@ -223,46 +272,109 @@ static void name_from_83(const uint8_t *ent, char *out) {
 
 // --- public API -------------------------------------------------------------
 
-int fat32_mount(void) {
+static void copy_label(char *out, const uint8_t *label) {
+    unsigned end = 11;
+    while (end && label[end - 1] == ' ') {
+        end--;
+    }
+    for (unsigned i = 0; i < end; i++) {
+        out[i] = short_byte(label[i]);
+    }
+    out[end] = 0;
+    if (strcmp(out, "no name") == 0) {
+        out[0] = 0;
+    }
+}
+
+int fat32_mount(blkdev_t *dev, fat32_volume_t **out) {
+    if (out == NULL) {
+        return FS_ERR_INVAL;
+    }
+    *out = NULL;
+    if (dev == NULL) {
+        return FS_ERR_INVAL;
+    }
     uint8_t sec[BLK_SECTOR_SIZE];
-    if (read_sector(0, sec) != 0) {
+    if (blkdev_read(dev, 0, 1, sec) != 0) {
         return FS_ERR_IO;
     }
-    if (sec[510] != 0x55 || sec[511] != 0xAA) {
+    uint32_t spc = sec[13], rsvd = rd16(sec + 14), nfats = sec[16];
+    uint32_t fatsz = rd32(sec + 36), root = rd32(sec + 44);
+    uint32_t total = rd16(sec + 19);
+    if (total == 0) {
+        total = rd32(sec + 32);
+    }
+    uint64_t data = (uint64_t)rsvd + (uint64_t)nfats * fatsz;
+    uint32_t flags = rd16(sec + 40);
+    uint32_t active = (flags & 0x80) ? flags & 0x0f : 0;
+    if (sec[510] != 0x55 || sec[511] != 0xaa || rd16(sec + 11) != 512 ||
+        !spc || (spc & (spc - 1)) || spc > 128 || !rsvd || !nfats ||
+        !fatsz || rd16(sec + 17) || rd16(sec + 22) || rd16(sec + 42) ||
+        active >= nfats || total > dev->sector_count || data >= total) {
         return FS_ERR_NOFS;
     }
-    uint32_t bytes_per_sec = rd16(sec + 11);
-    uint32_t spc = sec[13];
-    uint32_t rsvd = rd16(sec + 14);
-    uint32_t nfats = sec[16];
-    uint32_t fatsz = rd32(sec + 36);   // FATSz32
-    uint32_t root_clus = rd32(sec + 44);  // BPB_RootClus
-
-    if (bytes_per_sec != BLK_SECTOR_SIZE || spc == 0 || rsvd == 0 ||
-        nfats == 0 || fatsz == 0 || root_clus < 2) {
+    uint32_t clusters = (total - (uint32_t)data) / spc;
+    if (!clusters || clusters > 0x0ffffff5u ||
+        (uint64_t)fatsz * 128 < (uint64_t)clusters + 2 ||
+        root < 2 || root >= clusters + 2) {
         return FS_ERR_NOFS;
     }
-
-    vol.sec_per_clus = spc;
-    vol.fat_start = rsvd;
-    vol.first_data_sector = rsvd + nfats * fatsz;
-    vol.root_cluster = root_clus;
-    vol.mounted = true;
-    fat_cached_sec = 0xFFFFFFFFu;
+    fat32_volume_t *vol = kmalloc(sizeof(*vol));
+    if (vol == NULL) {
+        return FS_ERR_IO;
+    }
+    vol->dev = dev;
+    vol->sec_per_clus = spc;
+    vol->fat_start = rsvd + active * fatsz;
+    vol->first_data_sector = (uint32_t)data;
+    vol->root_cluster = root;
+    vol->cluster_count = clusters;
+    vol->fat_cached_sec = 0xffffffffu;
+    copy_label(vol->label, sec + 71);
+    // Root-directory label is authoritative; the BPB copy can be stale.
+    for (uint32_t pos = 0; ; pos += 32) {
+        uint8_t ent[32];
+        long n = chain_read(vol, root, pos, ent, sizeof(ent));
+        if (n < 0) {
+            kfree(vol);
+            return (int)n;
+        }
+        if (n == 0 || ent[0] == 0) {
+            break;
+        }
+        if (ent[0] != 0xe5 && ent[11] == 0x08) {
+            copy_label(vol->label, ent);
+            break;
+        }
+    }
+    *out = vol;
     return 0;
 }
 
+void fat32_unmount(fat32_volume_t *volume) {
+    kfree(volume);
+}
+
+const char *fat32_label(const fat32_volume_t *volume) {
+    return volume->label;
+}
+
 int fat32_readdir(fat32_file_t *dir, fat32_dirent_t *out) {
+    if (dir == NULL || out == NULL || dir->volume == NULL) {
+        return FS_ERR_INVAL;
+    }
     if (!dir->is_dir) {
         return FS_ERR_NOTDIR;
     }
     uint8_t ent[32];
-    uint16_t units[FAT32_LFN_MAX_UNITS];
+    uint16_t units[FAT32_LFN_MAX_UNITS] = {0};
     uint32_t nunits = 0;
+    uint32_t expected = 0;
+    uint8_t checksum = 0;
     bool have_lfn = false;
 
     for (;;) {
-        long n = chain_read(dir->first_cluster, dir->pos, ent, sizeof(ent));
+        long n = chain_read(dir->volume, dir->first_cluster, dir->pos, ent, sizeof(ent));
         if (n < 0) {
             return (int)n;
         }
@@ -281,9 +393,24 @@ int fat32_readdir(fat32_file_t *dir, fat32_dirent_t *out) {
             continue;
         }
         uint8_t attr = ent[11];
-        if ((attr & 0x0F) == 0x0F) {
-            nunits = lfn_collect(ent, units, nunits);
-            have_lfn = true;
+        if (attr == 0x0f) {
+            unsigned ord = ent[0] & 0x1f;
+            if (ent[0] & 0x40) {
+                memset(units, 0, sizeof(units));
+                expected = ord;
+                nunits = ord * 13;
+                checksum = ent[13];
+                have_lfn = ord > 0 && ord <= 20;
+            }
+            if (!have_lfn || ord == 0 || ord > 20 || ord != expected || ent[13] != checksum ||
+                (ent[0] & 0xa0) || ent[12] || rd16(ent + 26)) {
+                have_lfn = false;
+            } else {
+                for (unsigned k = 0; k < 13; k++) {
+                    units[(ord - 1) * 13 + k] = (uint16_t)rd16(ent + lfn_off[k]);
+                }
+                expected--;
+            }
             continue;
         }
         if (attr & 0x08) {
@@ -297,7 +424,8 @@ int fat32_readdir(fat32_file_t *dir, fat32_dirent_t *out) {
             continue;
         }
 
-        if (have_lfn) {
+        if (have_lfn && expected == 0 && short_checksum(ent) == checksum &&
+            lfn_complete(units, nunits)) {
             utf16_to_utf8(units, nunits, out->name, FAT32_NAME_MAX + 1);
         } else {
             name_from_83(ent, out->name);
@@ -321,9 +449,9 @@ static bool name_eq(const char *name, const char *comp, size_t comp_len) {
     return name[i] == 0;
 }
 
-static int find_in_dir(uint32_t dir_cluster, const char *comp, size_t comp_len,
+static int find_in_dir(fat32_volume_t *vol, uint32_t dir_cluster, const char *comp, size_t comp_len,
                        fat32_dirent_t *out) {
-    fat32_file_t dir = {.first_cluster = dir_cluster, .size = 0, .pos = 0,
+    fat32_file_t dir = {.volume = vol, .first_cluster = dir_cluster, .size = 0, .pos = 0,
                         .is_dir = true};
     fat32_dirent_t de;
     int r;
@@ -338,15 +466,15 @@ static int find_in_dir(uint32_t dir_cluster, const char *comp, size_t comp_len,
 
 // Resolve an absolute path to its directory entry. "/" resolves to a synthetic
 // root-directory entry.
-static int resolve(const char *path, fat32_dirent_t *out) {
-    if (!vol.mounted) {
+int fat32_lookup(fat32_volume_t *vol, const char *path, fat32_dirent_t *out) {
+    if (vol == NULL) {
         return FS_ERR_NOFS;
     }
-    if (path == NULL || path[0] != '/') {
+    if (path == NULL || out == NULL || path[0] != '/') {
         return FS_ERR_INVAL;
     }
     fat32_dirent_t cur = {.name = "/", .size = 0,
-                          .first_cluster = vol.root_cluster, .is_dir = true};
+                          .first_cluster = vol->root_cluster, .is_dir = true};
     const char *p = path + 1;
     while (*p) {
         const char *start = p;
@@ -359,7 +487,7 @@ static int resolve(const char *path, fat32_dirent_t *out) {
                 return FS_ERR_NOTDIR;
             }
             fat32_dirent_t de;
-            int r = find_in_dir(cur.first_cluster, start, len, &de);
+            int r = find_in_dir(vol, cur.first_cluster, start, len, &de);
             if (r != 0) {
                 return r;
             }
@@ -373,15 +501,19 @@ static int resolve(const char *path, fat32_dirent_t *out) {
     return 0;
 }
 
-int fat32_open(const char *path, fat32_file_t *out) {
+int fat32_open(fat32_volume_t *vol, const char *path, fat32_file_t *out) {
+    if (out == NULL) {
+        return FS_ERR_INVAL;
+    }
     fat32_dirent_t de;
-    int r = resolve(path, &de);
+    int r = fat32_lookup(vol, path, &de);
     if (r != 0) {
         return r;
     }
     if (de.is_dir) {
         return FS_ERR_ISDIR;
     }
+    out->volume = vol;
     out->first_cluster = de.first_cluster;
     out->size = de.size;
     out->pos = 0;
@@ -389,15 +521,19 @@ int fat32_open(const char *path, fat32_file_t *out) {
     return 0;
 }
 
-int fat32_opendir(const char *path, fat32_file_t *out) {
+int fat32_opendir(fat32_volume_t *vol, const char *path, fat32_file_t *out) {
+    if (out == NULL) {
+        return FS_ERR_INVAL;
+    }
     fat32_dirent_t de;
-    int r = resolve(path, &de);
+    int r = fat32_lookup(vol, path, &de);
     if (r != 0) {
         return r;
     }
     if (!de.is_dir) {
         return FS_ERR_NOTFILE;
     }
+    out->volume = vol;
     out->first_cluster = de.first_cluster;
     out->size = 0;
     out->pos = 0;
@@ -406,6 +542,9 @@ int fat32_opendir(const char *path, fat32_file_t *out) {
 }
 
 long fat32_read(fat32_file_t *f, void *buf, uint32_t len) {
+    if (f == NULL || f->volume == NULL || (len && buf == NULL)) {
+        return FS_ERR_INVAL;
+    }
     if (f->is_dir) {
         return FS_ERR_ISDIR;
     }
@@ -416,17 +555,23 @@ long fat32_read(fat32_file_t *f, void *buf, uint32_t len) {
     if (len > remaining) {
         len = remaining;
     }
-    long n = chain_read(f->first_cluster, f->pos, buf, len);
+    long n = chain_read(f->volume, f->first_cluster, f->pos, buf, len);
     if (n < 0) {
         return n;
+    }
+    if ((uint32_t)n != len) {
+        return FS_ERR_CORRUPT;
     }
     f->pos += (uint32_t)n;
     return n;
 }
 
-int fat32_stat(const char *path, fat32_stat_t *out) {
+int fat32_stat(fat32_volume_t *vol, const char *path, fat32_stat_t *out) {
+    if (out == NULL) {
+        return FS_ERR_INVAL;
+    }
     fat32_dirent_t de;
-    int r = resolve(path, &de);
+    int r = fat32_lookup(vol, path, &de);
     if (r != 0) {
         return r;
     }

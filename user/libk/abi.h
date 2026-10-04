@@ -23,3 +23,6 @@
 #define SYS_LSEEK   11
 #define SYS_READDIR 12
 #define SYS_STAT    13
+
+#define SYS_CHDIR 32
+#define SYS_GETCWD 33

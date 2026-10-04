@@ -33,6 +33,8 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
 | 11 | `lseek` | `long lseek(int fd, long offset, int whence)` | new offset, or `-1` |
 | 12 | `readdir` | `int readdir(int fd, struct dirent *out)` | `1` entry, `0` end, `-1` error |
 | 13 | `stat` | `int stat(const char *path, struct stat *out)` | `0`, or `-1` |
+| 32 | `chdir` | `int chdir(const char *path)` | `0`, or `-1` |
+| 33 | `getcwd` | `int getcwd(char *buf, size_t size)` | `0`, or `-1` |
 
 ## Notes per call
 
@@ -46,7 +48,8 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
   the program and runs it to completion in EL0 while the caller is suspended,
   then returns the (now-exited) child's pid. Call `wait(pid)` afterwards to reap
   it and collect its exit code. `name` is resolved to a filesystem path: a bare
-  name is looked up under `/bin`, an absolute path is used as-is (see
+  name is looked up under the boot volume's `/bin`; other names use the caller's
+  volume-aware path resolver (see
   [filesystem.md](filesystem.md)). `argv` entries are copied onto the child's
   stack and delivered as `main(argc, argv)`.
 - **`open`**: `flags` must be `O_RDONLY` (the filesystem is read-only). Works on
@@ -57,6 +60,19 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
 - **`readdir`**: returns one entry per call from a directory fd. Skips deleted
   entries, the volume label, and `.` / `..`. `name` is UTF-8.
 - **`stat`**: reports size and whether the path is a directory.
+- **`chdir`**: changes only the calling task's current directory. Supports
+  device/volume prefixes, current-volume absolute paths, relative paths, `.` and
+  `..`. The target must be a directory; failure preserves cwd. Children inherit
+  cwd at spawn and can change it independently.
+- **`getcwd`**: writes a NUL-terminated canonical path such as `boot:docs`, using
+  a unique volume label or the device slot when that label is ambiguous or
+  collides with another namespace name. The supplied byte capacity must include
+  the terminator; invalid or undersized buffers return `-1`. Returns `0` on
+  success, rather than a pointer.
+
+File paths for `open`, `stat`, `chdir` and explicit `spawn` paths use the same
+namespace rules; `/` selects the current volume's root. Syscall numbers 14 to
+31 belong to the scheduler/memory track; filesystem additions use 32 to 47.
 
 ## Structs and constants
 

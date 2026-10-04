@@ -171,7 +171,7 @@ def near(actual, expected, tolerance=8):
 PROMPT = rb"^\$ "
 
 
-def run(q, graphics=True, keyboard=False, repeat=0):
+def run(q, graphics=True, keyboard=False, repeat=0, multi_volume=False):
     """Yield (name, check) steps; each check raises Failure on error."""
 
     def boot():
@@ -205,6 +205,16 @@ def run(q, graphics=True, keyboard=False, repeat=0):
         q.expect(rb"long-filename \(LFN\)")
         q.expect(PROMPT)
     yield "cat reads a long-filename file", cat
+
+    def namespace():
+        q.send("nsprobe%s\r" % (" extras" if multi_volume else ""))
+        q.expect(rb"nsprobe: child cwd checked")
+        if multi_volume:
+            q.expect(rb"nsprobe: multi-volume checked")
+        q.expect(rb"nsprobe: namespace checked")
+        q.expect(rb"exited with 0")
+        q.expect(PROMPT)
+    yield "volume paths, cwd inheritance and retained file descriptors", namespace
 
     def debug_console():
         q.send("\x14")  # Ctrl-T
@@ -342,6 +352,7 @@ def main():
     parser.add_argument("--expect-root-failure", action="store_true", help="require a configured disk mount failure")
     parser.add_argument("--keyboard", action="store_true", help="inject keys through a VirtIO keyboard")
     parser.add_argument("--disk", help="external bare FAT32 or MBR FAT32 disk for virt")
+    parser.add_argument("--multi-volume", action="store_true", help="require scratch BOOT/EXTRAS partitions")
     parser.add_argument("--disk-writable", action="store_true", help="enable raw writes to the supplied test disk")
     parser.add_argument("--no-graphics", action="store_true")
     parser.add_argument("--kernel")
@@ -363,6 +374,8 @@ def main():
         parser.error("--repeat must be between 0 and 2000")
     if args.el2 and args.machine != "virt":
         parser.error("--el2 requires virt")
+    if args.multi_volume and not args.disk:
+        parser.error("--multi-volume requires --disk")
     if args.expect_root_failure and not args.disk:
         parser.error("--expect-root-failure requires --disk")
 
@@ -398,7 +411,7 @@ def main():
             return
         if args.keyboard:
             q.expect(rb"\[virtio-input\] keyboard ready")
-        for name, check in run(q, not args.no_graphics, args.keyboard, args.repeat):
+        for name, check in run(q, not args.no_graphics, args.keyboard, args.repeat, args.multi_volume):
             try:
                 check()
                 print("ok   - " + name)

@@ -3,6 +3,7 @@
 #include "fs/fat32.h"
 #include "mm.h"
 #include "mm/frame_alloc.h"
+#include "mm/kmalloc.h"
 #include "lib/printf.h"
 
 static task_t tasks[MAX_TASKS];
@@ -122,47 +123,32 @@ static bool build_args(void *stack, int argc, char *const argv[],
     return true;
 }
 
-// Resolve a program name to a filesystem path: an absolute path is used as-is,
-// a bare name is looked up under /bin. Returns false if it would not fit.
-static bool resolve_program_path(const char *name, char *out, size_t cap) {
-    size_t o = 0;
-    if (name[0] != '/') {
-        const char *prefix = "/bin/";
-        for (size_t i = 0; prefix[i] != '\0'; i++) {
-            if (o + 1 >= cap) {
-                return false;
-            }
-            out[o++] = prefix[i];
-        }
-    }
-    for (size_t i = 0; name[i] != '\0'; i++) {
-        if (o + 1 >= cap) {
-            return false;
-        }
-        out[o++] = name[i];
-    }
-    out[o] = '\0';
-    return true;
-}
-
 // Read a program off the filesystem and load it into memory via elf_load. The
 // file is read into a scratch buffer, which elf_load copies out of, so the
 // buffer is freed before returning. Returns 0, or -1 on any failure (a missing
 // file is reported silently so the caller -- e.g. the shell -- can react).
 static int load_program(const char *name, struct loaded_prog *lp) {
-    char path[128];
-    if (!resolve_program_path(name, path, sizeof(path))) {
-        return -1;
+    fs_cwd_t *initial = NULL;
+    const fs_cwd_t *cwd = current != NULL ? &current->cwd : NULL;
+    if (cwd == NULL) {
+        initial = kmalloc(sizeof(*initial));
+        if (initial == NULL || fs_boot_cwd(initial) != 0) {
+            kfree(initial);
+            return -1;
+        }
+        cwd = initial;
     }
     fat32_file_t f;
-    if (fat32_open(path, &f) != 0 || f.size == 0) {
+    int rc = fs_program_open(cwd, name, &f);
+    kfree(initial);
+    if (rc != 0 || f.size == 0) {
         return -1;
     }
 
     size_t npages = ((size_t)f.size + PAGE_SIZE - 1) / PAGE_SIZE;
     uint8_t *buf = frame_alloc_pages(npages);
     if (buf == NULL) {
-        printf("spawn: out of memory reading '%s'\n", path);
+        printf("spawn: out of memory reading '%s'\n", name);
         return -1;
     }
     uint32_t got = 0;
@@ -170,16 +156,16 @@ static int load_program(const char *name, struct loaded_prog *lp) {
         long n = fat32_read(&f, buf + got, f.size - got);
         if (n <= 0) {
             frame_free_pages(buf, npages);
-            printf("spawn: read('%s') failed\n", path);
+            printf("spawn: read('%s') failed\n", name);
             return -1;
         }
         got += (uint32_t)n;
     }
 
-    int rc = elf_load(buf, f.size, lp);
+    rc = elf_load(buf, f.size, lp);
     frame_free_pages(buf, npages);
     if (rc != 0) {
-        printf("spawn: elf_load('%s') failed: %d\n", path, rc);
+        printf("spawn: elf_load('%s') failed: %d\n", name, rc);
         return -1;
     }
     return 0;
@@ -206,6 +192,14 @@ int task_spawn(const char *name, int argc, char *const argv[]) {
         return -1;
     }
     t->parent = current;
+    if (current != NULL) {
+        t->cwd = current->cwd;
+    } else if (fs_boot_cwd(&t->cwd) != 0) {
+        task_free(t);
+        frame_free_pages(lp.image, lp.image_pages);
+        frame_free(stack);
+        return -1;
+    }
     t->entry = lp.entry;
     t->image = lp.image;
     t->image_pages = lp.image_pages;
