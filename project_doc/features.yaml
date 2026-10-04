@@ -238,9 +238,11 @@ categories:
         milestone: 8
       - id: partitions
         name: MBR partitions
-        status: planned
-        description: Each partition of a disk is mounted as its own device.
+        status: completed
+        description: Bounded primary FAT32 partition devices discovered from MBR disks.
         milestone: 8
+        completed: 2026-10-04
+        prs: [46]
       - id: fat32-write
         name: FAT32 write
         status: planned
