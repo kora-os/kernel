@@ -747,6 +747,12 @@ long fat32_seek(fat32_file_t *file, long offset, int whence) {
     return file->pos;
 }
 
+unsigned fat32_handle_count(const fat32_volume_t *vol) {
+    unsigned count = 0;
+    for (const fat32_inode_t *inode = vol->inodes; inode; inode = inode->next) count += inode->refs;
+    return count;
+}
+
 bool fat32_entry_busy(fat32_volume_t *vol, uint32_t sector, uint16_t offset) {
     for (fat32_inode_t *inode = vol->inodes; inode; inode = inode->next) {
         if (inode->sector == sector && inode->offset == offset) return true;

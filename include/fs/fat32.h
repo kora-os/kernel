@@ -110,5 +110,6 @@ int fat32_truncate(fat32_file_t *file, uint32_t size);
 int fat32_sync_volume(fat32_volume_t *volume);
 // Mutation guards for namespace operations: handles and cwd/assign pins use
 // the same reference-counted inode objects.
+unsigned fat32_handle_count(const fat32_volume_t *volume);
 bool fat32_entry_busy(fat32_volume_t *volume, uint32_t sector, uint16_t offset);
 bool fat32_directory_busy(fat32_volume_t *volume, uint32_t first_cluster);
