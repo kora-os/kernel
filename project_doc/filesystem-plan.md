@@ -32,9 +32,8 @@ volume root, inherited by children. No additional filesystem locks or blocking
 waits are introduced. FAT32_NAME_MAX remains 765 bytes.
 
 The user selected one df0/df1/... device-slot sequence across all backend types.
-Remaining proposed defaults pending answers: no synthetic unified tree, getcwd
-uses a unique volume label with device fallback, and the listing command is
-volumes.
+No synthetic unified tree is provided. getcwd uses a unique volume label with
+device fallback, and the listing command is volumes.
 
 ## Verification
 
