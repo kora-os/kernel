@@ -57,8 +57,18 @@ controller family, so the Pi 3 build leaves out the xHCI/PCIe/device-tree
 sources and the Pi 4 build leaves out the DWC2 (`dwhci*`) sources.
 Circle's USB device factory is built keyboard-only via `-DEXCLUDE_USB_*` for
 every other class (mouse, gamepads, storage, audio, net, serial, printer,
-bluetooth, midi, touchscreen), so their drivers need not be vendored. No
-vendored source file is edited in place.
+bluetooth, midi, touchscreen), so their drivers need not be vendored.
+
+Circle is built `-mgeneral-regs-only -DKORAOS_INTEGER_ONLY`, like the rest of
+the kernel: FP/SIMD registers belong to EL0 tasks, and Circle code runs in
+interrupt handlers that can interrupt any task.
+
+## Local changes
+
+- `lib/string.cpp`: the `%f` case of `CString::FormatV`, its `double` local
+  and `CString::ftoa` are wrapped in `#ifndef KORAOS_INTEGER_ONLY`, the only
+  floating point in the vendored tree (the USB code never formats floats).
+  Re-apply when updating the pin.
 
 ## Updating the pin
 

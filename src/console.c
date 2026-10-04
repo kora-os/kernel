@@ -6,8 +6,10 @@
 #include "lib/printf.h"
 #include "lib/string.h"
 #include "mini_uart.h"
+#include "mm.h"
 #include "mm/frame_alloc.h"
 #include "mm/kmalloc.h"
+#include "proc/task.h"
 #include "utils.h"
 
 void console_init(void) {
@@ -28,6 +30,7 @@ void console_cmd_help(const char *args) {
   uart_puts("  irqs - Show interrupt counters and the system tick\n");
   uart_puts("  heap - Show kernel heap and page pool usage\n");
   uart_puts("  heaptest [rounds] - Stress the kernel heap (default 2000 rounds)\n");
+  uart_puts("  tasks - List tasks with their state and kernel stack use\n");
   uart_puts("Ctrl-T switches the serial line between this console and the\n");
   uart_puts("screen terminal (the shell).\n");
 }
@@ -104,6 +107,22 @@ void console_cmd_heaptest(const char *args) {
          (unsigned)seed, (unsigned)free_before, (unsigned)frame_alloc_free_count());
 }
 
+static void print_task(const task_t *t, void *ctx) {
+  (void)ctx;
+  static const char *const states[] = {"unused  ", "runnable", "blocked ", "exited  "};
+  printf("  %3d  %s  %5u  %s\n", t->pid, states[t->state],
+         (unsigned)task_kstack_peak(t), t->name);
+}
+
+// Every task with its state and kernel stack high-water mark (bytes).
+void console_cmd_tasks(const char *args) {
+  (void)args;
+  printf("  pid  state     stack  name\n");
+  task_for_each(print_task, NULL);
+  printf("kernel stack peak: %u of %u bytes\n", (unsigned)task_kstack_peak_max(),
+         (unsigned)(KSTACK_PAGES * PAGE_SIZE));
+}
+
 console_command_t commands[] = {
     {"help", "Show available commands", console_cmd_help},
     {"get_el", "Get the current Exception Level", console_cmd_get_el},
@@ -111,6 +130,7 @@ console_command_t commands[] = {
     {"irqs", "Show interrupt counters and the system tick", console_cmd_irqs},
     {"heap", "Show kernel heap and page pool usage", console_cmd_heap},
     {"heaptest", "Stress the kernel heap", console_cmd_heaptest},
+    {"tasks", "List tasks and kernel stack use", console_cmd_tasks},
     {NULL, NULL, NULL},
 };
 

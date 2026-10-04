@@ -373,19 +373,19 @@ function(add_circle_library NAME BOARD)
         -ffreestanding
         -nostdlib
         -fno-builtin
-        -fno-stack-protector
-        # NOTE: unlike the rest of the kernel, Circle is NOT built -mgeneral-regs-only:
-        # CString unconditionally compiles a floating-point %f path, and clang may
-        # emit NEON elsewhere. EL1 FP/NEON access must be enabled before any Circle
-        # code runs (done in 3b-ii); the USB paths themselves never format floats.
+        # Integer-only, like the rest of the kernel: FP/SIMD registers belong to
+        # EL0 tasks (lazily context switched), and Circle runs in interrupt
+        # handlers that may interrupt any task. KORAOS_INTEGER_ONLY drops
+        # CString's %f path, the one use of floating point (see PROVENANCE.md).
+        -mgeneral-regs-only
+        -DKORAOS_INTEGER_ONLY
         -nostdinc++
         -fno-exceptions
         -fno-rtti
         -fno-threadsafe-statics
         -std=c++17
         -DAARCH=64
-        # No C standard library underneath Circle here; this also strips CString's
-        # floating-point %f path, so the kernel stays integer-only (-mgeneral-regs-only).
+        # No C standard library underneath Circle here.
         -DSTDLIB_SUPPORT=0
         # Build only the HID keyboard device driver from Circle's USB device factory;
         # every other class (mouse, gamepads, storage, audio, net, ...) is excluded so

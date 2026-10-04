@@ -40,6 +40,8 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
         koraos_add_user_program(${name} "${USER_DIR}/${name}.c")
     endforeach()
     koraos_add_user_program(allocprobe "${SOURCE_ROOT}/tests/user/allocprobe.c")
+    koraos_add_user_program(fpprobe "${SOURCE_ROOT}/tests/user/fpprobe.c"
+        "${SOURCE_ROOT}/tests/user/fpregs.S")
     koraos_add_user_program(nsprobe "${SOURCE_ROOT}/tests/user/nsprobe.c")
 
     # Retain the previous --bindir glob installation order in /bin.
