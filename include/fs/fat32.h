@@ -60,6 +60,7 @@ typedef struct {
 int fat32_mount(blkdev_t *dev, fat32_volume_t **out);
 void fat32_unmount(fat32_volume_t *volume);
 const char *fat32_label(const fat32_volume_t *volume);
+bool fat32_is_read_only(const fat32_volume_t *volume);
 int fat32_lookup(fat32_volume_t *volume, const char *path, fat32_dirent_t *out);
 
 // Open a file by absolute path. Returns 0, or FS_ERR_ISDIR if the path names a

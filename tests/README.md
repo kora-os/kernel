@@ -2,7 +2,7 @@
 
 ## Host unit tests (`tests/host/`)
 
-Pure-logic kernel code (code that does not touch hardware registers) is compiled
+Pure-logic kernel and shell parser code (code that does not touch hardware registers) is compiled
 with the **host** compiler and run directly on your machine, under
 AddressSanitizer and UndefinedBehaviorSanitizer. No cross toolchain, QEMU or
 Raspberry Pi is needed, and a run takes a few seconds.
@@ -34,7 +34,8 @@ Current suites:
 |------|--------|
 | `libk_malloc_test.c` | `user/libk/malloc.c` (built with `LIBK_HOST_TEST`, which renames it `libk_malloc` and so on): alignment, neighbour separation, coalescing, pool growth and release, direct page-run blocks, bad and double frees, `realloc`/`calloc`, exhaustion, a 200 000-round stress with `kheap_info` consistency checks |
 | `user_mem_test.c` | `src/proc/user_mem.c`: per-task page-run records behind `alloc_pages`/`free_pages`, foreign and double frees, reclaim on teardown, no leaks on failure |
-| `filesystem_test.c` | `src/fs/fat32.c` and `src/fs/namespace.c` on mtools-made volumes: independent geometry/caches, root/BPB labels, duplicate labels/device collisions, relative paths, cwd isolation, retained handles, malformed geometry/chains/LFN, allocation and I/O errors |
+| `shell_input_test.c` | Real EL0 shell parser with renamed syscall stubs: fragmented reads, maximal complete lines, oversized-line draining, next-command preservation, 16/17-token boundary, terminated arguments and maximal assign target |
+| `filesystem_test.c` | `src/fs/fat32.c` and `src/fs/namespace.c` on mtools-made volumes: independent geometry/caches, root/BPB labels, duplicate labels/device collisions, relative paths, cwd isolation, retained handles, malformed geometry/chains/LFN, allocation and I/O errors, assign snapshots/replacement/removal/capacity, c-only command lookup and shadowed-label cwd |
 | `blkdev_test.c` | `src/fs/blkdev.c`: bare FAT32 and mixed MBR discovery, hidden FAT32 types, invalid/range/overlap tables, partition-relative bounded read/write/flush, read-only and unsupported I/O, registry capacity |
 | `kmalloc_test.c` | `src/mm/kmalloc.c`, `src/mm/kmalloc_stress.c`: alignment, zeroing, cache-line separation, block reuse, slab release, page runs, over-aligned blocks, exhaustion, invalid and double frees, balanced IRQ masking, seeded stress |
 | `term_test.c` | `src/video/term.c`: autowrap, scrollback and its view, scroll regions, insert/delete/erase, alternate screen, status replies, colours (16/256/24-bit, bce), UTF-8 and DEC line drawing, tabs, origin mode, cursor style/visibility, OSC, REP |
@@ -96,8 +97,10 @@ tests/run-qemu-smoke.py --target qemu_virt --keyboard --disk build/userfs/aarch6
 
 The test checks the boot-time kernel heap self-test, boots to the ELF shell,
 runs filesystem/argv/exit-code checks plus an EL0 namespace probe (child cwd
-inheritance and isolation, failed path handling, and descriptors retained across
-chdir), switches to the serial debug console,
+inheritance and isolation, failed path handling, descriptors retained across
+chdir, volume/assign enumeration and assign syscall updates), checks shell
+`cd`/`pwd`/`volumes`/`assign`, current-directory `ls`, and excess-argument
+rejection followed by a valid command, switches to the debug console,
 verifies timer/UART IRQ progress, runs `heaptest` (seeded kernel heap stress)
 and checks that `heap` reports no leaks or bad frees, and checks terminal
 colors and graphics pixels using QEMU screenshots. Virt optionally injects
@@ -132,7 +135,11 @@ tests/run-qemu-smoke.py --target qemu_virt --disk build/multi-root.img --multi-v
 ```
 
 The fixture copies the shared image, relabels its copies as BOOT and EXTRAS,
-forces stale BPB labels, and verifies the source SHA256 remains unchanged.
+forces stale BPB labels, gives EXTRAS distinct README content and a private
+`extrahello` command, and verifies the source SHA256 remains unchanged. The
+profile assigns `c:` to EXTRAS while cwd remains on BOOT, executes `extrahello`
+and `c:/hello`, then verifies missing or removed `c:` does not fall back to
+BOOT `/bin`. It restores `c:` before subsequent checks.
 
 `--expect-root-failure --disk <zeroed-image>` requires a selected VirtIO disk,
 failed mount and failed init load, so silent ramdisk fallback cannot pass.
@@ -145,7 +152,9 @@ userland compilation or filesystem generation. The all-target job builds four
 Debug kernels, stages both hardware Release payloads into a temporary directory,
 creates a FAT32 SD image, and runs raspi3b smoke. Separate virt profiles cover
 embedded graphics, 128 MiB external disk/keyboard, primary MBR boot, two labeled
-partitions with namespace navigation, 64 MiB serial-only and EL2 entry. UART/screenshots are uploaded on failure. Pure host sanitizer suites stay
+partitions with namespace navigation and assign command lookup, 64 MiB
+serial-only and EL2 entry. UART/screenshots are uploaded on failure. Pure host
+sanitizer suites stay
 independent of the producer and kernel jobs.
 
 QEMU cannot validate real Pi USB, HDMI, caches or boot firmware. Hardware testing

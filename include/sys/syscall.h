@@ -26,6 +26,9 @@
 // Slots 16 through 31 are reserved for task and memory work.
 #define SYS_chdir   32
 #define SYS_getcwd  33
+#define SYS_volume_info 34
+#define SYS_assign      35
+#define SYS_assign_info 36
 
 // Dispatch a syscall described by a trap frame from EL0. The return value is
 // written back into the frame's x0.
