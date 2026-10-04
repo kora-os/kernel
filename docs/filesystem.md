@@ -9,7 +9,8 @@ independent binaries read from the filesystem, not embedded in the kernel image.
 
 Pi hardware and raspi3b use a **ramdisk**: a FAT32 image built on the host and
 embedded in the kernel. QEMU virt can instead mount one attached VirtIO MMIO
-block disk. No SD/eMMC driver exists yet.
+block disk. Both backends register together; FAT32 currently mounts only the
+preferred boot partition. No SD/eMMC driver exists yet.
 
 ```
 create-fs-image.sh  ──(mtools)──▶  build/userfs/aarch64/koraos.img  ──(.incbin)──▶  kernel image
@@ -18,7 +19,7 @@ create-fs-image.sh  ──(mtools)──▶  build/userfs/aarch64/koraos.img  �
 ```
 
 - [`create-fs-image.sh`](../create-fs-image.sh) formats a bare FAT32 volume
-  (BPB at LBA 0, no MBR/partition table, the simplest thing to parse) and
+  (BPB at LBA 0, no MBR/partition table) and
   populates it. It requires **mtools** (`mformat`, `mcopy`); see the
   [developer guide](developer-guide.md).
 - Everything under [`fsroot/`](../fsroot) is mirrored into the image root.
@@ -49,9 +50,12 @@ QEMU and real hardware with no extra media or QEMU flags.
 Each layer has a clean seam:
 
 - **Block device** ([`include/fs/blkdev.h`](../include/fs/blkdev.h)), a
-  `blkdev_t` with a `read` function pointer over 512-byte sectors. Backends
-  include the in-memory ramdisk and VirtIO MMIO disk; a future SD/eMMC driver can plug
-  itself here later **without any change to the FAT32 code above**.
+  `blkdev_t` with read/write/flush operations over 512-byte sectors. A registry
+  holds up to eight physical backends and four FAT32 primary partitions per
+  backend. Ramdisk and VirtIO register with an explicit backend type; future
+  SD/eMMC and USB backends use the same registration API. Each partition exposes
+  a bounded `blkdev_t` view whose LBA zero is its first sector. Bounds checks
+  happen before transport I/O, so reads and writes cannot cross a partition.
 - **FAT32** ([`include/fs/fat32.h`](../include/fs/fat32.h)), a single mounted
   volume, absolute paths, directory traversal, file reads, and stat. No VFS.
 - **File syscalls + per-task fd table**, see [syscalls.md](syscalls.md).
@@ -86,10 +90,11 @@ Each layer has a clean seam:
 ## Limitations and deferred work
 
 - **Read-only.** No create, write, append, delete, or directory modification.
-- **Pi storage is ramdisk only.** virt also supports a bare FAT32 VirtIO disk.
+- **Pi storage is ramdisk only.** virt supports bare FAT32 and primary MBR
+  FAT32 partitions on a VirtIO disk.
   No SD/eMMC driver exists.
-- **No partition table.** The image is a bare FAT32 volume; MBR/GPT parsing is
-  not implemented.
+- **Primary MBR only.** GPT and extended/logical partitions are unsupported.
+  The generated shared userfs remains a bare FAT32 volume.
 - **No VFS.** One filesystem, one mount, a thin file/fd layer.
 - **Case-insensitive matching is ASCII-only.** Non-ASCII case folding is not
   attempted.
@@ -103,8 +108,9 @@ Each layer has a clean seam:
 KORA_QEMU_DISK=build/userfs/aarch64/koraos.img ./run-qemu.sh --target qemu_virt
 ```
 
-Attach one bare FAT32 volume (BPB at sector zero, without MBR/GPT). The image
-contains `/bin/init` and `/bin/shell`. The launcher selects modern VirtIO MMIO;
+Attach a bare FAT32 volume or a disk with primary MBR FAT32 partitions. The
+first supported FAT32 partition is the boot root and must contain `/bin/init`
+and `/bin/shell`. The launcher selects modern VirtIO MMIO;
 legacy transport is unsupported. Media defaults to read-only; set
 `KORA_QEMU_DISK_READONLY=off` on a disposable image for raw block experiments.
 The block API supports `blk_read`, `blk_write` and negotiated `blk_flush`.
@@ -112,6 +118,39 @@ FAT32 and file syscalls remain read-only. The driver's capacity is bounded by
 the current 32-bit sector API. Missing disks use the embedded root; a configured
 broken disk does not silently fall back. Timed-out devices retain DMA buffers
 and reject subsequent requests until reboot.
+
+## Block registry and primary MBR partitions
+
+`blkdev_register(backend, type)` retains a physical backend and discovers its
+mountable partitions. Backends must remain alive for the registry lifetime.
+`blkdev_device_get` enumerates physical devices, including failed probes;
+`blkdev_partition_get` enumerates supported views and their parent, start LBA,
+and original MBR entry number. `blkdev_partition_io` returns the I/O view and
+`blkdev_root` identifies the preferred boot view. Registration is synchronous;
+filesystem operations need no additional locks under the kernel lock.
+
+A bare FAT32 boot sector is recognized by its jump and BPB geometry. Otherwise
+the sector must contain a signed MBR. FAT32 primary types `0x0b` and `0x0c`,
+plus hidden variants `0x1b` and `0x1c`, produce views in table order. Occupied
+entries must have valid boot indicators, nonzero starts and lengths, fit the
+physical disk, and not overlap, including entries for other filesystems.
+Malformed tables produce no partial views. Other primary filesystems are
+ignored; protective GPT and extended entries reject the disk as unsupported.
+A configured VirtIO disk with no usable boot view fails without ramdisk fallback.
+The embedded ramdisk remains registered for later multi-volume mounting.
+
+To test MBR boot without altering the shared userfs artifact:
+
+```bash
+tests/create-mbr-image.py --output build/mbr-root.img build/userfs/aarch64/koraos.img
+tests/run-qemu-smoke.py --target qemu_virt --disk build/mbr-root.img
+```
+
+The helper accepts up to four bare FAT32 source images, aligns partitions at
+2048-sector boundaries, and atomically publishes a separate scratch image.
+It preserves source images and never updates the shared producer artifact.
+FAT32 remains read-only; namespace names and mounting all views follow in the
+next milestone step.
 
 ## Shared producer and dependencies
 

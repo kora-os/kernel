@@ -2,43 +2,77 @@
 
 #include "common.h"
 
-// Block device layer: a linear array of fixed-size sectors underneath the
-// filesystem. The embedded ramdisk and VirtIO block device share this seam;
-// filesystem code does not need to know the underlying transport.
-
 #define BLK_SECTOR_SIZE 512u
+#define BLKDEV_MAX_DEVICES 8u
+#define BLKDEV_MAX_PARTITIONS (BLKDEV_MAX_DEVICES * 4u)
 
-// Negative error codes, following the ELF_ERR_* convention.
-#define BLK_ERR_NODEV (-1)  // no block device registered
-#define BLK_ERR_RANGE (-2)  // requested sector range is outside the device
+#define BLK_ERR_NODEV (-1)
+#define BLK_ERR_RANGE (-2)
 #define BLK_ERR_IO (-3)
 #define BLK_ERR_RO (-4)
 #define BLK_ERR_UNSUPPORTED (-5)
 #define BLK_ERR_INVALID (-6)
 #define BLK_ERR_BUSY (-7)
 
+// Backends expose physical, 512-byte sectors. Registry partition views expose
+// the same interface with partition-relative LBAs. Backends must remain alive
+// for the lifetime of the registry; registration does not copy backend state.
 typedef struct blkdev {
-    // Read `count` sectors starting at `lba` into `buf` (count * BLK_SECTOR_SIZE
-    // bytes). Returns 0 on success or a negative BLK_ERR_* code.
     int (*read)(struct blkdev *dev, uint32_t lba, uint32_t count, void *buf);
-    uint32_t sector_count;  // total number of sectors on the device
-    void *ctx;              // backend-private data
+    uint32_t sector_count;
+    void *ctx;
     int (*write)(struct blkdev *dev, uint32_t lba, uint32_t count, const void *buf);
     int (*flush)(struct blkdev *dev);
     bool read_only;
 } blkdev_t;
 
-// Select the target block backend before filesystem mount. With no attached
-// VirtIO disk use the embedded ramdisk; a configured broken disk stays failed.
+typedef enum blkdev_type {
+    BLKDEV_RAMDISK,
+    BLKDEV_VIRTIO,
+    BLKDEV_SD,
+    BLKDEV_USB,
+} blkdev_type_t;
+
+typedef struct blkdev_device {
+    blkdev_t *backend;
+    blkdev_type_t type;
+    unsigned first_partition;
+    unsigned partition_count;
+    int probe_error;
+} blkdev_device_t;
+
+typedef struct blkdev_partition {
+    blkdev_t dev;
+    const blkdev_device_t *device;
+    uint32_t start_lba;
+    unsigned mbr_index; // 1..4 for an MBR primary, 0 for a bare FAT32 volume
+    uint8_t mbr_type;
+} blkdev_partition_t;
+
+// Boot/test reset only. The kernel serializes all filesystem operations.
+void blkdev_registry_reset(void);
+// Registers a physical backend and probes bare FAT32 or primary MBR FAT32
+// partitions. Invalid media stays registered with probe_error and no views.
+// GPT and extended partitions are unsupported. Duplicate backends are rejected.
+int blkdev_register(blkdev_t *backend, blkdev_type_t type);
+unsigned blkdev_device_count(void);
+const blkdev_device_t *blkdev_device_get(unsigned index);
+unsigned blkdev_partition_count(void);
+const blkdev_partition_t *blkdev_partition_get(unsigned index);
+blkdev_t *blkdev_partition_io(unsigned index);
+
+// All transport calls pass through bounds and argument checks, including views.
+int blkdev_read(blkdev_t *dev, uint32_t lba, uint32_t count, void *buf);
+int blkdev_write(blkdev_t *dev, uint32_t lba, uint32_t count, const void *buf);
+int blkdev_flush(blkdev_t *dev);
+
+// Register embedded ramdisk and optional VirtIO. Until multi-volume FAT32 lands,
+// legacy calls use the first external partition, or embedded root if absent.
+// A configured broken external root never silently falls back to the ramdisk.
 void blkdev_init(void);
-
-// Read from the active block device. Returns 0 or a negative BLK_ERR_* code.
+blkdev_t *blkdev_root(void);
 int blk_read(uint32_t lba, uint32_t count, void *buf);
-
-// Raw device writes are optional; FAT32 remains read-only.
 int blk_write(uint32_t lba, uint32_t count, const void *buf);
 int blk_flush(void);
 bool blk_is_read_only(void);
-
-// Total sectors on the active device, or 0 if none is registered.
 uint32_t blk_sector_count(void);

@@ -47,6 +47,7 @@ run_test() {
     fi
 }
 
+run_test blkdev src/fs/blkdev.c
 run_test term src/video/term.c
 run_test printf src/lib/printf.c
 run_test virt src/platform/virt.c

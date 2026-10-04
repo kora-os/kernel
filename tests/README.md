@@ -30,8 +30,18 @@ Current suites:
 
 | Test | Covers |
 |------|--------|
+| `blkdev_test.c` | `src/fs/blkdev.c`: bare FAT32 and mixed MBR discovery, hidden FAT32 types, invalid/range/overlap tables, partition-relative bounded read/write/flush, read-only and unsupported I/O, registry capacity |
 | `kmalloc_test.c` | `src/mm/kmalloc.c`, `src/mm/kmalloc_stress.c`: alignment, zeroing, cache-line separation, block reuse, slab release, page runs, over-aligned blocks, exhaustion, invalid and double frees, balanced IRQ masking, seeded stress |
 | `term_test.c` | `src/video/term.c`: autowrap, scrollback and its view, scroll regions, insert/delete/erase, alternate screen, status replies, colours (16/256/24-bit, bce), UTF-8 and DEC line drawing, tabs, origin mode, cursor style/visibility, OSC, REP |
+
+The scratch MBR fixture suite is independent of cross compilation and QEMU:
+
+```bash
+tests/run-mbr-image-tests.py
+```
+
+It checks aligned multi-partition layout, byte-for-byte source preservation,
+invalid-input rejection and preservation of an existing output on failure.
 
 ## Feature status file
 
@@ -90,6 +100,15 @@ remains a deprecated alias for target selection. `--no-graphics` omits ramfb on
 virt and tests serial fallback. `--disk-writable` negotiates writable test media;
 FAT32 itself remains read-only.
 
+An external disk may contain a bare FAT32 volume or primary MBR FAT32
+partitions. The first supported partition supplies the boot root. To exercise
+partition offsets using a separate scratch image:
+
+```bash
+tests/create-mbr-image.py --output build/mbr-root.img build/userfs/aarch64/koraos.img
+tests/run-qemu-smoke.py --target qemu_virt --disk build/mbr-root.img --repeat 64
+```
+
 `--expect-root-failure --disk <zeroed-image>` requires a selected VirtIO disk,
 failed mount and failed init load, so silent ramdisk fallback cannot pass.
 
@@ -100,7 +119,8 @@ AArch64 artifact. Consumers download it and use `--userfs-dir` without invoking
 userland compilation or filesystem generation. The all-target job builds four
 Debug kernels, stages both hardware Release payloads into a temporary directory,
 creates a FAT32 SD image, and runs raspi3b smoke. Separate virt profiles cover
-embedded graphics, 128 MiB external disk/keyboard, 64 MiB serial-only and EL2
+embedded graphics, 128 MiB external disk/keyboard, primary MBR boot,
+64 MiB serial-only and EL2
 entry. UART/screenshots are uploaded on failure. Pure host sanitizer suites stay
 independent of the producer and kernel jobs.
 
