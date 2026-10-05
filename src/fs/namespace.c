@@ -608,3 +608,84 @@ int fs_program_open(const fs_cwd_t *cwd, const char *name, fat32_file_t *out) {
     kfree(path);
     return rc;
 }
+
+// Resolve an existing parent while retaining the caller's exact new leaf
+// spelling. A qualified bare leaf such as extras:new starts at that root.
+static int resolve_new_leaf(const fs_cwd_t *cwd, const char *path, fs_cwd_t *out) {
+    if (cwd == NULL || path == NULL || out == NULL) return FS_ERR_INVAL;
+    size_t len = 0, separator = 0;
+    bool found = false, slash_seen = false;
+    while (len < FS_QUALIFIED_PATH_MAX && path[len]) {
+        if (path[len] == '/') { separator = len; found = true; slash_seen = true; }
+        else if (path[len] == ':' && !slash_seen) { separator = len; found = true; }
+        len++;
+    }
+    if (len == 0 || len == FS_QUALIFIED_PATH_MAX) return FS_ERR_INVAL;
+    const char *leaf = found ? path + separator + 1 : path;
+    size_t leaf_len = len - (size_t)(leaf - path);
+    if (leaf_len == 0 || leaf_len > FAT32_NAME_MAX || strcmp(leaf, ".") == 0 ||
+        strcmp(leaf, "..") == 0) return FS_ERR_BADNAME;
+    char *parent = kmalloc(len + 2);
+    if (parent == NULL) return FS_ERR_IO;
+    if (!found) { parent[0] = '.'; parent[1] = 0; }
+    else {
+        size_t parent_len = path[separator] == ':' || separator == 0 ? separator + 1 : separator;
+        memcpy(parent, path, parent_len);
+        parent[parent_len] = 0;
+    }
+    fat32_dirent_t *entry = kmalloc(sizeof(*entry));
+    if (entry == NULL) { kfree(parent); return FS_ERR_IO; }
+    int rc = fs_resolve(cwd, parent, out, entry);
+    if (rc == 0 && !entry->is_dir) rc = FS_ERR_NOTDIR;
+    if (rc == 0) {
+        size_t used = (size_t)strlen(out->path);
+        if (used > 1) out->path[used++] = '/';
+        if (used + leaf_len >= FS_PATH_MAX) rc = FS_ERR_INVAL;
+        else memcpy(out->path + used, leaf, leaf_len + 1);
+    }
+    kfree(entry);
+    kfree(parent);
+    return rc;
+}
+
+int fs_open_flags(const fs_cwd_t *cwd, const char *path, uint32_t flags, fat32_file_t *out) {
+    fs_cwd_t *resolved = kmalloc(sizeof(*resolved));
+    if (resolved == NULL) return FS_ERR_IO;
+    int rc = flags & FAT32_O_CREAT ? resolve_new_leaf(cwd, path, resolved) :
+                                    fs_resolve(cwd, path, resolved, NULL);
+    if (rc == 0) rc = fat32_open_flags(resolved->volume, resolved->path, flags, out);
+    kfree(resolved);
+    return rc;
+}
+
+static int mutate_resolved(const fs_cwd_t *cwd, const char *path, unsigned operation) {
+    fs_cwd_t *resolved = kmalloc(sizeof(*resolved));
+    if (resolved == NULL) return FS_ERR_IO;
+    int rc = operation == 1 ? resolve_new_leaf(cwd, path, resolved) :
+                             fs_resolve(cwd, path, resolved, NULL);
+    if (rc == 0) {
+        if (operation == 0) rc = fat32_unlink(resolved->volume, resolved->path);
+        else if (operation == 1) rc = fat32_mkdir(resolved->volume, resolved->path);
+        else rc = fat32_rmdir(resolved->volume, resolved->path);
+    }
+    kfree(resolved);
+    return rc;
+}
+
+int fs_unlink(const fs_cwd_t *cwd, const char *path) { return mutate_resolved(cwd, path, 0); }
+int fs_mkdir(const fs_cwd_t *cwd, const char *path) { return mutate_resolved(cwd, path, 1); }
+int fs_rmdir(const fs_cwd_t *cwd, const char *path) { return mutate_resolved(cwd, path, 2); }
+
+int fs_rename(const fs_cwd_t *cwd, const char *source, const char *destination) {
+    struct rename_locations {
+        fs_cwd_t source;
+        fs_cwd_t destination;
+    } *s = kmalloc(sizeof(*s));
+    if (s == NULL) return FS_ERR_IO;
+    int rc = fs_resolve(cwd, source, &s->source, NULL);
+    if (rc == 0) rc = resolve_new_leaf(cwd, destination, &s->destination);
+    if (rc == 0 && s->source.volume != s->destination.volume) rc = FS_ERR_XDEV;
+    if (rc == 0) rc = fat32_rename(s->source.volume, s->source.path, s->destination.path);
+    kfree(s);
+    return rc;
+}

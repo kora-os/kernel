@@ -31,13 +31,18 @@
 #define FS_ERR_NOSPC    (-10) // no free data clusters
 #define FS_ERR_UNSUPPORTED (-11) // operation or durable flush unavailable
 #define FS_ERR_BUSY     (-12) // live handles or directory pins
+#define FS_ERR_EXISTS   (-13) // destination already exists
+#define FS_ERR_NOTEMPTY (-14) // directory contains children
+#define FS_ERR_BADNAME  (-15) // invalid FAT filename or UTF-8
+#define FS_ERR_XDEV     (-16) // namespace operation crosses volumes
 
 #define FAT32_O_RDONLY 0u
 #define FAT32_O_WRONLY 1u
 #define FAT32_O_RDWR   2u
-#define FAT32_O_CREAT  0x100u // reserved for namespace operations
+#define FAT32_O_CREAT  0x100u
 #define FAT32_O_TRUNC  0x200u
 #define FAT32_O_APPEND 0x400u
+#define FAT32_O_EXCL   0x800u
 
 typedef struct fat32_volume fat32_volume_t;
 typedef struct fat32_inode fat32_inode_t;
@@ -63,6 +68,10 @@ typedef struct {
     uint8_t attributes;
     uint32_t entry_sector; // short entry location; root uses 0xffffffff
     uint16_t entry_offset;
+    uint32_t parent_cluster;
+    uint32_t entry_index;
+    uint8_t lfn_slots;
+    char short_name[13]; // ASCII 8.3 alias for path matching
 } fat32_dirent_t;
 
 // Result of fat32_stat().
@@ -98,7 +107,7 @@ int fat32_readdir(fat32_file_t *dir, fat32_dirent_t *out);
 // Stat an absolute path (file or directory). Returns 0 or negative.
 int fat32_stat(fat32_volume_t *volume, const char *path, fat32_stat_t *out);
 
-// Existing-file mutation APIs. No create/unlink or writable syscall exposure yet.
+// File mutation APIs. Writable syscall exposure is deferred to step 9.3.
 // Append chooses the shared EOF on every write. Seeking cannot create holes.
 int fat32_open_flags(fat32_volume_t *volume, const char *path, uint32_t flags,
                      fat32_file_t *out);
@@ -113,3 +122,10 @@ int fat32_sync_volume(fat32_volume_t *volume);
 unsigned fat32_handle_count(const fat32_volume_t *volume);
 bool fat32_entry_busy(fat32_volume_t *volume, uint32_t sector, uint16_t offset);
 bool fat32_directory_busy(fat32_volume_t *volume, uint32_t first_cluster);
+
+// Namespace mutations use absolute volume-local paths. Existing destinations
+// are never overwritten; case-only rename of the same entry is supported.
+int fat32_unlink(fat32_volume_t *volume, const char *path);
+int fat32_mkdir(fat32_volume_t *volume, const char *path);
+int fat32_rmdir(fat32_volume_t *volume, const char *path);
+int fat32_rename(fat32_volume_t *volume, const char *source, const char *destination);

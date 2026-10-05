@@ -197,7 +197,7 @@ static void readonly_and_invalid(void) {
     CHECK(fat32_truncate(&f, 0) == FS_ERR_RO, "read-only truncate rejected");
     CHECK(fat32_write(&f, "x", 1) == FS_ERR_RO && writes == 0, "read-only handle performs no write I/O");
     fat32_close(&f);
-    CHECK(fat32_open_flags(v, "/missing", FAT32_O_CREAT | FAT32_O_WRONLY, &f) < 0, "create unsupported");
+    CHECK(fat32_open_flags(v, "/missing", FAT32_O_CREAT | FAT32_O_WRONLY, &f) < 0, "read-only creation rejected");
     CHECK(fat32_open_flags(v, "/original.bin", 3, &f) == FS_ERR_INVAL, "invalid access flags rejected");
     finish(&d, v);
 }

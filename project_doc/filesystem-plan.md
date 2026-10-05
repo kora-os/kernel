@@ -18,7 +18,7 @@ big kernel lock when it arrives. Track B uses syscall slots 32 through 47.
   navigation and volumes listing, boot and inheritance regression coverage.
 - [x] 9.1 (PR #50): write-back sector cache, FAT allocation/free, existing-file write,
   append/truncate and FSInfo accounting, scratch-image tests.
-- [ ] 9.2: create/unlink/mkdir/rmdir/rename, UTF-8 LFN encoding and unique 8.3
+- [x] 9.2 (PR #54): create/unlink/mkdir/rmdir/rename, UTF-8 LFN encoding and unique 8.3
   aliases, namespace and malformed-input host coverage.
 - [ ] 9.3: explicit sync and dirty state, file syscall write flags and namespace
   calls, cp/rm/mkdir/mv, virt write smoke with host fsck and mtools verification.
