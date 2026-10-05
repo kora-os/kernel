@@ -63,3 +63,11 @@ int fs_opendir(const fs_cwd_t *cwd, const char *path, fat32_file_t *out);
 int fs_stat(const fs_cwd_t *cwd, const char *path, fat32_stat_t *out);
 // Bare commands use c: exclusively; explicit paths use the caller's cwd.
 int fs_program_open(const fs_cwd_t *cwd, const char *name, fat32_file_t *out);
+
+// Mutations resolve the caller's cwd explicitly. New leaves are resolved via
+// their existing parent; rename rejects cross-volume destinations.
+int fs_open_flags(const fs_cwd_t *cwd, const char *path, uint32_t flags, fat32_file_t *out);
+int fs_unlink(const fs_cwd_t *cwd, const char *path);
+int fs_mkdir(const fs_cwd_t *cwd, const char *path);
+int fs_rmdir(const fs_cwd_t *cwd, const char *path);
+int fs_rename(const fs_cwd_t *cwd, const char *source, const char *destination);
