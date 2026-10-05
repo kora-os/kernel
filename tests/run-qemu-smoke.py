@@ -171,7 +171,7 @@ def near(actual, expected, tolerance=8):
 PROMPT = rb"^\$ "
 
 
-def run(q, graphics=True, keyboard=False, repeat=0, multi_volume=False):
+def run(q, graphics=True, keyboard=False, repeat=0, multi_volume=False, write_test=False):
     """Yield (name, check) steps; each check raises Failure on error."""
 
     def boot():
@@ -291,6 +291,31 @@ def run(q, graphics=True, keyboard=False, repeat=0, multi_volume=False):
             command("sys:")
             pwd(root)
     yield "shell navigation, volume listing and single-target assigns", shell_navigation
+
+    if write_test:
+        def writable_filesystem():
+            def tool(command, status=0):
+                q.send(command + "\r")
+                q.expect(rb"exited with " + str(status).encode() + rb"\r?$")
+                q.expect(PROMPT)
+
+            q.send("writeprobe\r")
+            q.expect(rb"writeprobe: data, namespace, UTF-8 and sync checked", timeout=60)
+            q.expect(rb"exited with 0")
+            q.expect(PROMPT)
+            tool('mkdir "write cli"')
+            tool('cp sys:README.TXT "write cli/copy with spaces.txt"')
+            tool("mv 'write cli/copy with spaces.txt' \"write cli/renamed copy.txt\"")
+            tool('cp "write cli/renamed copy.txt" "quoted copy.txt"')
+            tool('cp sys:README.TXT sys:README.TXT', 1)
+            tool('mv "quoted copy.txt" sys:README.TXT', 1)
+            tool('rm write\\ cli/renamed\\ copy.txt')
+            tool('rmdir "write cli"')
+            q.send("sync\r")
+            result = q.expect(rb"(^sync: failed|^\$ )")
+            if result.group(1) == b"sync: failed":
+                raise Failure("explicit sync failed")
+        yield "EL0 writes, UTF-8 paths, quoted file tools and sync", writable_filesystem
 
     def debug_console():
         q.send("\x14")  # Ctrl-T
@@ -482,6 +507,7 @@ def main():
     parser.add_argument("--keyboard", action="store_true", help="inject keys through a VirtIO keyboard")
     parser.add_argument("--disk", help="external bare FAT32 or MBR FAT32 disk for virt")
     parser.add_argument("--multi-volume", action="store_true", help="require scratch BOOT/EXTRAS partitions")
+    parser.add_argument("--write-test", action="store_true", help="mutate a disposable writable FAT32 root")
     parser.add_argument("--disk-writable", action="store_true", help="enable raw writes to the supplied test disk")
     parser.add_argument("--no-graphics", action="store_true")
     parser.add_argument("--kernel")
@@ -503,6 +529,8 @@ def main():
         parser.error("--repeat must be between 0 and 2000")
     if args.el2 and args.machine != "virt":
         parser.error("--el2 requires virt")
+    if args.write_test and (args.machine != "virt" or not args.disk or not args.disk_writable):
+        parser.error("--write-test requires virt, --disk and --disk-writable")
     if args.multi_volume and not args.disk:
         parser.error("--multi-volume requires --disk")
     if args.expect_root_failure and not args.disk:
@@ -540,7 +568,7 @@ def main():
             return
         if args.keyboard:
             q.expect(rb"\[virtio-input\] keyboard ready")
-        for name, check in run(q, not args.no_graphics, args.keyboard, args.repeat, args.multi_volume):
+        for name, check in run(q, not args.no_graphics, args.keyboard, args.repeat, args.multi_volume, args.write_test):
             try:
                 check()
                 print("ok   - " + name)

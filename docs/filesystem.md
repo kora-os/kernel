@@ -1,7 +1,7 @@
 # Filesystem
 
-KoraOS supports **FAT32 reads, data writes and namespace operations**. It is what the kernel uses to find
-and load userland programs: the kernel boots `/bin/init`, which starts
+KoraOS supports **FAT32 reads, writes and namespace operations through EL0
+syscalls and file utilities**. The kernel uses it to find and load userland programs: the kernel boots `/bin/init`, which starts
 `/bin/shell`, which loads `/bin/ls`, `/bin/cat`, and the rest, all as
 independent binaries read from the filesystem, not embedded in the kernel image.
 
@@ -38,7 +38,7 @@ QEMU and real hardware with no extra media or QEMU flags.
 
 ```
   task_spawn()  ──▶ resolves program paths, hands bytes to elf_load() (src/proc/task.c)
-  file syscalls ──▶ open / read / stat / chdir / getcwd           (src/sys/syscall.c)
+  file syscalls ──▶ open / read / write / sync / namespace           (src/sys/syscall.c)
   namespace     ──▶ device / volume names and per-task cwd       (src/fs/namespace.c)
   ─────────────────────────────────────────────────────────────────────────────
   FAT32 driver  ──▶ mount, path walk, FAT chains, LFN→UTF-8, read/write  (src/fs/fat32.c)
@@ -91,8 +91,10 @@ Each layer has a clean seam:
 append and truncate-on-open flags. Ordinary `fat32_open` remains read-only.
 Create opens an existing file without truncating it unless truncate is requested;
 exclusive create fails when a long name or its short alias already exists.
-Create requires write access, and exclusive access requires create. A read-only
-medium or a FAT read-only file rejects mutation. Writable transports must support both writes and flush;
+Create can return a read-only handle on writable media; exclusive access
+requires create. Truncate and append require writable access. A read-only
+medium or a FAT read-only file rejects mutation. Writable transports must
+support both writes and flush;
 missing durable flush support fails before media changes.
 
 Open handles share reference-counted metadata identified by the short directory
@@ -131,6 +133,57 @@ and mtools readback verify the resulting images:
 ```bash
 tests/run-fat-write-tests.sh
 ```
+
+## Writable syscalls and file tools
+
+`open` accepts `O_RDONLY`, `O_WRONLY` or `O_RDWR`, combined with `O_CREAT`,
+`O_EXCL`, `O_TRUNC` and `O_APPEND`. `O_EXCL` requires `O_CREAT`; truncate and
+append require writable access. `O_CREAT` alone preserves existing content.
+Directories can only be opened with plain `O_RDONLY`. File `read` and `write`
+check descriptor access even for zero bytes. Closing a file releases its handle;
+call `sync` to report durable completion.
+
+The `sync` syscall attempts every writable mounted volume, skips read-only
+media and reports failure if any volume failed. File tools call it before
+reporting success:
+
+- `cp source new-destination` streams one file to an exclusive new destination.
+  Existing destinations and self-copies through aliases are rejected. A failed
+  copy leaves a reported partial destination available for inspection.
+- `rm file...` removes files; `mkdir directory...` creates directories.
+- `rmdir empty-directory...` removes empty directories.
+- `mv source new-destination` renames within one volume, preserving existing
+  destinations. It does not copy across volumes.
+- The shell's `sync` command flushes writable volumes explicitly.
+
+These commands are non-recursive. Quote paths with spaces using single or
+double quotes, or escape the next character with a backslash. Quoted and
+unquoted pieces concatenate, empty quotes produce an empty argument, and
+malformed quotes or escapes reject the entire command. There is no expansion.
+
+```text
+mkdir "work files"
+cp sys:README.TXT "work files/read me.txt"
+mv 'work files/read me.txt' "work files/renamed file.txt"
+rm "work files/renamed file.txt"
+rmdir "work files"
+sync
+```
+
+The end-to-end writable test creates a fresh 64 MiB scratch root from registered
+prepared programs and `fsroot`, preserving the immutable shared userfs. QEMU
+writes data and Unicode filenames through EL0, exercises quoted file commands,
+and syncs. After the VM closes, the host checks `fsck.fat -n`, exact mtools
+readback, removed paths, FAT mirrors and clean/error flags:
+
+```bash
+./build.sh --target qemu_virt
+tests/run-qemu-write.py
+```
+
+Never attach the shared `build/userfs/aarch64/koraos.img` as writable media.
+The small embedded image remains a read-only boot artifact. Write tests use
+only scratch images; SD cards containing Pi firmware are outside this workflow.
 
 ## Namespace operations and filenames
 
@@ -184,13 +237,15 @@ tests/run-fat-namespace-tests.sh
 /docs/…                      example files, including Unicode-named ones
 /bin/init  /bin/shell        the boot chain
 /bin/ls  /bin/cat  /bin/echo  /bin/hello  /bin/gfxdemo
+/bin/cp  /bin/rm  /bin/mkdir  /bin/rmdir  /bin/mv
 ```
 
 ## Limitations and deferred work
 
-- **Writable userland is next.** Data writes and namespace operations are
-  available in the kernel API; file syscalls remain read-only until step 9.3.
-  Seeking beyond EOF and truncate growth are unsupported.
+- **No sparse files.** Seeking beyond EOF and truncate growth are unsupported.
+- **Console input is ASCII.** Kernel names and argv use UTF-8, and compiled
+  programs can create Unicode names. Interactive console input currently
+  filters non-ASCII bytes. Quotes make names containing ASCII spaces usable.
 - **Pi storage is ramdisk only.** virt supports bare FAT32 and primary MBR
   FAT32 partitions on a VirtIO disk.
   No SD/eMMC driver exists.
@@ -216,8 +271,8 @@ and `/bin/shell`. The launcher selects modern VirtIO MMIO;
 legacy transport is unsupported. Media defaults to read-only; set
 `KORA_QEMU_DISK_READONLY=off` only on a disposable image for write tests.
 The block API supports `blk_read`, `blk_write` and negotiated `blk_flush`.
-The FAT32 kernel API supports data writes and namespace operations; file syscalls
-remain read-only until write flags and file management operations are exposed. The driver's capacity is bounded by
+Writable file syscalls and tools operate on disposable writable media. The
+embedded ramdisk remains read-only. The driver's capacity is bounded by
 the current 32-bit sector API. Missing disks use the embedded root; a configured
 broken disk does not silently fall back. Timed-out devices retain DMA buffers
 and reject subsequent requests until reboot.

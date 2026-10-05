@@ -23,6 +23,9 @@ static unsigned live_allocations;
 static bool fail_allocations;
 static int backend_error;
 static int backend_flush_error;
+static blkdev_t *failing_sync_backend;
+static blkdev_t *observed_sync_backend;
+static unsigned observed_sync_flushes;
 
 void *kmalloc(size_t size) {
     if (fail_allocations) return NULL;
@@ -57,6 +60,11 @@ static int memory_write(blkdev_t *dev, uint32_t lba, uint32_t count, const void 
 static int memory_flush(blkdev_t *dev) {
     (void)dev;
     return backend_flush_error;
+}
+static int selective_flush(blkdev_t *dev) {
+    if (dev == failing_sync_backend) return BLK_ERR_IO;
+    if (dev == observed_sync_backend) observed_sync_flushes++;
+    return 0;
 }
 static bool load_backend(const char *name, blkdev_t *out) {
     char path[1024];
@@ -538,6 +546,51 @@ static void namespace_sync_failure(void) {
     free(backend.ctx);
     CHECK(live_allocations == 0, "failed reset retry releases all namespace ownership");
 }
+static void sync_all_volumes(void) {
+    blkdev_t alpha, beta, readonly;
+    if (!load_backend("alpha.img", &alpha) || !load_backend("beta.img", &beta) ||
+        !load_backend("bpb-label.img", &readonly)) return;
+    alpha.read_only = beta.read_only = false;
+    alpha.write = beta.write = memory_write;
+    alpha.flush = beta.flush = selective_flush;
+    observed_sync_backend = &beta;
+    observed_sync_flushes = 0;
+    failing_sync_backend = NULL;
+    blkdev_registry_reset();
+    CHECK(blkdev_register(&alpha, BLKDEV_VIRTIO) == 0 &&
+          blkdev_register(&beta, BLKDEV_VIRTIO) == 0 &&
+          blkdev_register(&readonly, BLKDEV_RAMDISK) == 0 &&
+          fs_mount_registered(blkdev_partition_io(0)) == 0, "mount mixed sync-all media");
+    CHECK(fs_volume_count() == 3 && fs_sync_all() == 0,
+          "clean read-only and unsupported volumes allow harmless sync");
+    fat32_file_t file;
+    for (unsigned i = 0; i < 2; i++) {
+        CHECK(fat32_open_flags(fs_volume_get(i)->volume, "/large.bin", FAT32_O_RDWR, &file) == 0 &&
+              fat32_write(&file, i ? "B" : "A", 1) == 1, "dirty independent sync-all volumes");
+        fat32_close(&file);
+    }
+    unsigned before = observed_sync_flushes;
+    failing_sync_backend = &alpha;
+    CHECK(fs_sync_all() == FS_ERR_IO && observed_sync_flushes > before,
+          "sync reports first failure and still flushes later volumes");
+    fat32_volume_t *cold = mount_backend(&beta);
+    char content = 0;
+    CHECK(fat32_open(cold, "/large.bin", &file) == 0 && fat32_read(&file, &content, 1) == 1 && content == 'B',
+          "later volume bytes are durable after another volume fails");
+    fat32_close(&file);
+    CHECK(fat32_unmount(cold) == 0, "release independent durable remount");
+    before = observed_sync_flushes;
+    CHECK(fat32_sync_volume(fs_volume_get(1)->volume) == 0 && observed_sync_flushes == before,
+          "successful volume is clean despite earlier sync failure");
+    failing_sync_backend = NULL;
+    CHECK(fs_sync_all() == 0 && fs_namespace_reset() == 0, "failed volume sync retries without losing mounted state");
+    observed_sync_backend = NULL;
+    blkdev_registry_reset();
+    free(alpha.ctx);
+    free(beta.ctx);
+    free(readonly.ctx);
+    CHECK(live_allocations == 0, "sync-all cleanup releases every volume and assign");
+}
 int main(int argc, char **argv) {
     if (argc != 2) return 2;
     fixture_directory = argv[1];
@@ -550,6 +603,7 @@ int main(int argc, char **argv) {
     assign_semantics();
     directory_pin_lifecycle();
     namespace_sync_failure();
+    sync_all_volumes();
     printf("filesystem_test: %d checks, %d failures\n", test_checks, test_failures);
     return test_failures != 0;
 }

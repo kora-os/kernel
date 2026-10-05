@@ -94,21 +94,6 @@ static char *copy_user_path(const char *path) {
     return NULL;
 }
 
-// write(fd, buf, len): fd 1 (stdout) and 2 (stderr) go to the terminal.
-static long sys_write(int fd, const char *buf, uint64_t len) {
-    if (fd != 1 && fd != 2) {
-        return -1;
-    }
-    if (!uptr_ok((uint64_t)buf, len)) {
-        return -1;
-    }
-    for (uint64_t i = 0; i < len; i++) {
-        tty_putc(buf[i]);
-    }
-    tty_flush();
-    return (long)len;
-}
-
 // Look up an open file/directory handle by fd (>= FD_BASE) in the current task,
 // or NULL if the fd is out of range or not open.
 static open_file_t *fd_lookup(int fd) {
@@ -118,6 +103,22 @@ static open_file_t *fd_lookup(int fd) {
     }
     open_file_t *of = &t->files[fd - FD_BASE];
     return of->used ? of : NULL;
+}
+
+// Preserve terminal writes on fd 1/2; file descriptors use their own access
+// mode and shared inode metadata. Lengths are bounded before the FAT API cast.
+static long sys_write(int fd, const char *buf, uint64_t len) {
+    if (fd == 1 || fd == 2) {
+        if (!uptr_ok((uint64_t)buf, len)) return -1;
+        for (uint64_t i = 0; i < len; i++) tty_putc(buf[i]);
+        tty_flush();
+        return (long)len;
+    }
+    open_file_t *of = fd_lookup(fd);
+    if (of == NULL || of->file.is_dir || !(of->file.flags & 3u) || len > 0xffffffffu ||
+        (len && !uptr_ok((uint64_t)buf, len))) return -1;
+    long count = fat32_write(&of->file, buf, (uint32_t)len);
+    return count < 0 ? -1 : count;
 }
 
 // Read a line from the terminal, echoing as it goes and honouring backspace.
@@ -173,29 +174,25 @@ static long read_console_line(char *buf, uint64_t len) {
 // read(fd, buf, len): fd 0 (stdin) reads a console line; fd >= FD_BASE reads
 // from an open file. Returns bytes read, or -1.
 static long sys_read(int fd, char *buf, uint64_t len) {
-    if (len == 0) {
-        return 0;
-    }
-    if (!uptr_ok((uint64_t)buf, len)) {
-        return -1;
-    }
     if (fd == 0) {
+        if (len == 0) return 0;
+        if (!uptr_ok((uint64_t)buf, len)) return -1;
         return read_console_line(buf, len);
     }
     open_file_t *of = fd_lookup(fd);
-    if (of == NULL || of->file.is_dir) {
-        return -1;
-    }
-    long n = fat32_read(&of->file, buf, (uint32_t)len);
-    return n < 0 ? -1 : n;
+    if (of == NULL || of->file.is_dir || (of->file.flags & 3u) == FAT32_O_WRONLY ||
+        len > 0xffffffffu || (len && !uptr_ok((uint64_t)buf, len))) return -1;
+    long count = fat32_read(&of->file, buf, (uint32_t)len);
+    return count < 0 ? -1 : count;
 }
 
-// open(path, flags): resolve an absolute path to a file or directory and give
-// it an fd in the calling task's table. Only O_RDONLY is supported.
+// open(path, flags): resolve against the caller's cwd and reserve an fd
+// before any creation/truncation. Directory handles require pure O_RDONLY.
 static long sys_open(const char *path, int flags) {
-    if (flags != 0) {
-        return -1; // only O_RDONLY is supported
-    }
+    uint32_t mode = (uint32_t)flags;
+    if ((mode & ~(3u | FAT32_O_CREAT | FAT32_O_TRUNC | FAT32_O_APPEND | FAT32_O_EXCL)) ||
+        (mode & 3u) == 3u || (!(mode & 3u) && (mode & (FAT32_O_TRUNC | FAT32_O_APPEND))) ||
+        ((mode & FAT32_O_EXCL) && !(mode & FAT32_O_CREAT))) return -1;
     if (!uptr_ok((uint64_t)path, 1)) {
         return -1;
     }
@@ -218,8 +215,8 @@ static long sys_open(const char *path, int flags) {
         return -1;
     }
     fat32_file_t f;
-    int rc = fs_open(&t->cwd, copy, &f);
-    if (rc == FS_ERR_ISDIR) {
+    int rc = fs_open_flags(&t->cwd, copy, mode, &f);
+    if (rc == FS_ERR_ISDIR && mode == FAT32_O_RDONLY) {
         rc = fs_opendir(&t->cwd, copy, &f);  // a directory: open it for readdir
     }
     kfree(copy);
@@ -364,6 +361,32 @@ static long sys_assign(const char *name, const char *target) {
     return rc == 0 ? 0 : -1;
 }
 
+static long sys_path_mutation(const char *path, int (*operation)(const fs_cwd_t *, const char *)) {
+    task_t *t = task_current();
+    if (t == NULL) return -1;
+    char *copy = copy_user_path(path);
+    if (copy == NULL) return -1;
+    int rc = operation(&t->cwd, copy);
+    kfree(copy);
+    return rc == 0 ? 0 : -1;
+}
+
+static long sys_rename(const char *old_path, const char *new_path) {
+    task_t *t = task_current();
+    if (t == NULL) return -1;
+    char *old_copy = copy_user_path(old_path);
+    char *new_copy = copy_user_path(new_path);
+    if (old_copy == NULL || new_copy == NULL) {
+        kfree(old_copy);
+        kfree(new_copy);
+        return -1;
+    }
+    int rc = fs_rename(&t->cwd, old_copy, new_copy);
+    kfree(old_copy);
+    kfree(new_copy);
+    return rc == 0 ? 0 : -1;
+}
+
 // alloc_pages(count): give the calling task `count` contiguous zeroed pages,
 // tracked so they are reclaimed when the task is reaped. Returns the base
 // address, or 0 on failure.
@@ -491,6 +514,21 @@ void syscall_handle(struct trapframe *tf) {
         break;
     case SYS_assign_info:
         ret = sys_assign_info((unsigned)a0, (struct kassign_info *)a1);
+        break;
+    case SYS_sync:
+        ret = fs_sync_all() == 0 ? 0 : -1;
+        break;
+    case SYS_unlink:
+        ret = sys_path_mutation((const char *)a0, fs_unlink);
+        break;
+    case SYS_mkdir:
+        ret = sys_path_mutation((const char *)a0, fs_mkdir);
+        break;
+    case SYS_rmdir:
+        ret = sys_path_mutation((const char *)a0, fs_rmdir);
+        break;
+    case SYS_rename:
+        ret = sys_rename((const char *)a0, (const char *)a1);
         break;
     default:
         ret = -1;

@@ -29,6 +29,11 @@
 #define SYS_volume_info 34
 #define SYS_assign      35
 #define SYS_assign_info 36
+#define SYS_sync        37
+#define SYS_unlink      38
+#define SYS_mkdir       39
+#define SYS_rmdir       40
+#define SYS_rename      41
 
 // Dispatch a syscall described by a trap frame from EL0. The return value is
 // written back into the frame's x0.

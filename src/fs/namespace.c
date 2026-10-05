@@ -689,3 +689,12 @@ int fs_rename(const fs_cwd_t *cwd, const char *source, const char *destination) 
     kfree(s);
     return rc;
 }
+
+int fs_sync_all(void) {
+    int error = 0;
+    for (unsigned i = 0; i < volume_count; i++) {
+        int rc = fat32_sync_volume(volumes[i].volume);
+        if (rc != 0 && error == 0) error = rc;
+    }
+    return error;
+}

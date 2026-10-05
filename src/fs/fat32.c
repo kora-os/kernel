@@ -731,7 +731,7 @@ static int handle_open(fat32_volume_t *vol, const fat32_dirent_t *de,
 
 int fat32_open_flags(fat32_volume_t *vol, const char *path, uint32_t flags, fat32_file_t *out) {
     if (out == NULL || (flags & ~(3u | FAT32_O_CREAT | FAT32_O_EXCL | FAT32_O_TRUNC | FAT32_O_APPEND)) ||
-        (flags & 3u) == 3u || ((flags & (FAT32_O_CREAT | FAT32_O_TRUNC | FAT32_O_APPEND)) &&
+        (flags & 3u) == 3u || ((flags & (FAT32_O_TRUNC | FAT32_O_APPEND)) &&
                               !(flags & 3u)) || ((flags & FAT32_O_EXCL) && !(flags & FAT32_O_CREAT))) return FS_ERR_INVAL;
     fat32_dirent_t de;
     int rc = fat32_lookup(vol, path, &de);

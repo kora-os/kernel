@@ -189,8 +189,8 @@ categories:
         prs: [10]
       - id: file-commands
         name: File management commands
-        status: planned
-        description: cp, rm, mkdir and mv once the filesystem is writable.
+        status: in_progress
+        description: cp, rm, mkdir, rmdir, mv and sync on writable volumes.
         milestone: 9
       - id: volume-navigation
         name: Volume navigation
@@ -225,7 +225,7 @@ categories:
       - id: fat32-read
         name: FAT32 read
         status: completed
-        description: Read-only FAT32 with long filenames.
+        description: Reads FAT32 files with long filenames.
         completed: 2026-09-16
         prs: [9]
       - id: virtio-block

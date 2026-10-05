@@ -11,6 +11,7 @@
 #define assign(...) shell_mock_assign(__VA_ARGS__)
 #define spawn(...) shell_mock_spawn(__VA_ARGS__)
 #define wait(...) shell_mock_wait(__VA_ARGS__)
+#define sync(...) shell_mock_sync(__VA_ARGS__)
 #include "../../user/shell.c"
 #undef main
 #undef read
@@ -22,6 +23,7 @@
 #undef assign
 #undef spawn
 #undef wait
+#undef sync
 
 static char input[3 * LINE_MAX], output[2 * LINE_MAX];
 static size_t input_size, input_position, output_size, read_chunk;
@@ -76,6 +78,7 @@ int shell_mock_spawn(const char *name, int argc, char *const argv[]) {
     last_argument_terminated = argc > 0 && kstreq(argv[argc - 1], "a");
     return 123;
 }
+int shell_mock_sync(void) { return 0; }
 int shell_mock_wait(int pid) { CHECK(pid == 123, "wait matches child"); return 0; }
 
 static void reset(void) {
@@ -168,5 +171,32 @@ static void maximal_assign_line(void) {
           "maximum assign name and qualified target reach syscall intact");
     CHECK(spawn_calls == 0, "assign built-in never dispatches as an ELF command");
 }
+static void quoted_tokens(void) {
+    char *argv[MAX_ARGV];
+    char text[] = "cp 'single quoted.txt' \"double\\\" quoted.txt\" escaped\\ name.txt '' ab\"cd\"\\ ef & '&'";
+    int count = tokenize(text, argv);
+    CHECK(count == 8, "quotes, escapes, empty argument and concatenation tokenized");
+    if (count == 8) {
+        CHECK(kstreq(argv[1], "single quoted.txt") && kstreq(argv[2], "double\" quoted.txt") &&
+              kstreq(argv[3], "escaped name.txt") && kstreq(argv[4], "") &&
+              kstreq(argv[5], "abcd ef"), "quote decoding preserves argument contents");
+        CHECK(kstreq(argv[6], "&") && !literal_tokens[6] &&
+              kstreq(argv[7], "&") && literal_tokens[7], "quoted operators retain literal provenance");
+    }
+    char single[] = "echo 'back\\slash' résumé-notes.txt";
+    CHECK(tokenize(single, argv) == 3 && kstreq(argv[1], "back\\slash") &&
+          kstreq(argv[2], "résumé-notes.txt"), "single quotes preserve slashes and lexer preserves UTF-8 bytes");
+    const char *invalid[] = {"echo 'open", "echo \"open", "echo trailing\\", "echo \"escape\\\n"};
+    for (unsigned i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
+        char malformed[64];
+        unsigned j = 0;
+        do { malformed[j] = invalid[i][j]; } while (invalid[i][j++]);
+        CHECK(tokenize(malformed, argv) == -2, "malformed quote/escape rejected");
+    }
+    reset();
+    append("echo 'unterminated\necho a\nexit\n");
+    CHECK(shell_test_main() == 0 && spawn_calls == 1 && output_contains("shell: invalid quoting"),
+          "malformed quoting never dispatches its prefix and next command runs");
+}
 TEST_MAIN(fragmented_reads, line_boundaries, drained_line_not_dispatched,
-          argument_boundaries, maximal_assign_line)
+          argument_boundaries, maximal_assign_line, quoted_tokens)

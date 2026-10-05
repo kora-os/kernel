@@ -39,10 +39,14 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
     foreach(name hello init shell echo gfxdemo termdemo ls cat)
         koraos_add_user_program(${name} "${USER_DIR}/${name}.c")
     endforeach()
+    foreach(name cp rm mkdir rmdir mv)
+        koraos_add_user_program(${name} "${USER_DIR}/${name}.c")
+    endforeach()
     koraos_add_user_program(allocprobe "${SOURCE_ROOT}/tests/user/allocprobe.c")
     koraos_add_user_program(fpprobe "${SOURCE_ROOT}/tests/user/fpprobe.c"
         "${SOURCE_ROOT}/tests/user/fpregs.S")
     koraos_add_user_program(nsprobe "${SOURCE_ROOT}/tests/user/nsprobe.c")
+    koraos_add_user_program(writeprobe "${SOURCE_ROOT}/tests/user/writeprobe.c")
 
     # Retain the previous --bindir glob installation order in /bin.
     list(SORT USER_PROGRAM_ELVES)
