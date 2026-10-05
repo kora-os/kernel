@@ -254,7 +254,7 @@ categories:
         status: in_progress
         description: Create, write, rename and delete files and directories.
         milestone: 9
-        prs: [50]
+        prs: [50, 54]
       - id: sd-card
         name: SD card
         status: planned
