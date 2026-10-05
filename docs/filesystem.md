@@ -1,6 +1,6 @@
 # Filesystem
 
-KoraOS supports **FAT32 reads and existing-file data writes**. It is what the kernel uses to find
+KoraOS supports **FAT32 reads, data writes and namespace operations**. It is what the kernel uses to find
 and load userland programs: the kernel boots `/bin/init`, which starts
 `/bin/shell`, which loads `/bin/ls`, `/bin/cat`, and the rest, all as
 independent binaries read from the filesystem, not embedded in the kernel image.
@@ -89,8 +89,10 @@ Each layer has a clean seam:
 
 `fat32_open_flags` accepts read-only, write-only or read/write access, optional
 append and truncate-on-open flags. Ordinary `fat32_open` remains read-only.
-Creation is reserved for the next step. A read-only medium or a FAT read-only
-file rejects mutation. Writable transports must support both writes and flush;
+Create opens an existing file without truncating it unless truncate is requested;
+exclusive create fails when a long name or its short alias already exists.
+Create requires write access, and exclusive access requires create. A read-only
+medium or a FAT read-only file rejects mutation. Writable transports must support both writes and flush;
 missing durable flush support fails before media changes.
 
 Open handles share reference-counted metadata identified by the short directory
@@ -130,6 +132,51 @@ and mtools readback verify the resulting images:
 tests/run-fat-write-tests.sh
 ```
 
+## Namespace operations and filenames
+
+The kernel FAT32 API supports create, unlink, mkdir, rmdir and rename. The
+namespace wrappers take cwd explicitly and resolve relative, volume-qualified
+and assign-qualified paths. Rename stays within one mounted volume and reports
+`FS_ERR_XDEV` across volumes. Existing destinations are preserved: rename does
+not overwrite another entry. A case-only rename can update the source name.
+Directories cannot be moved beneath themselves, and rmdir requires an empty
+directory.
+
+An open file or directory, current directory, assign target or retained ancestor
+blocks removal and rename of that object. Holding a parent directory as cwd
+does not block adding or removing an unpinned child. Removing or replacing an
+assign releases its old directory references.
+
+Created names use strictly validated UTF-8 and are encoded into VFAT UTF-16
+entries, including surrogate pairs. The limit remains 255 UTF-16 code units
+and 765 UTF-8 bytes. Overlong encodings, lone continuations, truncated sequences,
+surrogate code points, out-of-range values and the VFAT padding unit U+FFFF are
+rejected. FAT-forbidden characters, control bytes and trailing spaces or dots
+are also rejected. Every name receives a collision-free ASCII 8.3 alias; both
+the long name and alias can open the same file. Aliases avoid collisions with
+existing short names and long names. LFN records carry ordinals, checksums,
+a terminating zero when needed and padding, even across directory sector or
+cluster boundaries.
+
+Mkdir initializes `.` and `..`; moving a directory updates its parent link.
+Directory growth allocates and links zeroed clusters, while deletion releases
+the matching short entry and LFN slots for reuse. In-memory sector undo records
+cover directory, FAT and allocation changes during a namespace operation.
+A reported operation failure restores its previous namespace and allocations;
+if rollback I/O fails, the volume retains recovery records for a later sync.
+A successful operation followed by a failed sync retains its new state for retry.
+This recovery handles reported errors and is not a power-loss journal.
+
+The namespace sanitizer suite creates disposable 64 MiB images. Independent
+checks inspect raw UTF-16 LFN records, aliases and directory parent links, run
+`fsck.fat -n`, and read exact contents with mtools through short aliases. Heap
+allocation failure and read, write, flush and persistent rollback errors are
+injected before recovery and cold remount:
+
+```bash
+tests/run-fat-namespace-tests.sh
+```
+
 ## Current layout of the image
 
 ```
@@ -141,10 +188,9 @@ tests/run-fat-write-tests.sh
 
 ## Limitations and deferred work
 
-- **No namespace writes yet.** Existing-file overwrite, append, allocation and
-  shrink are available in the kernel FAT32 API. File syscalls remain read-only
-  until the following write steps. Create, delete and directory changes are
-  deferred. Seeking beyond EOF and truncate growth are unsupported.
+- **Writable userland is next.** Data writes and namespace operations are
+  available in the kernel API; file syscalls remain read-only until step 9.3.
+  Seeking beyond EOF and truncate growth are unsupported.
 - **Pi storage is ramdisk only.** virt supports bare FAT32 and primary MBR
   FAT32 partitions on a VirtIO disk.
   No SD/eMMC driver exists.
@@ -153,8 +199,9 @@ tests/run-fat-write-tests.sh
 - **No VFS.** FAT32 volumes share a namespace and a thin file/fd layer.
 - **Case-insensitive matching is ASCII-only.** Non-ASCII case folding is not
   attempted.
-- **Surrogate-pair LFN decoding** is implemented to spec but is not covered by a
-  test fixture, because the host `mtools` mis-encodes astral characters.
+- **Host astral-name creation.** Some mtools versions mis-encode astral input.
+  The namespace suite creates these names through the kernel, verifies raw
+  UTF-16 surrogate pairs independently, and reads contents through short aliases.
 
 ## VirtIO root disk on virt
 
@@ -169,8 +216,8 @@ and `/bin/shell`. The launcher selects modern VirtIO MMIO;
 legacy transport is unsupported. Media defaults to read-only; set
 `KORA_QEMU_DISK_READONLY=off` only on a disposable image for write tests.
 The block API supports `blk_read`, `blk_write` and negotiated `blk_flush`.
-The FAT32 kernel API supports existing-file data writes; file syscalls remain
-read-only until write flags and file management operations are exposed. The driver's capacity is bounded by
+The FAT32 kernel API supports data writes and namespace operations; file syscalls
+remain read-only until write flags and file management operations are exposed. The driver's capacity is bounded by
 the current 32-bit sector API. Missing disks use the embedded root; a configured
 broken disk does not silently fall back. Timed-out devices retain DMA buffers
 and reject subsequent requests until reboot.

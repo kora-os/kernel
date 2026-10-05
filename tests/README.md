@@ -32,6 +32,7 @@ Current suites:
 
 | Test | Covers |
 |------|--------|
+| `fat_namespace_test.c` | Create/exclusive-create, Greek/astral/maximal LFNs, strict UTF-8 and FAT names, short-alias collisions and lookup, directory growth/slot reuse, unlink/mkdir/rmdir/rename, object/cwd/assign guards, relative and qualified paths, cross-volume rejection, observed-allocation OOM sweeps, transient/persistent I/O recovery, raw VFAT/dot-link validation and fsck/mtools checks |
 | `fat_write_test.c` | Existing-file writes on disposable 64 MiB mtools media: sector preservation, append, fragmented chains, first allocation, shared handle metadata, truncate and freed-cluster reuse, disk full, partition-view write/flush capabilities, FAT mirroring/active FAT/high bits, stale FSInfo, dirty eviction, retry after injected read/write/flush errors, cold remount, fsck and host readback |
 | `libk_malloc_test.c` | `user/libk/malloc.c` (built with `LIBK_HOST_TEST`, which renames it `libk_malloc` and so on): alignment, neighbour separation, coalescing, pool growth and release, direct page-run blocks, bad and double frees, `realloc`/`calloc`, exhaustion, a 200 000-round stress with `kheap_info` consistency checks |
 | `user_mem_test.c` | `src/proc/user_mem.c`: per-task page-run records behind `alloc_pages`/`free_pages`, foreign and double frees, reclaim on teardown, no leaks on failure |
@@ -84,6 +85,26 @@ tasks and are switched lazily, so kernel code (above all interrupt handlers)
 must not touch them; such a bug would corrupt user registers, typically only on
 real hardware. Needs `llvm-objdump` (or `OBJDUMP=...`). CI runs it on the debug
 and release builds.
+
+The namespace suite also runs independently:
+
+```bash
+tests/run-fat-namespace-tests.sh
+```
+
+It creates a separate valid 64 MiB mtools source and checks its immutable SHA256.
+Normal operations and 72 write/flush interruption cases are exported, plus one
+consolidated allocation-recovery image per operation and four persistent-error
+images. Every result must pass `fsck.fat -n`, exact mtools readback through short
+aliases, FAT mirror equality and an independent raw directory parser checking
+UTF-16, LFN ordinals/checksums/padding and dot links. An observed-allocation
+sweep fails every heap allocation in each operation and checks previous names,
+free-cluster counts and object ownership before retry. Directory extension,
+read failures and failed rollback retention are covered too. A valid external
+LFN resembling a generated short alias verifies that alias creation reserves
+both naming forms. Full-disk BAD reservations remain isolated malformed fault
+fixtures without an integrity claim. Images live under
+`build/host-tests/namespace-fixtures`.
 
 ## Feature status file
 
