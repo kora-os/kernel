@@ -189,9 +189,11 @@ categories:
         prs: [10]
       - id: file-commands
         name: File management commands
-        status: in_progress
+        status: completed
         description: cp, rm, mkdir, rmdir, mv and sync on writable volumes.
         milestone: 9
+        completed: 2026-10-05
+        prs: [55]
       - id: volume-navigation
         name: Volume navigation
         status: completed
@@ -251,10 +253,11 @@ categories:
         prs: [46]
       - id: fat32-write
         name: FAT32 write
-        status: in_progress
+        status: completed
         description: Create, write, rename and delete files and directories.
         milestone: 9
-        prs: [50, 54]
+        completed: 2026-10-05
+        prs: [50, 54, 55]
       - id: sd-card
         name: SD card
         status: planned
