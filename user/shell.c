@@ -40,27 +40,56 @@ static int read_command_line(void) {
     return 0;
 }
 
-// Split a line into argv in place: whitespace runs become NUL terminators and
-// each token gets a slot. Reject excess arguments rather than executing a prefix.
-static int tokenize(char *line, char **argv) {
+// Keep literal-token provenance for future background/operator parsing.
+static unsigned char literal_tokens[MAX_ARGV];
+
+static int whitespace(char c) {
+    return c == ' ' || c == '\t' || c == '\n' || c == '\r';
+}
+
+// Compact tokens in place. Quotes concatenate with adjacent text; empty quotes
+// produce an empty argument. No expansion or command substitution is performed.
+static int tokenize(char *text, char **argv) {
+    char *source = text, *destination = text;
     int argc = 0;
-    char *p = line;
-    while (*p && argc < MAX_ARGV) {
-        while (*p == ' ' || *p == '\t' || *p == '\n') {
-            *p++ = '\0';
+    for (;;) {
+        while (whitespace(*source)) source++;
+        if (!*source) return argc;
+        if (argc == MAX_ARGV) return -1;
+        argv[argc] = destination;
+        literal_tokens[argc] = 0;
+        char quote = 0;
+        while (*source) {
+            char c = *source++;
+            if (quote) {
+                if (c == '\n' || c == '\r') return -2;
+                if (c == quote) {
+                    quote = 0;
+                    continue;
+                }
+                if (c == '\\' && quote == '"') {
+                    if (!*source || *source == '\n' || *source == '\r') return -2;
+                    c = *source++;
+                }
+                *destination++ = c;
+                continue;
+            }
+            if (whitespace(c)) break;
+            if (c == '\'' || c == '"') {
+                quote = c;
+                literal_tokens[argc] = 1;
+            } else if (c == '\\') {
+                if (!*source || *source == '\n' || *source == '\r') return -2;
+                literal_tokens[argc] = 1;
+                *destination++ = *source++;
+            } else {
+                *destination++ = c;
+            }
         }
-        if (!*p) {
-            break;
-        }
-        argv[argc++] = p;
-        while (*p && *p != ' ' && *p != '\t' && *p != '\n') {
-            p++;
-        }
+        if (quote) return -2;
+        *destination++ = 0;
+        argc++;
     }
-    while (*p == ' ' || *p == '\t' || *p == '\n') {
-        *p++ = '\0';
-    }
-    return *p ? -1 : argc;
 }
 
 static void help(void) {
@@ -76,6 +105,9 @@ static void help(void) {
     kputs("  assign name     remove an assign (sys: is fixed)\n");
     kputs("  ls [path]       list a directory (default current)\n");
     kputs("  cat <path>...   print file contents\n");
+    kputs("  cp/rm/mkdir/rmdir/mv  manage files (cp and mv preserve existing targets)\n");
+    kputs("  sync            flush writable volumes\n");
+    kputs("  quote paths containing spaces; backslash escapes the next character\n");
     kputs("  <program> [args...]  run a program from c:\n");
     kputs("programs in /bin: hello, echo, gfxdemo, termdemo, ls, cat (try 'ls /bin')\n");
 }
@@ -150,7 +182,7 @@ int main(void) {
 
         int argc = tokenize(line, argv);
         if (argc < 0) {
-            kputs("shell: too many arguments\n");
+            kputs(argc == -1 ? "shell: too many arguments\n" : "shell: invalid quoting\n");
             continue;
         }
         if (argc == 0) {
@@ -193,6 +225,14 @@ int main(void) {
                 list_volumes();
             } else {
                 kputs("usage: volumes\n");
+            }
+            continue;
+        }
+        if (kstreq(argv[0], "sync")) {
+            if (argc != 1) {
+                kputs("usage: sync\n");
+            } else if (sync() < 0) {
+                kputs("sync: failed\n");
             }
             continue;
         }

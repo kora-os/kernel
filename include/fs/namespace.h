@@ -71,3 +71,7 @@ int fs_unlink(const fs_cwd_t *cwd, const char *path);
 int fs_mkdir(const fs_cwd_t *cwd, const char *path);
 int fs_rmdir(const fs_cwd_t *cwd, const char *path);
 int fs_rename(const fs_cwd_t *cwd, const char *source, const char *destination);
+
+// Sync every mounted volume, continuing after errors. Clean read-only or
+// unsupported media need no flush; pending recovery errors are returned.
+int fs_sync_all(void);

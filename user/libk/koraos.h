@@ -30,6 +30,12 @@ struct fb_info {
  * are UTF-8. The kernel mirrors these struct layouts in src/sys/syscall.c;
  * keep them in sync. */
 #define O_RDONLY 0
+#define O_WRONLY 1
+#define O_RDWR   2
+#define O_CREAT  0x100
+#define O_TRUNC  0x200
+#define O_APPEND 0x400
+#define O_EXCL   0x800
 
 #define SEEK_SET 0
 #define SEEK_CUR 1
@@ -71,13 +77,21 @@ struct assign_info {
 ssize_t write(int fd, const void *buf, size_t len);
 ssize_t read(int fd, void *buf, size_t len);
 
-/* Files: open() takes O_RDONLY (files and directories); read() serves file fds,
- * readdir() serves directory fds. */
+/* Files: access is O_RDONLY, O_WRONLY or O_RDWR, plus optional create,
+ * truncate, append and exclusive-create flags. Only pure O_RDONLY opens
+ * directories. File cursors stay within EOF; readdir serves directory fds. */
 int open(const char *path, int flags);
 int close(int fd);
 long lseek(int fd, long offset, int whence);
 int readdir(int fd, struct dirent *out);   /* 1 = entry, 0 = end, <0 = error */
 int stat(const char *path, struct stat *out);
+/* Mutations and durable sync return 0 or -1. Rename never overwrites another
+ * entry and rejects cross-volume moves. */
+int sync(void);
+int unlink(const char *path);
+int mkdir(const char *path);
+int rmdir(const char *path);
+int rename(const char *old_path, const char *new_path);
 
 // Change cwd, or copy its volume-qualified canonical spelling (including NUL).
 // Both return 0 on success and -1 on failure; failed chdir preserves cwd.

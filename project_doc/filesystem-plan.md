@@ -20,7 +20,7 @@ big kernel lock when it arrives. Track B uses syscall slots 32 through 47.
   append/truncate and FSInfo accounting, scratch-image tests.
 - [x] 9.2 (PR #54): create/unlink/mkdir/rmdir/rename, UTF-8 LFN encoding and unique 8.3
   aliases, namespace and malformed-input host coverage.
-- [ ] 9.3: explicit sync and dirty state, file syscall write flags and namespace
+- [x] 9.3 (PR #55): explicit sync and dirty state, file syscall write flags and namespace
   calls, cp/rm/mkdir/mv, virt write smoke with host fsck and mtools verification.
 
 ## Namespace decisions
@@ -42,3 +42,8 @@ sanitizer and virt jobs, which run on PRs and main pushes. Every write test uses
 a disposable image copied from the shared immutable userfs; the final CI stage
 checks fsck.fat -n and mtools content after QEMU exits. Pi kernel builds and
 raspi3b ramdisk smoke remain part of the regression gate.
+
+All six Track B bundles are delivered through PRs #46, #47, #49, #50, #54 and
+#55. Verification includes host sanitizers, both QEMU targets, all four kernel
+builds, and post-QEMU fsck/mtools checks on disposable images. Real storage
+hardware was not written.

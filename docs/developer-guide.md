@@ -150,7 +150,7 @@ See `tests/README.md` for what each covers and how to add tests.
 
 ## Further Documentation
 
-- [filesystem.md](filesystem.md) – the read-only FAT32 filesystem, the ramdisk, and how the image is built and embedded.
+- [filesystem.md](filesystem.md) – FAT32 volumes, reads/writes, the ramdisk and disposable write testing.
 - [how-userland-works.md](how-userland-works.md) – what happens when a program is loaded, where it lives in memory, how processes coexist, and the (deliberate) lack of memory protection.
 - [syscalls.md](syscalls.md) – the full system-call ABI.
 - [writing-userland-programs.md](writing-userland-programs.md) – how to write, build, and run a userland program (no compiler or libc on the device yet).
@@ -176,15 +176,31 @@ Shift/Ctrl/Caps, editing/navigation and Shift+PgUp/PgDn scrollback.
 to the debug console. Pi USB layouts still use the Circle keymap setting.
 
 An external disk uses modern VirtIO MMIO and defaults to read-only media.
-`KORA_QEMU_DISK_READONLY=off` enables raw block writes on a supplied disposable
-image; FAT32/file syscalls stay read-only. A missing disk uses embedded userfs;
+`KORA_QEMU_DISK_READONLY=off` enables FAT32 file writes on a supplied disposable
+image; the embedded ramdisk stays read-only. Never enable writes on the shared
+`build/userfs/aarch64/koraos.img` artifact or a card containing Pi firmware. A missing disk uses embedded userfs;
 a configured broken disk does not silently fall back. See `filesystem.md`.
+
+For an end-to-end write test, install dosfstools (`fsck.fat`) alongside mtools:
+
+```bash
+./build.sh --target qemu_virt
+tests/run-qemu-write.py
+```
+
+This creates a fresh 64 MiB scratch root, runs EL0 writes and quoted file tools,
+then verifies it with fsck and exact mtools readback after the VM closes. The
+immutable shared image hash is checked before and after the run. `cp` creates
+new destinations only; `mv` does not overwrite or move across volumes. All
+mutating tools sync before reporting success. Use the shell's `sync` command
+to flush changes made by other programs. Names use UTF-8, while interactive
+console input currently accepts ASCII; quotes handle spaces in ASCII paths.
 
 CI builds shared userfs once and passes its artifact to kernel jobs. It builds
 all four targets, both hardware release targets, a complete SD payload, and
 retains host sanitizer/CLI tests and raspi3b smoke. Independent virt profiles
 cover embedded graphics, external disk/keyboard at 128 MiB, serial-only 64 MiB,
-EL2 entry, and repeated EL0 page/malloc allocation and nested-process lifetime. Logs and
+EL2 entry, writable scratch-root integrity, and repeated EL0 page/malloc allocation and nested-process lifetime. Logs and
 screenshots are retained on failure. QEMU does not validate real Pi USB, HDMI,
 cache behavior or firmware. The current virt profile has no SMP, GICv3, PCI,
 networking, audio or VirtIO GPU; scheduling remains cooperative.
