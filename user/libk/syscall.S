@@ -33,6 +33,11 @@ SYSCALL getcwd,  SYS_GETCWD
 SYSCALL volume_info, SYS_VOLUME_INFO
 SYSCALL assign,      SYS_ASSIGN
 SYSCALL assign_info, SYS_ASSIGN_INFO
+SYSCALL sync,        SYS_SYNC
+SYSCALL unlink,      SYS_UNLINK
+SYSCALL mkdir,       SYS_MKDIR
+SYSCALL rmdir,       SYS_RMDIR
+SYSCALL rename,      SYS_RENAME
 
 // exit() never returns; if the kernel ever did return here, spin rather than
 // running off into whatever follows.

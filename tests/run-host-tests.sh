@@ -47,6 +47,9 @@ run_test() {
     fi
 }
 
+python3 "$ROOT/tests/check-syscall-abi.py" || failed=1
+python3 "$ROOT/tests/run-write-image-tests.py" || failed=1
+run_test cp
 run_test shell_input
 run_test blkdev src/fs/blkdev.c
 run_test term src/video/term.c

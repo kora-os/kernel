@@ -4,7 +4,9 @@
 
 KoraOS is a bare-metal AArch64 kernel for Raspberry Pi 3/4 and QEMU
 (`raspi3b` and `virt`). It runs an EL0 shell and utilities from a FAT32 user
-filesystem. Read the [Manifesto](MANIFESTO.md) for the project's direction.
+filesystem with volume paths, assigns and file management tools. Writable
+VirtIO media supports create, copy, append, truncate, rename and removal; the
+embedded ramdisk remains read-only. Read the [Manifesto](MANIFESTO.md) for the project's direction.
 
 ## Quick start
 
@@ -34,6 +36,20 @@ Each kernel owns `build/<debug|release>/<target>/kernel.{elf,img,map}` and its
 CMake cache. All targets consume the same AArch64 programs and FAT32 image
 under `build/userfs/aarch64/`. The shared producer runs once before the selected
 kernels. It publishes a new filesystem image only after successful generation.
+
+## Disposable filesystem write test
+
+Install dosfstools (`fsck.fat`) in addition to mtools, then run:
+
+```bash
+./build.sh --target qemu_virt
+tests/run-qemu-write.py
+```
+
+The test creates a fresh 64 MiB scratch disk, writes through EL0 and verifies
+it with fsck and mtools after QEMU exits. It preserves the shared userfs image.
+See [Filesystem](docs/filesystem.md) for `cp`, `rm`, `mkdir`, `rmdir`, `mv`,
+`sync`, quoting and volume paths. Write tests never use a Pi firmware card.
 
 ## Hardware installation
 

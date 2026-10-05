@@ -4,7 +4,7 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
 
 ## Project Snapshot
 - **Target**: QEMU AArch64 virt (independent development target), plus Bare-metal Raspberry Pi kernel (Pi 3 via QEMU raspi3b, Pi 4 hardware)
-- **Current Capabilities**: EL0/FAT32 console, Pi USB keyboards; virt PL011/GICv2, ramfb, VirtIO storage/input and CI development profiles
+- **Current Capabilities**: EL0/FAT32 reads/writes and file tools, volume/assign paths, Pi USB keyboards; virt PL011/GICv2, ramfb, VirtIO storage/input and CI development profiles
 - **Toolchain**: LLVM/Clang cross-compilation managed by CMake (`./build.sh`)
 
 ## Where To Look
@@ -24,6 +24,11 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
 - Use `build.sh --target qemu_virt` and `run-qemu.sh --target qemu_virt` for
   independent development; raspi3b is `qemu_raspi3b`. User programs/FS generation
   live in `cmake/userfs.cmake` and `cmake/userfs`; kernels consume shared userfs.
+- FAT32 writes are developed on disposable QEMU virt images only. Run
+  `tests/run-qemu-write.py` for EL0 writes plus fsck/mtools verification. The
+  shared `build/userfs/aarch64/koraos.img` is immutable; never attach it writable
+  or test writes on a Pi firmware card. Mutating user tools must surface sync
+  failures. The ramdisk remains read-only.
 - Use `run-qemu.sh` for rapid UART smoke tests; see the developer guide for hardware installation steps.
 - Documentation lives under `docs/`; do not store temporary todos there—use `project_doc/` for roadmap-level planning instead.
 

@@ -72,7 +72,7 @@ jobs:
       - name: Install kernel toolchain and QEMU
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang lld llvm cmake mtools qemu-system-arm
+          sudo apt-get install -y --no-install-recommends clang lld llvm cmake mtools dosfstools qemu-system-arm
       - name: Build all four targets using shared userfs
         run: ./build.sh --target all --userfs-dir build/userfs/aarch64
       - name: Build and stage both hardware release targets
@@ -121,6 +121,8 @@ jobs:
             args: --disk build/mbr-root.img --repeat 64
           - profile: multi-volume
             args: --disk build/multi-root.img --multi-volume --repeat 64
+          - profile: writable-filesystem
+            args: ""
           - profile: serial-small-ram
             args: --ram 64M --no-graphics --repeat 32
           - profile: el2-entry
@@ -134,7 +136,7 @@ jobs:
       - name: Install kernel toolchain and QEMU
         run: |
           sudo apt-get update
-          sudo apt-get install -y --no-install-recommends clang lld llvm cmake mtools qemu-system-arm
+          sudo apt-get install -y --no-install-recommends clang lld llvm cmake mtools dosfstools qemu-system-arm
       - name: Build virt with prepared userfs
         run: ./build.sh --target qemu_virt --userfs-dir build/userfs/aarch64
       - name: Wrap shared root in a scratch MBR image
@@ -144,7 +146,11 @@ jobs:
         if: matrix.profile == 'multi-volume'
         run: tests/create-multivolume-image.py --output build/multi-root.img build/userfs/aarch64/koraos.img
       - name: Exercise development profile
+        if: matrix.profile != 'writable-filesystem'
         run: tests/run-qemu-smoke.py --target qemu_virt --out build/debug/qemu_virt/qemu-${{ matrix.profile }} ${{ matrix.args }}
+      - name: Verify writable scratch filesystem from QEMU to host
+        if: matrix.profile == 'writable-filesystem'
+        run: tests/run-qemu-write.py --out build/debug/qemu_virt/qemu-${{ matrix.profile }}
       - name: Reject invalid configured root disk
         if: matrix.profile == 'disk-keyboard'
         run: |

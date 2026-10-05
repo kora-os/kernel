@@ -31,3 +31,8 @@
 #define SYS_VOLUME_INFO 34
 #define SYS_ASSIGN      35
 #define SYS_ASSIGN_INFO 36
+#define SYS_SYNC        37
+#define SYS_UNLINK      38
+#define SYS_MKDIR       39
+#define SYS_RMDIR       40
+#define SYS_RENAME      41

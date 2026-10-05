@@ -272,8 +272,17 @@ static void invalid_names(void) {
     CHECK(fat32_open_flags(volume, path, FAT32_O_CREAT | FAT32_O_RDWR, &file) < 0,
           "astral surrogate pairs count as two UTF-16 units");
     fat32_close(&file);
-    CHECK(fat32_open_flags(volume, "/a/new.txt", FAT32_O_CREAT | FAT32_O_RDONLY, &file) == FS_ERR_INVAL,
-          "create needs writable access");
+    CHECK(fat32_open_flags(volume, "/a/new.txt", FAT32_O_CREAT | FAT32_O_RDONLY | FAT32_O_EXCL, &file) == 0,
+          "read-only handle can create metadata on writable media");
+    char empty;
+    CHECK(fat32_read(&file, &empty, 1) == 0 && fat32_write(&file, "x", 1) == FS_ERR_RO,
+          "created read-only handle permits reads and denies writes");
+    fat32_close(&file);
+    CHECK(fat32_open_flags(volume, "/a/new.txt", FAT32_O_CREAT | FAT32_O_RDONLY | FAT32_O_EXCL, &file) == FS_ERR_EXISTS,
+          "read-only exclusive creation preserves existing entry");
+    CHECK(fat32_open_flags(volume, "/a/new.txt", FAT32_O_RDONLY | FAT32_O_TRUNC, &file) == FS_ERR_INVAL &&
+          fat32_open_flags(volume, "/a/new.txt", FAT32_O_RDONLY | FAT32_O_APPEND, &file) == FS_ERR_INVAL,
+          "read-only truncate and append remain invalid");
     fat32_file_t root = {0};
     CHECK(fat32_opendir(volume, "/", &root) == 0, "open root for cursor overflow regression");
     root.pos = 0xffffffe0;

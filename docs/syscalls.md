@@ -40,11 +40,18 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
 | 34 | `volume_info` | `int volume_info(unsigned int index, struct volume_info *out)` | `1` item, `0` end, `-1` error |
 | 35 | `assign` | `int assign(const char *name, const char *target)` | `0`, or `-1` |
 | 36 | `assign_info` | `int assign_info(unsigned int index, struct assign_info *out)` | `1` item, `0` end, `-1` error |
+| 37 | `sync` | `int sync(void)` | `0`, or `-1` |
+| 38 | `unlink` | `int unlink(const char *path)` | `0`, or `-1` |
+| 39 | `mkdir` | `int mkdir(const char *path)` | `0`, or `-1` |
+| 40 | `rmdir` | `int rmdir(const char *path)` | `0`, or `-1` |
+| 41 | `rename` | `int rename(const char *old_path, const char *new_path)` | `0`, or `-1` |
 
 ## Notes per call
 
-- **`write`**: only `fd` 1 (stdout) and 2 (stderr) are valid; both go to the
-  console (UART + framebuffer).
+- **`write`**: fd 1 (stdout) and 2 (stderr) go to the console. A writable file
+  descriptor at fd 3 or above writes at its cursor; append selects current EOF
+  for every call. Returns accepted bytes, possibly a short write on exhaustion,
+  or `-1`. `sync` reports durable completion.
 - **`read`**: `fd` 0 reads a line from the console (echoed, backspace honoured,
   returns at newline or when the buffer fills). `fd ≥ 3` reads from an open file.
 - **`alloc_pages`** / **`free_pages`**: Amiga-style memory: a run of `count`
@@ -64,9 +71,13 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
   volume-aware path resolver (see
   [filesystem.md](filesystem.md)). `argv` entries are copied onto the child's
   stack and delivered as `main(argc, argv)`.
-- **`open`**: `flags` must be `O_RDONLY` (the filesystem is read-only). Works on
-  both files and directories; the resulting fd is used with `read` (files) or
-  `readdir` (directories). fds 0/1/2 are the console; real files start at 3.
+- **`open`**: accepts one access mode (`O_RDONLY`, `O_WRONLY`, `O_RDWR`) and
+  create/exclusive/truncate/append flags below. Exclusive requires create;
+  truncate and append require writable access. Create alone preserves an
+  existing file and may create a read-only handle on writable media. Directories
+  accept only plain `O_RDONLY`. The kernel reserves a descriptor before
+  creating or truncating, so a full table cannot mutate the file. fds 0/1/2
+  are the console; real files start at 3.
 - **`lseek`**: `whence` is `SEEK_SET` / `SEEK_CUR` / `SEEK_END`; the new offset
   must land within `[0, size]`. Not valid on directory fds.
 - **`readdir`**: returns one entry per call from a directory fd. Skips deleted
@@ -94,6 +105,26 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
   canonical qualified target and immutable flag. Returns `1` for an item,
   `0` at the end or `-1` for invalid output pointers.
 
+- **`sync`**: flushes every writable mounted volume, including cached data,
+  allocation tables, directory metadata and FSInfo. Read-only volumes are
+  skipped. It attempts later volumes even if an earlier one failed and returns
+  `-1` if any flush failed. Closing a descriptor does not imply sync.
+- **`unlink`**: removes a file and its clusters. Directories, read-only files
+  and live handles are rejected.
+- **`mkdir`**: creates one directory with `.` and `..` entries. Its parent must
+  exist; it does not create a chain of missing parents.
+- **`rmdir`**: removes an empty directory. Root, cwd/assign pins, live directory
+  handles and nonempty directories are rejected.
+- **`rename`**: renames within one volume. Existing destination entries are
+  preserved, apart from a case-only update of the same source. Open handles,
+  cwd/assign pins, cross-volume moves and moving a directory under itself fail.
+
+File I/O validates descriptor permissions even for zero bytes. Valid file
+zero-byte calls may use a NULL buffer; console output retains its pointer
+checks. File lengths above `UINT32_MAX`, invalid buffers and invalid flags
+return `-1`. The kernel API retains detailed errors; user syscalls map them to
+`-1`.
+
 File paths for `open`, `stat`, `chdir` and explicit `spawn` paths use the same
 namespace rules; `/` selects the current volume's root. Syscall numbers 14 to
 31 belong to the scheduler/memory track; filesystem additions use 32 to 47.
@@ -105,6 +136,12 @@ From [`user/libk/koraos.h`](../user/libk/koraos.h) (mirrored kernel-side in
 
 ```c
 #define O_RDONLY 0
+#define O_WRONLY 1
+#define O_RDWR 2
+#define O_CREAT 0x100
+#define O_TRUNC 0x200
+#define O_APPEND 0x400
+#define O_EXCL 0x800
 #define SEEK_SET 0
 #define SEEK_CUR 1
 #define SEEK_END 2

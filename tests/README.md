@@ -36,7 +36,8 @@ Current suites:
 | `fat_write_test.c` | Existing-file writes on disposable 64 MiB mtools media: sector preservation, append, fragmented chains, first allocation, shared handle metadata, truncate and freed-cluster reuse, disk full, partition-view write/flush capabilities, FAT mirroring/active FAT/high bits, stale FSInfo, dirty eviction, retry after injected read/write/flush errors, cold remount, fsck and host readback |
 | `libk_malloc_test.c` | `user/libk/malloc.c` (built with `LIBK_HOST_TEST`, which renames it `libk_malloc` and so on): alignment, neighbour separation, coalescing, pool growth and release, direct page-run blocks, bad and double frees, `realloc`/`calloc`, exhaustion, a 200 000-round stress with `kheap_info` consistency checks |
 | `user_mem_test.c` | `src/proc/user_mem.c`: per-task page-run records behind `alloc_pages`/`free_pages`, foreign and double frees, reclaim on teardown, no leaks on failure |
-| `shell_input_test.c` | Real EL0 shell parser with renamed syscall stubs: fragmented reads, maximal complete lines, oversized-line draining, next-command preservation, 16/17-token boundary, terminated arguments and maximal assign target |
+| `cp_test.c` | Actual file-copy utility: partial reads/writes, exclusive destination preservation, partial-error output and durable-sync failure |
+| `shell_input_test.c` | Real EL0 shell parser with renamed syscall stubs: fragmented reads, maximal complete lines, oversized-line draining, next-command preservation, 16/17-token boundary, terminated arguments, maximal assign target, quoted/escaped/empty tokens, literal operator provenance and malformed quoting |
 | `filesystem_test.c` | `src/fs/fat32.c` and `src/fs/namespace.c` on mtools-made volumes: independent geometry/caches, root/BPB labels, duplicate labels/device collisions, relative paths, cwd isolation, retained handles, malformed geometry/chains/LFN, allocation and I/O errors, assign snapshots/replacement/removal/capacity, c-only command lookup and shadowed-label cwd, owned cwd/assign ancestor pins, busy reset and flush-failed reset preservation/retry |
 | `blkdev_test.c` | `src/fs/blkdev.c`: bare FAT32 and mixed MBR discovery, hidden FAT32 types, invalid/range/overlap tables, partition-relative bounded read/write/flush, read-only and unsupported I/O, registry capacity |
 | `kmalloc_test.c` | `src/mm/kmalloc.c`, `src/mm/kmalloc_stress.c`: alignment, zeroing, cache-line separation, block reuse, slab release, page runs, over-aligned blocks, exhaustion, invalid and double frees, balanced IRQ masking, seeded stress |
@@ -171,8 +172,8 @@ and `--out` override the image and artifact locations. Defaults are the selected
 `build/debug/<target>/kernel.img` and its `qemu-smoke/` directory. `--machine`
 remains a deprecated alias for target selection. `--no-graphics` omits ramfb on
 virt and tests serial fallback. `--disk-writable` negotiates writable test media;
-file syscalls remain read-only while existing-file data writes are tested
-through the kernel FAT32 API.
+file writes require a writable file descriptor. Use writable media only on
+disposable scratch images.
 
 An external disk may contain a bare FAT32 volume or primary MBR FAT32
 partitions. The first supported partition supplies the boot root. To exercise
@@ -197,6 +198,24 @@ profile assigns `c:` to EXTRAS while cwd remains on BOOT, executes `extrahello`
 and `c:/hello`, then verifies missing or removed `c:` does not fall back to
 BOOT `/bin`. It restores `c:` before subsequent checks.
 
+The writable profile runs the complete VM-to-host integrity check:
+
+```bash
+./build.sh --target qemu_virt
+tests/run-qemu-write.py
+```
+
+It creates a fresh 64 MiB FAT32 root from `fsroot` and registered prepared ELF
+names, excluding stale ELF leftovers. The shared 2 MiB image is hashed and
+never used as writable media. `writeprobe` covers creation, exclusive create,
+read-only create, zero-byte permissions, large-length rejection, full fd-table
+failure before mutation, data growth, partial-sector overwrite, shared append,
+truncate, UTF-8 names, namespace and busy guards. Quoted CLI file utilities
+exercise durable sync. After QEMU closes, `fsck.fat -n` and mtools verify exact
+contents and removed paths; raw checks compare FAT mirrors and clean/error bits.
+Logs and `verification.json` live in `build/debug/qemu_virt/qemu-write` by default.
+`--out`, `--build-dir`, `--userfs-dir` and `--release` select other artifacts.
+
 `--expect-root-failure --disk <zeroed-image>` requires a selected VirtIO disk,
 failed mount and failed init load, so silent ramdisk fallback cannot pass.
 
@@ -209,7 +228,7 @@ Debug kernels, stages both hardware Release payloads into a temporary directory,
 creates a FAT32 SD image, and runs raspi3b smoke. Separate virt profiles cover
 embedded graphics, 128 MiB external disk/keyboard, primary MBR boot, two labeled
 partitions with namespace navigation and assign command lookup, 64 MiB
-serial-only and EL2 entry. UART/screenshots are uploaded on failure. Pure host
+serial-only, EL2 entry and writable scratch-root integrity. UART/screenshots are uploaded on failure. Pure host
 sanitizer suites stay
 independent of the producer and kernel jobs.
 
