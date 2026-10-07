@@ -73,24 +73,29 @@ Each task has its own kernel stack, with its EL0 registers saved in a trap
 frame at the top and its kernel context (callee-saved registers and stack
 pointer) saved by `cpu_switch` when it is switched out
 ([`src/proc/task.c`](../src/proc/task.c)). The boot thread, which runs
-`kernel_main`, is task 0. Scheduling is still **cooperative and single-core**,
-with **no preemption** yet:
+`kernel_main`, is task 0. Scheduling is **preemptive and single-core**:
 
-- `spawn` is create plus wait: it creates the child, then blocks the caller
-  until the child has exited, and only then returns the child's pid. So the
-  "process tree" still behaves like a call stack,
-  `kernel → /bin/init → /bin/shell → /bin/ls`, where each parent is blocked
-  waiting for its child.
+- The 100 Hz timer tick ends the running task's time slice; the switch to the
+  next runnable task (round robin) happens on its way back to EL0. The kernel
+  itself is not preemptible: a task in a syscall runs until it returns or
+  blocks.
+- A task **blocks** instead of spinning when it waits: for a child to exit
+  (`spawn`, `wait`), for console input (`read` sleeps on a wait queue and is
+  woken by the UART, VirtIO or USB keyboard interrupt), or in `msleep`. With
+  nothing runnable the core waits for an interrupt (`wfi`).
+- `spawn` is create plus wait: it creates the child and, unless asked for a
+  background job (`SPAWN_NOWAIT`, the shell's `cmd &`), blocks the caller until
+  the child has exited.
 - A finished task becomes a **zombie** (its memory stays allocated so its exit
-  code remains valid) until the parent reaps it with `wait`.
-- Up to `MAX_TASKS` (8) tasks can be live at once, the nesting depth plus any
-  unreaped zombies.
+  code remains valid) until the parent reaps it with `wait`. If the parent
+  exits first, its children become orphans that the kernel reaps itself.
+- Up to `MAX_TASKS` (8) tasks can be live at once, including unreaped
+  zombies.
 
 Because of the identity map, **every task's image, stack, and heap are mapped
 and addressable at the same time** (there is no address-space switch between
 tasks). Distinct tasks simply occupy distinct regions of the one pool. `yield`
-switches to another runnable task if there is one, which with nested spawns
-there never is yet.
+gives the rest of the time slice to another runnable task, if there is one.
 
 **FP/SIMD registers are per task.** The kernel, the Circle USB code included,
 is integer-only, so the registers only ever hold EL0 state, and they are

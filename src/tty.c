@@ -8,6 +8,7 @@
 #include "arch/irq.h"
 #include "console.h"
 #include "mini_uart.h"
+#include "proc/task.h"
 #include "video/console_fb.h"
 
 // Input queue. Every producer (the USB keyboard IRQ path, and serial input
@@ -21,6 +22,9 @@ static char input_queue[INPUT_QUEUE_SIZE];
 static volatile unsigned input_head;  // written only by the producer
 static volatile unsigned input_tail;  // written only by the consumer
 
+// Readers sleep here until input (or a scrollback request) arrives.
+static struct wait_queue input_waiters;
+
 void tty_input_push(char c) {
     unsigned head = input_head;
     if (head - input_tail == INPUT_QUEUE_SIZE) {
@@ -29,6 +33,7 @@ void tty_input_push(char c) {
     input_queue[head % INPUT_QUEUE_SIZE] = c;
     asm volatile("" ::: "memory");
     input_head = head + 1;
+    wait_queue_wake_all(&input_waiters);
 }
 
 static int input_pop(char *c) {
@@ -91,26 +96,23 @@ void tty_serial_init(void) {
 }
 
 // Scrollback requests from the keyboard (IRQ context), in half screens. They
-// are applied from the input wait loop below, so the screen is never drawn
-// from an interrupt handler.
+// are applied by the task waiting for input (see tty_getc), so the screen is
+// never drawn from an interrupt handler.
 static volatile int scroll_request;
 
 void tty_scrollback(int halfpages) {
     scroll_request += halfpages;
+    wait_queue_wake_all(&input_waiters);
 }
 
+// Called with IRQs masked.
 static void apply_scroll_request(void) {
-    if (scroll_request == 0) {
-        return;
-    }
-    irq_disable();
     int request = scroll_request;
     scroll_request = 0;
     if (request != 0) {
         screen_scroll_view(request);
         screen_flush();
     }
-    irq_enable();
 }
 
 void tty_flush(void) {
@@ -120,22 +122,20 @@ void tty_flush(void) {
 char tty_getc(void) {
     tty_flush();  // whatever was echoed or printed must be visible while we wait
 
-    // Syscalls run with PSTATE.I set (exception entry masks IRQs), so without
-    // this window the keyboard, SOF and systick interrupts would all stall for
-    // as long as the shell waits for input. Only this idle wait is opened up:
-    // IRQ handlers (the Circle USB stack) allocate from the frame allocator,
-    // which the rest of the syscall path also uses without locking.
-    irq_enable();
+    // Sleep until a keyboard (USB, VirtIO) or UART interrupt pushes input.
+    // The queue is checked and the sleep entered with IRQs masked, so a byte
+    // arriving in between still wakes us; other tasks run meanwhile, and with
+    // nothing runnable the scheduler idles with IRQs open.
+    uint64_t flags = irq_save();
     char c;
     for (;;) {
-        // Serial input arrives through the UART interrupt (tty_serial_init),
-        // like the keyboard's, on both boards.
         apply_scroll_request();
         if (input_pop(&c)) {
             break;
         }
+        wait_queue_sleep(&input_waiters);
     }
-    irq_disable();
+    irq_restore(flags);
     return c;
 }
 

@@ -153,10 +153,13 @@ There is no page-table sharing to manage.
    every kernel object free of FP/SIMD use, so interrupt handlers cannot
    clobber task registers. `fpprobe` and the `tasks` console command are
    tested in every smoke profile. Still cooperative and single-core.
-2. **Preemption and sleeping**: the timer tick requests a reschedule, taken on
-   return to EL0. Wait queues; blocking `read` sleeps and is woken by the UART,
-   VirtIO input and USB keyboard interrupts. A `sleep` syscall; optional `&`
-   background jobs in the shell as the demo.
+2. **Preemption and sleeping** (done): the tick requests a reschedule, taken
+   on every return to EL0 (10 ms round-robin slices). Wait queues; console
+   `read` sleeps and is woken by the UART, VirtIO input and USB keyboard
+   interrupts. `msleep(ms)` (syscall 16), `spawn` flags (`SPAWN_NOWAIT`) and
+   `wait(pid, &code, flags)` (pid -1, `WNOHANG`); orphans are reaped by the
+   kernel. The shell runs `cmd &` in the background and reports finished jobs
+   at the next prompt. EL0 can read the virtual counter (`uptime_us()`).
 3. **Locks and per-CPU data**: spinlocks with ARMv8.0 exclusives (the Cortex-A53
    has no LSE atomics), IRQ-save variants, per-CPU data via `TPIDR_EL1`, the BKL
    and `Forbid()`/`Permit()`. Audit every place that masks interrupts for mutual

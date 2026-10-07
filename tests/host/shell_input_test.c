@@ -9,8 +9,8 @@
 #define volume_info(...) shell_mock_volume_info(__VA_ARGS__)
 #define assign_info(...) shell_mock_assign_info(__VA_ARGS__)
 #define assign(...) shell_mock_assign(__VA_ARGS__)
-#define spawn(...) shell_mock_spawn(__VA_ARGS__)
-#define wait(...) shell_mock_wait(__VA_ARGS__)
+#define spawn_flags(...) shell_mock_spawn_flags(__VA_ARGS__)
+#define waitpid(...) shell_mock_waitpid(__VA_ARGS__)
 #define sync(...) shell_mock_sync(__VA_ARGS__)
 #include "../../user/shell.c"
 #undef main
@@ -21,14 +21,15 @@
 #undef volume_info
 #undef assign_info
 #undef assign
-#undef spawn
-#undef wait
+#undef spawn_flags
+#undef waitpid
 #undef sync
 
 static char input[3 * LINE_MAX], output[2 * LINE_MAX];
 static size_t input_size, input_position, output_size, read_chunk;
-static unsigned spawn_calls, assign_calls;
-static int last_argc;
+static unsigned spawn_calls, assign_calls, background_reaps;
+static int last_argc, last_spawn_flags;
+static bool background_job_live;
 static bool last_argument_terminated, maximal_assign_received;
 
 ssize_t shell_mock_read(int fd, void *buffer, size_t size) {
@@ -71,20 +72,39 @@ int shell_mock_assign(const char *name, const char *target) {
                               kstrlen(target) == KORA_PATH_MAX - 1;
     return 0;
 }
-int shell_mock_spawn(const char *name, int argc, char *const argv[]) {
+int shell_mock_spawn_flags(const char *name, int argc, char *const argv[], int flags) {
     (void)name;
     spawn_calls++;
     last_argc = argc;
+    last_spawn_flags = flags;
     last_argument_terminated = argc > 0 && kstreq(argv[argc - 1], "a");
+    if (flags & SPAWN_NOWAIT) {
+        background_job_live = true;
+        return 124;
+    }
     return 123;
 }
 int shell_mock_sync(void) { return 0; }
-int shell_mock_wait(int pid) { CHECK(pid == 123, "wait matches child"); return 0; }
+// A background job (pid 124) has finished by the next prompt.
+int shell_mock_waitpid(int pid, int *code, int flags) {
+    if (pid == -1) {
+        CHECK(flags == WNOHANG, "job reaping never blocks the prompt");
+        if (!background_job_live) return 0;
+        background_job_live = false;
+        background_reaps++;
+        *code = 7;
+        return 124;
+    }
+    CHECK(pid == 123 && flags == 0, "foreground wait matches child");
+    *code = 0;
+    return pid;
+}
 
 static void reset(void) {
     input_size = input_position = output_size = read_chunk = 0;
-    spawn_calls = assign_calls = 0;
-    last_argc = 0;
+    spawn_calls = assign_calls = background_reaps = 0;
+    last_argc = last_spawn_flags = 0;
+    background_job_live = false;
     last_argument_terminated = maximal_assign_received = false;
     output[0] = 0;
 }
@@ -198,5 +218,28 @@ static void quoted_tokens(void) {
     CHECK(shell_test_main() == 0 && spawn_calls == 1 && output_contains("shell: invalid quoting"),
           "malformed quoting never dispatches its prefix and next command runs");
 }
+static void background_jobs(void) {
+    reset();
+    append("echo a &\nexit\n");
+    CHECK(shell_test_main() == 0 && spawn_calls == 1 && last_argc == 2 &&
+          last_spawn_flags == SPAWN_NOWAIT && last_argument_terminated,
+          "separate & starts a background job without passing \"&\" as an argument");
+    CHECK(output_contains("[124] started") && output_contains("[124] done, exit 7") &&
+          background_reaps == 1, "background job announced and reaped at the next prompt");
+    reset();
+    append("echo a&\necho a\nexit\n");
+    CHECK(shell_test_main() == 0 && spawn_calls == 2 && last_spawn_flags == 0 &&
+          last_argument_terminated, "trailing & is stripped; the next command runs in front");
+    CHECK(output_contains("[123] exited with 0"), "foreground job still waited for");
+    reset();
+    append("&\nexit\n");
+    CHECK(shell_test_main() == 0 && spawn_calls == 0, "a lone & runs nothing");
+    reset();
+    append("echo '&'\necho a\\&\nexit\n");
+    CHECK(shell_test_main() == 0 && spawn_calls == 2 && last_spawn_flags == 0 &&
+          !background_reaps && !output_contains("started"),
+          "quoted and escaped ampersands are arguments, not background jobs");
+}
+
 TEST_MAIN(fragmented_reads, line_boundaries, drained_line_not_dispatched,
-          argument_boundaries, maximal_assign_line, quoted_tokens)
+          argument_boundaries, maximal_assign_line, quoted_tokens, background_jobs)

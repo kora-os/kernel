@@ -13,8 +13,8 @@
 #define SYS_EXIT    1
 #define SYS_READ    2
 /* 3 was sbrk (retired; returns -1) */
-#define SYS_SPAWN   4
-#define SYS_WAIT    5
+#define SYS_SPAWN_FLAGS 4
+#define SYS_WAITPID 5
 #define SYS_GETPID  6
 #define SYS_YIELD   7
 #define SYS_FB_INFO 8
@@ -25,6 +25,7 @@
 #define SYS_STAT    13
 #define SYS_ALLOC_PAGES 14
 #define SYS_FREE_PAGES  15
+#define SYS_MSLEEP      16
 
 #define SYS_CHDIR 32
 #define SYS_GETCWD 33

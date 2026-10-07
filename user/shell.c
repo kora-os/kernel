@@ -40,7 +40,8 @@ static int read_command_line(void) {
     return 0;
 }
 
-// Keep literal-token provenance for future background/operator parsing.
+// Whether each token was quoted or escaped: such a token is never an operator
+// (see take_background).
 static unsigned char literal_tokens[MAX_ARGV];
 
 static int whitespace(char c) {
@@ -109,6 +110,7 @@ static void help(void) {
     kputs("  sync            flush writable volumes\n");
     kputs("  quote paths containing spaces; backslash escapes the next character\n");
     kputs("  <program> [args...]  run a program from c:\n");
+    kputs("  <program> [args...] &  run it in the background\n");
     kputs("programs in /bin: hello, echo, gfxdemo, termdemo, ls, cat (try 'ls /bin')\n");
 }
 
@@ -169,12 +171,47 @@ static void assign_command(int argc, char **argv) {
     }
 }
 
+static void print_job_end(int pid, const char *what, int code) {
+    kputs("[");
+    kput_int(pid);
+    kputs(what);
+    kput_int(code);
+    kputs("\n");
+}
+
+// Report background jobs that finished since the last prompt (reaping them).
+static void reap_jobs(void) {
+    int code;
+    int pid;
+    while ((pid = waitpid(-1, &code, WNOHANG)) > 0) {
+        print_job_end(pid, "] done, exit ", code);
+    }
+}
+
+// A trailing "&" (its own word, or the end of the last one) asks for a
+// background job; strip it and say so. A quoted or escaped token is literal:
+// `echo '&'` and `echo a\&` print an ampersand.
+static int take_background(int *argc, char **argv) {
+    char *last = argv[*argc - 1];
+    size_t len = kstrlen(last);
+    if (literal_tokens[*argc - 1] || len == 0 || last[len - 1] != '&') {
+        return 0;
+    }
+    if (len == 1) {
+        (*argc)--;
+    } else {
+        last[len - 1] = '\0';
+    }
+    return 1;
+}
+
 int main(void) {
     kputs("\nKoraOS shell. Type 'help'.\n");
 
     char *argv[MAX_ARGV];
 
     for (;;) {
+        reap_jobs();
         kputs("$ ");
         if (!read_command_line()) {
             continue;
@@ -250,18 +287,23 @@ int main(void) {
             continue;
         }
 
-        int pid = spawn(argv[0], argc, argv);
+        int background = take_background(&argc, argv);
+        if (argc == 0) {
+            continue;
+        }
+        int pid = spawn_flags(argv[0], argc, argv, background ? SPAWN_NOWAIT : 0);
         if (pid < 0) {
             kputs("shell: no such program: ");
             kputs(argv[0]);
             kputs("\n");
             continue;
         }
-        int code = wait(pid);
-        kputs("[");
-        kput_int(pid);
-        kputs("] exited with ");
-        kput_int(code);
-        kputs("\n");
+        if (background) {
+            kputs("[");
+            kput_int(pid);
+            kputs("] started\n");
+            continue;
+        }
+        print_job_end(pid, "] exited with ", wait(pid));
     }
 }

@@ -1,10 +1,15 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Tasks, their kernel stacks and the (still cooperative, single-core)
-// scheduler. See proc/task.h.
+// Tasks, their kernel stacks and the (preemptive, single-core) scheduler.
+// See proc/task.h.
+//
+// Mutual exclusion is by masking IRQs: there is one core, the kernel is not
+// preemptible, and the only other code that touches task state is interrupt
+// handlers (wake-ups, the tick). Milestone 7 PR 3 replaces this with locks.
 
 #include "proc/task.h"
 #include "arch/irq.h"
+#include "arch/systick.h"
 #include "user/elf.h"
 #include "fs/fat32.h"
 #include "mm.h"
@@ -31,9 +36,24 @@ static task_t boot_task = {
 };
 static task_t *current = &boot_task;
 
+// Set by the tick and by wake-ups; taken on the next return to EL0.
+static volatile bool need_resched;
+
 // Grab a free table slot and give it a fresh pid. Returns NULL if the table is
 // full. Leaves the slot RUNNABLE; the caller fills in the rest.
+static void task_free(task_t *t);
+
+// Free zombies nobody will reap: their parent exited before them.
+static void reap_orphans(void) {
+    for (int i = 0; i < MAX_TASKS; i++) {
+        if (tasks[i].state == TASK_EXITED && tasks[i].orphan && &tasks[i] != current) {
+            task_free(&tasks[i]);
+        }
+    }
+}
+
 static task_t *task_alloc(void) {
+    reap_orphans();
     for (int i = 0; i < MAX_TASKS; i++) {
         task_t *t = &tasks[i];
         if (t->state == TASK_UNUSED) {
@@ -135,15 +155,87 @@ static void schedule(void) {
     irq_restore(flags);
 }
 
+static void make_runnable(task_t *t) {
+    t->state = TASK_RUNNABLE;
+    t->blocked_on = BLOCK_NONE;
+    t->waiting_for = NULL;
+    t->wq = NULL;
+    t->wq_next = NULL;
+    need_resched = true;
+}
+
 // Block the running task until `child` (or, if NULL, any child) exits.
 static void block_on_child(task_t *child) {
+    uint64_t flags = irq_save();
     current->state = TASK_BLOCKED;
+    current->blocked_on = BLOCK_CHILD;
     current->waiting_for = child;
     schedule();
+    irq_restore(flags);
 }
 
 void task_yield(void) {
     schedule();
+}
+
+void wait_queue_sleep(struct wait_queue *wq) {
+    uint64_t flags = irq_save();
+    current->state = TASK_BLOCKED;
+    current->blocked_on = BLOCK_QUEUE;
+    current->wq = wq;
+    current->wq_next = wq->head;
+    wq->head = current;
+    schedule();
+    irq_restore(flags);
+}
+
+void wait_queue_wake_all(struct wait_queue *wq) {
+    uint64_t flags = irq_save();
+    task_t *t = wq->head;
+    wq->head = NULL;
+    while (t != NULL) {
+        task_t *next = t->wq_next;
+        make_runnable(t);
+        t = next;
+    }
+    irq_restore(flags);
+}
+
+void task_msleep(uint64_t ms) {
+    uint64_t hz = systick_hz();
+    uint64_t ticks = hz != 0 ? (ms * hz + 999) / 1000 : 0;
+    if (ticks == 0) {
+        task_yield();
+        return;
+    }
+    uint64_t flags = irq_save();
+    current->state = TASK_BLOCKED;
+    current->blocked_on = BLOCK_SLEEP;
+    // The current tick is already partly over: one more guarantees the minimum.
+    current->wake_tick = systick_count() + ticks + 1;
+    schedule();
+    irq_restore(flags);
+}
+
+static void tick_task(task_t *t, uint64_t now) {
+    if (t->state == TASK_BLOCKED && t->blocked_on == BLOCK_SLEEP && now >= t->wake_tick) {
+        make_runnable(t);
+    }
+}
+
+void sched_tick(uint64_t now) {
+    tick_task(&boot_task, now);
+    for (int i = 0; i < MAX_TASKS; i++) {
+        tick_task(&tasks[i], now);
+    }
+    need_resched = true;  // round robin: the running task's slice is over
+}
+
+void sched_preempt_check(void) {
+    if (need_resched) {
+        need_resched = false;
+        schedule();
+    }
 }
 
 static size_t cstr_len(const char *s) {
@@ -327,39 +419,57 @@ task_t *task_create(const char *name, int argc, char *const argv[]) {
     return t;
 }
 
-int task_spawn(const char *name, int argc, char *const argv[]) {
+int task_spawn(const char *name, int argc, char *const argv[], int flags) {
     task_t *child = task_create(name, argc, argv);
     if (child == NULL) {
         return -1;
     }
     int pid = child->pid;
-    while (child->state != TASK_EXITED) {
-        block_on_child(child);
+    if ((flags & SPAWN_NOWAIT) == 0) {
+        while (child->state != TASK_EXITED) {
+            block_on_child(child);
+        }
     }
     return pid;
 }
 
-int task_wait(int pid) {
+int task_wait_ex(int pid, int *code, int flags) {
     task_t *me = task_current();
     for (;;) {
-        task_t *child = NULL;
+        task_t *match = NULL;
+        bool exited = false;
         for (int i = 0; i < MAX_TASKS; i++) {
             task_t *t = &tasks[i];
-            if (t->state != TASK_UNUSED && t->pid == pid && t->parent == me) {
-                child = t;
-                break;
+            if (t->state == TASK_UNUSED || t->parent != me || t->orphan ||
+                (pid != -1 && t->pid != pid)) {
+                continue;
+            }
+            if (match == NULL || (!exited && t->state == TASK_EXITED)) {
+                match = t;
+                exited = t->state == TASK_EXITED;
             }
         }
-        if (child == NULL) {
+        if (match == NULL) {
             return -1;
         }
-        if (child->state == TASK_EXITED) {
-            int code = child->exit_code;
-            task_free(child);
-            return code;
+        if (exited) {
+            int found = match->pid;
+            if (code != NULL) {
+                *code = match->exit_code;
+            }
+            task_free(match);
+            return found;
         }
-        block_on_child(child);
+        if (flags & WAIT_NOHANG) {
+            return 0;
+        }
+        block_on_child(pid == -1 ? NULL : match);
     }
+}
+
+int task_wait(int pid) {
+    int code;
+    return task_wait_ex(pid, &code, 0) > 0 ? code : -1;
 }
 
 int task_getpid(void) {
@@ -375,16 +485,28 @@ task_t *task_running(void) {
 }
 
 void task_exit(int code) {
+    irq_save();  // for good: the next task brings its own mask
     task_t *me = current;
     me->state = TASK_EXITED;
     me->exit_code = code;
     fpsimd_release(me);
 
+    // Children outlive us as orphans: reaped as soon as they are zombies.
+    for (int i = 0; i < MAX_TASKS; i++) {
+        task_t *t = &tasks[i];
+        if (t->state != TASK_UNUSED && t->parent == me) {
+            t->parent = NULL;
+            t->orphan = true;
+            if (t->state == TASK_EXITED) {
+                task_free(t);
+            }
+        }
+    }
+
     task_t *parent = parent_of(me);
-    if (parent->state == TASK_BLOCKED &&
+    if (!me->orphan && parent->state == TASK_BLOCKED && parent->blocked_on == BLOCK_CHILD &&
         (parent->waiting_for == me || parent->waiting_for == NULL)) {
-        parent->state = TASK_RUNNABLE;
-        parent->waiting_for = NULL;
+        make_runnable(parent);
     }
     schedule();  // never picks this task again
     for (;;) {

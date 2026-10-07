@@ -119,9 +119,11 @@ categories:
         prs: [4]
       - id: preemptive-scheduler
         name: Preemptive scheduler
-        status: in_progress
+        status: completed
         description: Timer-driven task switching with sleeping and wait queues.
         milestone: 7
+        completed: 2026-10-04
+        prs: [51, 52]
       - id: smp
         name: Multicore (SMP)
         status: planned
@@ -203,7 +205,7 @@ categories:
         prs: [47, 49]
       - id: job-control
         name: Background jobs and pinning
-        status: planned
+        status: in_progress
         description: Run programs in the background or on a chosen core.
         milestone: 7
       - id: basic

@@ -23,8 +23,8 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
 | 1 | `exit` | `void exit(int status)` | does not return |
 | 2 | `read` | `ssize_t read(int fd, void *buf, size_t len)` | bytes read, `0` at EOF, or `-1` |
 | 3 | (retired) | was `sbrk` | `-1` |
-| 4 | `spawn` | `int spawn(const char *name, int argc, char *const argv[])` | child pid, or `-1` |
-| 5 | `wait` | `int wait(int pid)` | child exit code, or `-1` |
+| 4 | `spawn` | `int spawn_flags(const char *name, int argc, char *const argv[], int flags)` | child pid, or `-1` |
+| 5 | `wait` | `int waitpid(int pid, int *code, int flags)` | child pid, `0` (`WNOHANG`, none yet), or `-1` |
 | 6 | `getpid` | `int getpid(void)` | current pid |
 | 7 | `yield` | `void yield(void)` | `0`, after letting other runnable tasks run |
 | 8 | `fb_info` | `int fb_info(struct fb_info *out)` | `0`, or `-1` |
@@ -35,6 +35,7 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
 | 13 | `stat` | `int stat(const char *path, struct stat *out)` | `0`, or `-1` |
 | 14 | `alloc_pages` | `void *alloc_pages(size_t count)` | base of `count` zeroed pages, or `NULL` |
 | 15 | `free_pages` | `int free_pages(void *base)` | `0`, or `-1` |
+| 16 | `msleep` | `void msleep(unsigned long ms)` | `0`, after at least `ms` milliseconds |
 | 32 | `chdir` | `int chdir(const char *path)` | `0`, or `-1` |
 | 33 | `getcwd` | `int getcwd(char *buf, size_t size)` | `0`, or `-1` |
 | 34 | `volume_info` | `int volume_info(unsigned int index, struct volume_info *out)` | `1` item, `0` end, `-1` error |
@@ -63,14 +64,24 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
   [writing-userland-programs.md](writing-userland-programs.md)). There is no
   `sbrk`: with one flat address space, memory after a heap is usually someone
   else's, so a contiguous break cannot grow reliably.
-- **`spawn`**: creates a task for the program and blocks the caller until the
-  child has exited (scheduling is cooperative), then returns the child's pid. Call `wait(pid)` afterwards to reap
-  it and collect its exit code. `name` is resolved to a filesystem path: a bare
+- **`spawn`**: creates a task for the program. Without `SPAWN_NOWAIT` (flags
+  0) it blocks the caller until the child has exited, then returns the child's
+  pid; with `SPAWN_NOWAIT` it returns the pid at once and the child runs
+  alongside (a background job). Either way, reap the child with `waitpid`.
+  libk's `spawn(name, argc, argv)` is the flags-0 form. `name` is resolved to a filesystem path: a bare
   name is looked up through `c:` (initially `sys:bin`), with no fallback to
   `/bin` if the assign or command is missing; other names use the caller's
   volume-aware path resolver (see
   [filesystem.md](filesystem.md)). `argv` entries are copied onto the child's
   stack and delivered as `main(argc, argv)`.
+- **`wait`**: reaps an exited child, `pid` or any child for `-1`, storing its
+  exit code in `*code` (which may be `NULL`) and returning its pid. It blocks
+  until one exits, unless `WNOHANG` is set, in which case it returns `0` if
+  none has. `-1` means the caller has no such child. libk's `wait(pid)`
+  returns the exit code directly. A child whose parent exits first becomes an
+  orphan and is reaped by the kernel.
+- **`msleep`**: blocks for at least `ms` milliseconds, in whole 10 ms ticks
+  (plus up to one tick); other tasks run meanwhile. `msleep(0)` yields.
 - **`open`**: accepts one access mode (`O_RDONLY`, `O_WRONLY`, `O_RDWR`) and
   create/exclusive/truncate/append flags below. Exclusive requires create;
   truncate and append require writable access. Create alone preserves an

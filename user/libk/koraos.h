@@ -147,12 +147,45 @@ void *memset(void *dest, int c, size_t n);
 void *memcpy(void *dest, const void *src, size_t n);
 void *memmove(void *dest, const void *src, size_t n);
 
-/* Process control */
+/* Process control. Scheduling is preemptive: every runnable program gets
+ * time slices of one 10 ms tick in turn.
+ *
+ * spawn_flags() starts a child; without SPAWN_NOWAIT it returns only once the
+ * child has exited, with SPAWN_NOWAIT at once (a background job). Either way
+ * the child must then be reaped: waitpid() collects child `pid` (or any child
+ * for -1), storing its exit code in *code (may be NULL) and returning its pid;
+ * with WNOHANG it returns 0 instead of blocking if none has exited yet. Both
+ * return -1 on failure (no such program, or no such child). spawn() and wait()
+ * are the simple forms: run to completion, then collect the exit code. A child
+ * whose parent exits first is reaped by the kernel. */
+#define SPAWN_NOWAIT 1
+#define WNOHANG 1
+
 void exit(int status) __attribute__((noreturn));
-int spawn(const char *name, int argc, char *const argv[]);
-int wait(int pid);
+int spawn_flags(const char *name, int argc, char *const argv[], int flags);
+int waitpid(int pid, int *code, int flags);
 int getpid(void);
 void yield(void);
+void msleep(unsigned long ms);  /* at least ms milliseconds, in 10 ms ticks */
+
+static inline int spawn(const char *name, int argc, char *const argv[]) {
+    return spawn_flags(name, argc, argv, 0);
+}
+
+/* Exit code of child `pid` once it has exited, or -1 if there is no such child. */
+static inline int wait(int pid) {
+    int code;
+    return waitpid(pid, &code, 0) > 0 ? code : -1;
+}
+
+/* Microseconds since boot, from the generic timer's virtual counter (readable
+ * at EL0, no syscall). */
+static inline unsigned long uptime_us(void) {
+    unsigned long count, freq;
+    __asm__ volatile("isb; mrs %0, cntvct_el0" : "=r"(count));
+    __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(freq));
+    return count / freq * 1000000u + count % freq * 1000000u / freq;
+}
 
 /* Graphics */
 int fb_info(struct fb_info *out);
