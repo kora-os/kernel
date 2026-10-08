@@ -160,12 +160,16 @@ There is no page-table sharing to manage.
    `wait(pid, &code, flags)` (pid -1, `WNOHANG`); orphans are reaped by the
    kernel. The shell runs `cmd &` in the background and reports finished jobs
    at the next prompt. EL0 can read the virtual counter (`uptime_us()`).
-3. **Locks and per-CPU data**: spinlocks with ARMv8.0 exclusives (the Cortex-A53
-   has no LSE atomics), IRQ-save variants, per-CPU data via `TPIDR_EL1`, the BKL
-   and `Forbid()`/`Permit()`. Audit every place that masks interrupts for mutual
-   exclusion (`tty.c`, `virtio_input.c`, `irq.c`, `mmu.c`, and Circle glue) and
-   convert interrupt-shared data to IRQ-safe spinlocks. A locked `printf` with a
-   panic bypass. Still one core.
+3. **Locks and per-CPU data** (done): spinlocks on ARMv8.0 exclusives with
+   IRQ-save variants and self-checks (recursion, foreign unlock, switching with
+   a lock held), per-CPU data via `TPIDR_EL1`, the BKL (taken on entry from
+   EL0, dropped while sleeping, never in interrupts) and `forbid()`/`permit()`
+   (syscalls 17/18, Amiga semantics: no preemption while forbidden). The
+   interrupt-masking audit converted `tty.c`, `virtio_input.c`, `irq.c`, the
+   heap, the frame allocator and the scheduler to spinlocks; `mmu.c` keeps a
+   local mask and now broadcasts its TLB invalidation; Circle stays
+   single-core on core 0. A locked `printf` with a panic bypass, and
+   `panic()`. Lock order and rules: `docs/locking.md`. Still one core.
 4. **Secondary core bring-up**: PSCI `CPU_ON` on virt, the firmware spin table on
    Pi 3/Pi 4. Per-core stack, EL1 drop, shared MMU tables (MMU and caches on
    before touching any lock), vector table, per-core timer and per-core

@@ -7,6 +7,8 @@
 
 #include "mm.h"
 #include "mm/frame_alloc.h"
+#include "arch/percpu.h"
+#include "lib/panic.h"
 #include "mm/kmalloc.h"
 #include "test.h"
 
@@ -96,8 +98,22 @@ void tfp_printf(char *fmt, ...) {
     reports++;
 }
 
+// The heap lock runs on the real spinlock code (src/arch/spinlock.c), on one
+// simulated core.
+static struct cpu test_cpu;
+
+struct cpu *this_cpu(void) {
+    return &test_cpu;
+}
+
+void panic(const char *fmt, ...) {
+    printf("panic: %s\n", fmt);
+    __builtin_trap();
+}
+
 static void check_balanced(const char *where) {
     CHECK(irq_depth == 0, "%s: IRQ mask left unbalanced (%d)", where, irq_depth);
+    CHECK(test_cpu.locks_held == 0, "%s: %d spinlocks left held", where, test_cpu.locks_held);
 }
 
 static size_t live_allocs(void) {

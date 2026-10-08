@@ -55,7 +55,15 @@ run_test blkdev src/fs/blkdev.c
 run_test term src/video/term.c
 run_test printf src/lib/printf.c
 run_test virt src/platform/virt.c
-run_test kmalloc src/mm/kmalloc.c src/mm/kmalloc_stress.c
+TEST_FLAGS=(-DKORAOS_HOST_TEST)
+run_test kmalloc src/mm/kmalloc.c src/mm/kmalloc_stress.c src/arch/spinlock.c
+TEST_FLAGS=(-DKORAOS_HOST_TEST -pthread)
+run_test spinlock src/arch/spinlock.c
+# The same test on the compiler-atomic fallback (what non-arm64 hosts build).
+TEST_FLAGS=(-DKORAOS_HOST_TEST -DSPINLOCK_PORTABLE -pthread -I "$ROOT/tests/host")
+"$CC" "${CFLAGS[@]}" "${TEST_FLAGS[@]}" -o "$OUT/spinlock_portable_test" \
+    "$ROOT/tests/host/spinlock_test.c" "$ROOT/src/arch/spinlock.c" && "$OUT/spinlock_portable_test" || failed=1
+TEST_FLAGS=()
 run_test user_mem src/proc/user_mem.c
 TEST_FLAGS=(-DLIBK_HOST_TEST -I "$ROOT/user/libk")
 run_test libk_malloc user/libk/malloc.c

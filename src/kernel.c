@@ -1,6 +1,7 @@
 #include "arch/cxx.h"
 #include "arch/exception.h"
 #include "arch/irq.h"
+#include "arch/percpu.h"
 #include "arch/systick.h"
 #ifdef KORAOS_VIRT
 #include "platform/virt.h"
@@ -17,6 +18,7 @@
 #include "mm/kmalloc.h"
 #include "mm/mmu.h"
 #include "proc/task.h"
+#include "lib/panic.h"
 #include "lib/printf.h"
 #include "lib/stdlib.h"
 #include "mini_uart.h"
@@ -33,6 +35,11 @@ void putc(void *p, char c) {
 }
 
 void kernel_main(uintptr_t dtb) {
+  // Per-CPU data first: spinlocks and the scheduler find this core through it.
+  // kernel_main is then task 0 and holds the big kernel lock.
+  percpu_init(0);
+  task_init_boot();
+
 #ifdef KORAOS_VIRT
   if (!virt_platform_init(dtb)) {
     for (;;) { asm volatile("wfi"); }
@@ -45,6 +52,7 @@ void kernel_main(uintptr_t dtb) {
   uart_putc('\n');
 
   init_printf(NULL, putc);
+  printf_lock_init();
 
   // Run C++ global constructors now that printf is available. (Constructors
   // must not allocate yet: the frame allocator is brought up further down.)
@@ -152,7 +160,8 @@ void kernel_main(uintptr_t dtb) {
   task_reap_all();  // release anything left unreaped
 
   // Nothing left to run: keep serving the serial line (the debug console, or
-  // Ctrl-T to switch) for as long as the machine is up.
+  // Ctrl-T to switch) for as long as the machine is up, without the BKL.
+  bkl_release_for_good();
   for (;;) {
     tty_poll_serial();
   }

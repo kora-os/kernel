@@ -1,5 +1,5 @@
 #include "mm/frame_alloc.h"
-#include "arch/irq.h"
+#include "arch/spinlock.h"
 #include "mm.h"
 #ifdef KORAOS_VIRT
 #include "platform/virt.h"
@@ -17,6 +17,9 @@ extern char _end[];
 #define BITMAP_WORDS ((MAX_FRAMES + BITS_PER_WORD - 1) / BITS_PER_WORD)
 
 // One bit per page: 1 = allocated, 0 = free.
+// frame_lock (IRQ-safe) covers the bitmap and the free count.
+static struct spinlock frame_lock = SPINLOCK_INIT("frames");
+
 static uint64_t bitmap[BITMAP_WORDS];
 static uintptr_t pool_base;
 static size_t pool_frames;
@@ -103,9 +106,9 @@ void *frame_alloc_pages(size_t count) {
     }
 
     // The kernel heap allocates from interrupt handlers too (the USB stack's
-    // completion routines), so the bitmap is only touched with IRQs masked.
-    // Zeroing happens afterwards: the run is already ours.
-    uint64_t flags = irq_save();
+    // completion routines), hence the IRQ-safe lock. Zeroing happens after
+    // dropping it: the run is already ours.
+    uint64_t flags = spin_lock_irqsave(&frame_lock);
     void *page = NULL;
     // Linear first-fit scan for a run of `count` consecutive free frames.
     for (size_t start = 0; start + count <= pool_frames; start++) {
@@ -124,7 +127,7 @@ void *frame_alloc_pages(size_t count) {
         // Skip past the used frame that broke the run.
         start += run;
     }
-    irq_restore(flags);
+    spin_unlock_irqrestore(&frame_lock, flags);
 
     if (page != NULL) {
         zero_pages(page, count);
@@ -151,14 +154,14 @@ void frame_free_pages(void *pages, size_t count) {
         return;
     }
 
-    uint64_t flags = irq_save();
+    uint64_t flags = spin_lock_irqsave(&frame_lock);
     for (size_t i = 0; i < count; i++) {
         if (frame_is_used(start + i)) {
             frame_set_free(start + i);
             free_frames++;
         }
     }
-    irq_restore(flags);
+    spin_unlock_irqrestore(&frame_lock, flags);
 }
 
 void frame_free(void *page) {

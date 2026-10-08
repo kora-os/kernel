@@ -36,6 +36,8 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
 | 14 | `alloc_pages` | `void *alloc_pages(size_t count)` | base of `count` zeroed pages, or `NULL` |
 | 15 | `free_pages` | `int free_pages(void *base)` | `0`, or `-1` |
 | 16 | `msleep` | `void msleep(unsigned long ms)` | `0`, after at least `ms` milliseconds |
+| 17 | `forbid` | `int forbid(void)` | new forbid depth |
+| 18 | `permit` | `int permit(void)` | new forbid depth, or `-1` if not forbidden |
 | 32 | `chdir` | `int chdir(const char *path)` | `0`, or `-1` |
 | 33 | `getcwd` | `int getcwd(char *buf, size_t size)` | `0`, or `-1` |
 | 34 | `volume_info` | `int volume_info(unsigned int index, struct volume_info *out)` | `1` item, `0` end, `-1` error |
@@ -82,6 +84,11 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
   orphan and is reaped by the kernel.
 - **`msleep`**: blocks for at least `ms` milliseconds, in whole 10 ms ticks
   (plus up to one tick); other tasks run meanwhile. `msleep(0)` yields.
+- **`forbid`** / **`permit`**: after AmigaOS's `Forbid()`/`Permit()`. `forbid`
+  keeps the big kernel lock across returns to EL0 until the matching `permit`,
+  so no other core can be in the kernel meanwhile, and stops this task being
+  preempted (interrupts still run). They nest; blocking breaks the forbid only
+  while the task sleeps; exiting ends it. See [locking.md](locking.md).
 - **`open`**: accepts one access mode (`O_RDONLY`, `O_WRONLY`, `O_RDWR`) and
   create/exclusive/truncate/append flags below. Exclusive requires create;
   truncate and append require writable access. Create alone preserves an

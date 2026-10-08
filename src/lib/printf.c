@@ -205,11 +205,30 @@ void init_printf(void* putp,void (*putf) (void*,char))
     stdout_putp=putp;
     }
 
+/* KoraOS: optional lock around each printf, so lines from different cores
+ * and interrupt handlers do not interleave (see tfp_set_output_lock). */
+static unsigned long (*output_lock)(void);
+static void (*output_unlock)(unsigned long);
+
+void tfp_set_output_lock(unsigned long (*lock)(void), void (*unlock)(unsigned long))
+    {
+    output_lock=lock;
+    output_unlock=unlock;
+    }
+
+void tfp_vprintf(char *fmt, va_list va)
+    {
+    unsigned long flags=0;
+    if (output_lock) flags=output_lock();
+    tfp_format(stdout_putp,stdout_putf,fmt,va);
+    if (output_unlock) output_unlock(flags);
+    }
+
 void tfp_printf(char *fmt, ...)
     {
     va_list va;
     va_start(va,fmt);
-    tfp_format(stdout_putp,stdout_putf,fmt,va);
+    tfp_vprintf(fmt,va);
     va_end(va);
     }
 

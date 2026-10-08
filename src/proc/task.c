@@ -1,14 +1,25 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Tasks, their kernel stacks and the (preemptive, single-core) scheduler.
-// See proc/task.h.
+// Tasks, their kernel stacks, the scheduler and the big kernel lock. See
+// proc/task.h and docs/locking.md.
 //
-// Mutual exclusion is by masking IRQs: there is one core, the kernel is not
-// preemptible, and the only other code that touches task state is interrupt
-// handlers (wake-ups, the tick). Milestone 7 PR 3 replaces this with locks.
+// Locking:
+//   * The BKL serializes everything tasks do in the kernel: a task holds it
+//     from kernel entry (from EL0) until it returns to EL0 or blocks. The task
+//     table, parent links, fd tables and so on are BKL-protected.
+//   * sched_lock (IRQ-safe) protects task states and the scheduling fields
+//     (blocked_on, wait queues, wake_tick), because interrupt handlers, which
+//     never take the BKL, wake tasks and run the tick. It is held across the
+//     context switch and released by the task switched to.
+//   * Order: BKL, then a subsystem lock (tty, heap, ...), then sched_lock.
+//     A task blocks by marking itself under sched_lock first and only then
+//     dropping the BKL, so a waker that needs the BKL cannot miss it.
 
 #include "proc/task.h"
 #include "arch/irq.h"
+#include "arch/percpu.h"
+#include "arch/spinlock.h"
+#include "lib/panic.h"
 #include "arch/systick.h"
 #include "user/elf.h"
 #include "fs/fat32.h"
@@ -34,10 +45,85 @@ static task_t boot_task = {
     .state = TASK_RUNNABLE,
     .name = "kernel",
 };
-static task_t *current = &boot_task;
 
-// Set by the tick and by wake-ups; taken on the next return to EL0.
-static volatile bool need_resched;
+static struct spinlock sched_lock = SPINLOCK_INIT("sched");
+static struct spinlock bkl = SPINLOCK_INIT("bkl");
+static task_t *volatile bkl_holder;  // diagnostics
+
+#define current (this_cpu()->curr)
+
+void task_init_boot(void) {
+    struct cpu *c = this_cpu();
+    c->idle = &boot_task;
+    c->curr = &boot_task;
+    // kernel_main runs in the kernel, so it holds the BKL like any task would.
+    spin_lock(&bkl);
+    boot_task.bkl = true;
+    bkl_holder = &boot_task;
+}
+
+// The big kernel lock ---------------------------------------------------
+
+// Take the BKL, with IRQs open while waiting for it: the holder may be on
+// another core for a while, and this core still serves interrupts meanwhile
+// (handlers never take the BKL). Returns with the caller's IRQ mask.
+static void bkl_take(void) {
+    uint64_t flags = irq_save();
+    while (!spin_trylock(&bkl)) {
+        asm volatile("msr daifclr, #2\n\tyield\n\tmsr daifset, #2" ::: "memory");
+    }
+    bkl_holder = current;
+    irq_restore(flags);
+}
+
+// Drop the BKL around a switch if the running task holds it; it stays the
+// task's (t->bkl), to be retaken when the task runs again.
+static bool bkl_drop(void) {
+    if (!current->bkl) {
+        return false;
+    }
+    bkl_holder = NULL;
+    spin_unlock(&bkl);
+    return true;
+}
+
+void bkl_enter_from_el0(void) {
+    task_t *t = current;
+    if (!t->bkl) {  // a forbid()den task kept it
+        bkl_take();
+        t->bkl = true;
+    }
+}
+
+void bkl_exit_to_el0(void) {
+    task_t *t = current;
+    if (t->bkl && t->forbid == 0) {
+        t->bkl = false;
+        bkl_holder = NULL;
+        spin_unlock(&bkl);
+    }
+}
+
+void bkl_release_for_good(void) {
+    bkl_exit_to_el0();
+}
+
+int bkl_holder_pid(void) {
+    task_t *t = bkl_holder;
+    return t != NULL ? t->pid : -1;
+}
+
+int task_forbid(void) {
+    return ++current->forbid;
+}
+
+int task_permit(void) {
+    task_t *t = current;
+    if (t->forbid == 0) {
+        return -1;
+    }
+    return --t->forbid;
+}
 
 // Grab a free table slot and give it a fresh pid. Returns NULL if the table is
 // full. Leaves the slot RUNNABLE; the caller fills in the rest.
@@ -52,18 +138,25 @@ static void reap_orphans(void) {
     }
 }
 
+// The slot stays UNUSED, so the scheduler ignores it, until task_create()
+// has finished setting it up and makes it RUNNABLE.
 static task_t *task_alloc(void) {
     reap_orphans();
     for (int i = 0; i < MAX_TASKS; i++) {
         task_t *t = &tasks[i];
-        if (t->state == TASK_UNUSED) {
+        if (t->state == TASK_UNUSED && t->pid == 0) {
             memset(t, 0, sizeof(*t));
             t->pid = next_pid++;
-            t->state = TASK_RUNNABLE;
             return t;
         }
     }
     return NULL;
+}
+
+static void set_state(task_t *t, task_state_t state) {
+    uint64_t flags = spin_lock_irqsave(&sched_lock);
+    t->state = state;
+    spin_unlock_irqrestore(&sched_lock, flags);
 }
 
 // Release a task's held memory and return its slot to the pool. Never called
@@ -94,8 +187,8 @@ static void task_free(task_t *t) {
         t->kstack = NULL;
     }
     user_pages_release_all(t);
+    set_state(t, TASK_UNUSED);
     t->pid = 0;
-    t->state = TASK_UNUSED;
 }
 
 static task_t *parent_of(const task_t *t) {
@@ -126,33 +219,60 @@ static void check_kstack(const task_t *t) {
     const uint64_t *guard = t->kstack;
     for (int i = 0; i < KSTACK_GUARD_WORDS; i++) {
         if (guard[i] != KSTACK_FILL) {
-            printf("\n*** kernel stack overflow in pid %d (%s) ***\n", t->pid, t->name);
-            for (;;) {
-                asm volatile("wfi");
-            }
+            panic("kernel stack overflow in pid %d (%s)", t->pid, t->name);
         }
     }
 }
 
-// Switch to the next runnable task. Returns when the current task is chosen
-// again. With nothing runnable, waits for an interrupt to make something so.
-// The IRQ mask is not part of the saved context: each task keeps its own in
-// `flags`, on its own stack, and gets it back when it is switched in again.
-static void schedule(void) {
-    uint64_t flags = irq_save();
-    task_t *prev = current;
+// Switch to the next runnable task, with sched_lock held and IRQs masked; the
+// caller has already set the running task's new state. Returns when this task
+// is switched back in, with sched_lock held again (taken over from the task
+// that switched to us). With nothing runnable, waits for an interrupt, with
+// sched_lock released so the handler can wake someone.
+static void switch_away(void) {
+    struct cpu *c = this_cpu();
+    task_t *prev = c->curr;
+    if (c->locks_held != 1) {
+        panic("switching away from pid %d with %d spinlocks held", prev->pid,
+              c->locks_held);
+    }
     task_t *next = pick_next(prev);
     while (next == NULL) {
+        spin_unlock(&sched_lock);
         asm volatile("msr daifclr, #2\n\twfi\n\tmsr daifset, #2" ::: "memory");
+        spin_lock(&sched_lock);
         next = pick_next(prev);
     }
     if (next != prev) {
         check_kstack(prev);
-        current = next;
+        c->curr = next;
         fpsimd_switch_to(next);
         cpu_switch(&prev->ctx, &next->ctx);
     }
-    irq_restore(flags);
+}
+
+// The first thing a new task runs (from ret_to_user): release the
+// sched_lock the switching task held for it.
+void schedule_tail(void) {
+    spin_unlock(&sched_lock);
+}
+
+// Give up the CPU after the caller marked the running task under sched_lock
+// (taken with spin_lock_irqsave, `flags`): drop the BKL, switch, then take it
+// back when this task runs again.
+static void block_and_switch(uint64_t flags) {
+    bool had_bkl = bkl_drop();
+    switch_away();
+    spin_unlock_irqrestore(&sched_lock, flags);
+    if (had_bkl) {
+        bkl_take();
+    }
+}
+
+// Let other runnable tasks have the CPU; the running task stays runnable.
+static void schedule(void) {
+    uint64_t flags = spin_lock_irqsave(&sched_lock);
+    block_and_switch(flags);
 }
 
 static void make_runnable(task_t *t) {
@@ -161,36 +281,44 @@ static void make_runnable(task_t *t) {
     t->waiting_for = NULL;
     t->wq = NULL;
     t->wq_next = NULL;
-    need_resched = true;
+    this_cpu()->need_resched = true;
 }
 
 // Block the running task until `child` (or, if NULL, any child) exits.
 static void block_on_child(task_t *child) {
-    uint64_t flags = irq_save();
-    current->state = TASK_BLOCKED;
-    current->blocked_on = BLOCK_CHILD;
-    current->waiting_for = child;
-    schedule();
-    irq_restore(flags);
+    uint64_t flags = spin_lock_irqsave(&sched_lock);
+    if (child == NULL || child->state != TASK_EXITED) {
+        current->state = TASK_BLOCKED;
+        current->blocked_on = BLOCK_CHILD;
+        current->waiting_for = child;
+    }
+    block_and_switch(flags);
 }
 
 void task_yield(void) {
     schedule();
 }
 
-void wait_queue_sleep(struct wait_queue *wq) {
-    uint64_t flags = irq_save();
-    current->state = TASK_BLOCKED;
-    current->blocked_on = BLOCK_QUEUE;
-    current->wq = wq;
-    current->wq_next = wq->head;
-    wq->head = current;
-    schedule();
-    irq_restore(flags);
+void wait_queue_sleep(struct wait_queue *wq, struct spinlock *cond) {
+    spin_lock(&sched_lock);  // IRQs are already masked: the caller holds `cond`
+    task_t *t = current;
+    t->state = TASK_BLOCKED;
+    t->blocked_on = BLOCK_QUEUE;
+    t->wq = wq;
+    t->wq_next = wq->head;
+    wq->head = t;
+    spin_unlock(cond);
+    bool had_bkl = bkl_drop();
+    switch_away();
+    spin_unlock(&sched_lock);
+    if (had_bkl) {
+        bkl_take();
+    }
+    spin_lock(cond);
 }
 
 void wait_queue_wake_all(struct wait_queue *wq) {
-    uint64_t flags = irq_save();
+    uint64_t flags = spin_lock_irqsave(&sched_lock);
     task_t *t = wq->head;
     wq->head = NULL;
     while (t != NULL) {
@@ -198,7 +326,7 @@ void wait_queue_wake_all(struct wait_queue *wq) {
         make_runnable(t);
         t = next;
     }
-    irq_restore(flags);
+    spin_unlock_irqrestore(&sched_lock, flags);
 }
 
 void task_msleep(uint64_t ms) {
@@ -208,13 +336,12 @@ void task_msleep(uint64_t ms) {
         task_yield();
         return;
     }
-    uint64_t flags = irq_save();
+    uint64_t flags = spin_lock_irqsave(&sched_lock);
     current->state = TASK_BLOCKED;
     current->blocked_on = BLOCK_SLEEP;
     // The current tick is already partly over: one more guarantees the minimum.
     current->wake_tick = systick_count() + ticks + 1;
-    schedule();
-    irq_restore(flags);
+    block_and_switch(flags);
 }
 
 static void tick_task(task_t *t, uint64_t now) {
@@ -224,16 +351,20 @@ static void tick_task(task_t *t, uint64_t now) {
 }
 
 void sched_tick(uint64_t now) {
+    spin_lock(&sched_lock);  // in the timer interrupt: IRQs masked
     tick_task(&boot_task, now);
     for (int i = 0; i < MAX_TASKS; i++) {
         tick_task(&tasks[i], now);
     }
-    need_resched = true;  // round robin: the running task's slice is over
+    this_cpu()->need_resched = true;  // round robin: the running slice is over
+    spin_unlock(&sched_lock);
 }
 
 void sched_preempt_check(void) {
-    if (need_resched) {
-        need_resched = false;
+    struct cpu *c = this_cpu();
+    // A forbid()den task keeps its core, as on AmigaOS (until it blocks).
+    if (c->need_resched && c->curr->forbid == 0) {
+        c->need_resched = false;
         schedule();
     }
 }
@@ -416,6 +547,7 @@ task_t *task_create(const char *name, int argc, char *const argv[]) {
 
     printf("  [pid %d] run '%s': entry=0x%lx sp=0x%lx (%d image pages)\n",
            t->pid, name, lp.entry, sp, (int)t->image_pages);
+    set_state(t, TASK_RUNNABLE);
     return t;
 }
 
@@ -477,7 +609,8 @@ int task_getpid(void) {
 }
 
 task_t *task_current(void) {
-    return current != &boot_task ? current : NULL;
+    task_t *t = current;
+    return t != this_cpu()->idle ? t : NULL;
 }
 
 task_t *task_running(void) {
@@ -485,13 +618,12 @@ task_t *task_running(void) {
 }
 
 void task_exit(int code) {
-    irq_save();  // for good: the next task brings its own mask
     task_t *me = current;
-    me->state = TASK_EXITED;
-    me->exit_code = code;
+    me->forbid = 0;  // exiting ends a forbid(), as Permit() would
     fpsimd_release(me);
 
     // Children outlive us as orphans: reaped as soon as they are zombies.
+    // (Under the BKL: no other task changes parent links meanwhile.)
     for (int i = 0; i < MAX_TASKS; i++) {
         task_t *t = &tasks[i];
         if (t->state != TASK_UNUSED && t->parent == me) {
@@ -503,15 +635,16 @@ void task_exit(int code) {
         }
     }
 
+    uint64_t flags = spin_lock_irqsave(&sched_lock);
+    me->state = TASK_EXITED;
+    me->exit_code = code;
     task_t *parent = parent_of(me);
     if (!me->orphan && parent->state == TASK_BLOCKED && parent->blocked_on == BLOCK_CHILD &&
         (parent->waiting_for == me || parent->waiting_for == NULL)) {
         make_runnable(parent);
     }
-    schedule();  // never picks this task again
-    for (;;) {
-        asm volatile("wfi");
-    }
+    block_and_switch(flags);  // never picks this task again
+    panic("exited task %d was switched back in", me->pid);
 }
 
 void task_reap_all(void) {
@@ -546,9 +679,11 @@ size_t task_kstack_peak_max(void) {
 }
 
 void task_for_each(void (*fn)(const task_t *t, void *ctx), void *ctx) {
+    uint64_t flags = spin_lock_irqsave(&sched_lock);
     for (int i = 0; i < MAX_TASKS; i++) {
         if (tasks[i].state != TASK_UNUSED) {
             fn(&tasks[i], ctx);
         }
     }
+    spin_unlock_irqrestore(&sched_lock, flags);
 }

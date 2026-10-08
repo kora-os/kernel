@@ -34,7 +34,9 @@ A program runs in EL0 with a deliberately small runtime:
   it); `spawn_flags(..., SPAWN_NOWAIT)` starts it in the background, and
   `waitpid(-1, &code, WNOHANG)` collects finished children without blocking.
   `msleep(ms)` sleeps; `uptime_us()` reads a microsecond clock without a
-  syscall. There are no threads yet.
+  syscall. `forbid()`/`permit()` keep the CPU and the kernel to yourself while
+  you poke at kernel structures (see [locking.md](locking.md)). There are no
+  threads yet.
 - **`main` signature.** Either `int main(void)` or `int main(int argc, char
   **argv)`; the entry stub [`user/crt0.S`](../user/crt0.S) calls `main` and
   passes its return value to `exit`.

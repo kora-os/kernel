@@ -26,6 +26,8 @@
 #define SYS_ALLOC_PAGES 14
 #define SYS_FREE_PAGES  15
 #define SYS_MSLEEP      16
+#define SYS_FORBID      17
+#define SYS_PERMIT      18
 
 #define SYS_CHDIR 32
 #define SYS_GETCWD 33

@@ -74,6 +74,11 @@ regs Kusti, 23.10.2004
 void init_printf(void* putp,void (*putf) (void*,char));
 
 void tfp_printf(char *fmt, ...);
+void tfp_vprintf(char *fmt, va_list va);
+
+/* KoraOS: serialize whole printf calls. lock() returns a value handed back to
+ * unlock() (the saved IRQ mask). Unset by default, as in host tests. */
+void tfp_set_output_lock(unsigned long (*lock)(void), void (*unlock)(unsigned long));
 void tfp_sprintf(char* s,char *fmt, ...);
 
 void tfp_format(void* putp,void (*putf) (void*,char),char *fmt, va_list va);

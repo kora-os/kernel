@@ -62,6 +62,7 @@ class Qemu:
                 self.pending = self.pending[match.end():]
                 return match
             if FAULT.search(self.pending):
+                self.drain(0.5)  # the rest of the fault report
                 raise Failure("kernel fault:\n" + self.tail())
             remaining = deadline - time.monotonic()
             if remaining <= 0:
@@ -75,6 +76,20 @@ class Qemu:
                 self.log.write(data)
                 self.log.flush()
                 self.pending += data
+
+    def drain(self, seconds):
+        """Collect output for `seconds` more (after a fault, for its report)."""
+        deadline = time.monotonic() + seconds
+        while (remaining := deadline - time.monotonic()) > 0:
+            ready, _, _ = select.select([self.proc.stdout], [], [], remaining)
+            if not ready:
+                break
+            data = os.read(self.proc.stdout.fileno(), 4096)
+            if not data:
+                break
+            self.log.write(data)
+            self.log.flush()
+            self.pending += data
 
     def send(self, text):
         self.proc.stdin.write(text.encode())
@@ -394,31 +409,42 @@ def run(q, graphics=True, keyboard=False, repeat=0, multi_volume=False, write_te
 
     def read_tasks():
         """Run `tasks` on the debug console: ({name: (state, stack)}, peak, size)."""
+        listed, peak, size, _ = read_tasks_bkl()
+        return {name: info[:2] for name, info in listed.items()}, peak, size
+
+    def read_tasks_bkl():
+        """`tasks` with the forbid flag and BKL holder: ({name: (state, stack,
+        forbidden)}, peak, size, holder pid or None)."""
         q.send("\x14")
         q.expect(rb"koraos> ")
         q.send("tasks\r")
         listed = {}
         while True:
-            m = q.expect(rb"^(?:\s+(\d+)\s+(\w+)\s+(\d+)\s+(\S+)|kernel stack peak: (\d+) of (\d+) bytes)\r?\n")
-            if m.group(5):
-                peak, size = int(m.group(5)), int(m.group(6))
+            m = q.expect(rb"^(?:\s+(\d+)\s+(\w+)\s+(\d+)\s+(\S+)( \(forbid\))?|kernel stack peak: (\d+) of (\d+) bytes)\r?\n")
+            if m.group(6):
+                peak, size = int(m.group(6)), int(m.group(7))
                 break
-            listed[m.group(4).decode()] = (m.group(2).decode(), int(m.group(3)))
+            listed[m.group(4).decode()] = (m.group(2).decode(), int(m.group(3)), m.group(5) is not None)
+        m = q.expect(rb"^big kernel lock: (free|pid (\d+))\r?\n")
+        holder = int(m.group(2)) if m.group(2) else None
         q.expect(rb"koraos> ")
         q.send("\x14")
         q.expect(rb"\[serial -> screen terminal")
-        return listed, peak, size
+        return listed, peak, size, holder
 
     def tasks():
         # The shell sleeps in read() until input arrives; it does not spin. (A
         # few retries cover the moment between printing its prompt and reading.)
+        # With everyone asleep, nobody holds the big kernel lock.
         for _ in range(5):
-            listed, peak, size = read_tasks()
-            if listed.get("init", ("",))[0] == "blocked" and listed.get("shell", ("",))[0] == "blocked":
+            listed, peak, size, holder = read_tasks_bkl()
+            if (listed.get("init", ("",))[0] == "blocked" and
+                    listed.get("shell", ("",))[0] == "blocked" and holder is None):
                 break
             time.sleep(0.2)
         else:
-            raise Failure("expected init and the shell blocked, got %s" % listed)
+            raise Failure("expected init and the shell blocked and the BKL free, got %s, "
+                          "holder %s" % (listed, holder))
         # Every task so far, the probes included: keep a quarter of the stack spare.
         if peak == 0 or peak > size * 3 // 4:
             raise Failure("kernel stack peak %d of %d bytes" % (peak, size))
@@ -440,8 +466,10 @@ def run(q, graphics=True, keyboard=False, repeat=0, multi_volume=False, write_te
         pid = m.group(1)
         q.expect(PROMPT)
         q.send("echo alive\r")
-        m = q.expect(rb"^(alive|schedprobe: spun)")
-        if m.group(1) != b"alive":
+        # "alive" anchored (the echoed command line contains it too); the
+        # background job's line may follow a prompt.
+        m = q.expect(rb"^alive|schedprobe: spun")
+        if m.group(0) != b"alive":
             raise Failure("the shell did not run while a background job was spinning")
         q.expect(PROMPT)
         # The shell may be asleep in read() or, preempted between its prompt and
@@ -449,7 +477,7 @@ def run(q, graphics=True, keyboard=False, repeat=0, multi_volume=False, write_te
         listed, _, _ = read_tasks()
         if listed.get("schedprobe", ("",))[0] != "runnable" or "shell" not in listed:
             raise Failure("expected a runnable schedprobe next to the shell, got %s" % listed)
-        q.expect(rb"^schedprobe: spun \d+ ms", timeout=60)
+        q.expect(rb"schedprobe: spun \d+ ms", timeout=60)
         # The job exits just after printing; the first prompt after that
         # reports it.
         for _ in range(50):
@@ -463,6 +491,52 @@ def run(q, graphics=True, keyboard=False, repeat=0, multi_volume=False, write_te
         else:
             raise Failure("the shell never reported the finished background job")
     yield "msleep, background jobs and preemption of a spinning task", scheduling
+
+    def forbid_permit():
+        # With a spinner competing, a normal task loses the CPU for whole time
+        # slices (10 ms); while forbid()den it must not lose it at all. Host
+        # scheduling noise can stretch a gap, so allow a few attempts.
+        q.send("schedprobe spin 8000 &\r")
+        m = q.expect(rb"^\[(\d+)\] started")
+        spinner = m.group(1)
+        q.expect(PROMPT)
+        results = []
+        for _ in range(3):
+            q.send("forbidprobe\r")
+            m = q.expect(rb"^forbidprobe: (?:longest gap free (\d+) us, forbidden (\d+) us|([^\r\n]*))\r?\n",
+                         timeout=60)
+            if m.group(3) is not None:
+                raise Failure("forbidprobe: %s" % m.group(3).decode(errors="replace"))
+            q.expect(rb"exited with 0")
+            q.expect(PROMPT)
+            free_gap, forbidden_gap = int(m.group(1)), int(m.group(2))
+            results.append((free_gap, forbidden_gap))
+            if free_gap >= 5000 and forbidden_gap < 5000:
+                break
+        else:
+            raise Failure("forbid() did not keep the CPU (free, forbidden gaps in us): %s" % results)
+        q.expect(rb"schedprobe: spun \d+ ms", timeout=60)
+
+        # Background output may follow the shell's prompt on the same line, so
+        # the background jobs' lines are matched unanchored.
+        # While a task holds forbid(), `tasks` (in the UART interrupt) shows it
+        # holding the BKL; the shell cannot run until it permits.
+        q.send("forbidprobe hold 3000 &\r")
+        q.expect(rb"forbidprobe: holding")
+        listed, _, _, holder = read_tasks_bkl()
+        if not listed.get("forbidprobe", ("", 0, False))[2] or holder is None:
+            raise Failure("forbidden task or BKL holder not shown: %s, holder %s" % (listed, holder))
+        q.expect(rb"forbidprobe: released", timeout=60)
+        for _ in range(50):
+            q.send("\r")
+            m = q.expect(rb"^(?:\[(\d+)\] done, exit (\d+)\r?\n)?\$ ")
+            if m.group(1) is not None and m.group(1) != spinner:
+                break
+            time.sleep(0.1)
+        _, _, _, holder = read_tasks_bkl()
+        if holder is not None:
+            raise Failure("the BKL is still held (by pid %s) with the system idle" % holder)
+    yield "forbid()/permit(): nesting, no preemption, BKL held across EL0", forbid_permit
 
     if repeat:
         def kernel_counts():

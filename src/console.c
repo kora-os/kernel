@@ -110,8 +110,8 @@ void console_cmd_heaptest(const char *args) {
 static void print_task(const task_t *t, void *ctx) {
   (void)ctx;
   static const char *const states[] = {"unused  ", "runnable", "blocked ", "exited  "};
-  printf("  %3d  %s  %5u  %s\n", t->pid, states[t->state],
-         (unsigned)task_kstack_peak(t), t->name);
+  printf("  %3d  %s  %5u  %s%s\n", t->pid, states[t->state],
+         (unsigned)task_kstack_peak(t), t->name, t->forbid ? " (forbid)" : "");
 }
 
 // Every task with its state and kernel stack high-water mark (bytes).
@@ -121,6 +121,12 @@ void console_cmd_tasks(const char *args) {
   task_for_each(print_task, NULL);
   printf("kernel stack peak: %u of %u bytes\n", (unsigned)task_kstack_peak_max(),
          (unsigned)(KSTACK_PAGES * PAGE_SIZE));
+  int holder = bkl_holder_pid();
+  if (holder < 0) {
+    printf("big kernel lock: free\n");
+  } else {
+    printf("big kernel lock: pid %d\n", holder);
+  }
 }
 
 console_command_t commands[] = {

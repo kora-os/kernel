@@ -122,11 +122,11 @@ categories:
         status: completed
         description: Timer-driven task switching with sleeping and wait queues.
         milestone: 7
-        completed: 2026-10-04
+        completed: 2026-10-07
         prs: [51, 52]
       - id: smp
         name: Multicore (SMP)
-        status: planned
+        status: in_progress
         description: User programs run in parallel on all cores under one big kernel lock.
         milestone: 7
       - id: core-pinning

@@ -111,15 +111,19 @@ el1h_sync:
     bl  handle_sync_el1
     kernel_exit
 
+// A trap from EL0 runs under the big kernel lock: taken here, released before
+// returning (unless the task is forbid()den). Interrupts never take it.
 // Every return to EL0 passes sched_preempt_check, which switches tasks if the
 // tick or a wake-up asked for it. The kernel is not preemptible, so this is
 // the only place a running task is switched out against its will.
 el0_sync:
     kernel_entry
+    bl  bkl_enter_from_el0
     mrs x0, esr_el1
     mrs x1, far_el1
     mov x2, sp
     bl  handle_sync_el0
+    bl  bkl_exit_to_el0
     bl  sched_preempt_check
     kernel_exit
 
@@ -141,6 +145,7 @@ el0_irq:
 // at the trap frame task_create() prepared at the top of its kernel stack.
 .global ret_to_user
 ret_to_user:
+    bl  schedule_tail
     kernel_exit
 
 // --- Invalid / unexpected entries (numbered by vector index) ---

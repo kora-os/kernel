@@ -181,7 +181,10 @@ void mmu_map_coherent(uintptr_t base, size_t size) {
     }
 
     // Nothing (an IRQ handler included) may touch these blocks while their
-    // entries are briefly invalid below.
+    // entries are briefly invalid below. This is a local mask, not a lock:
+    // callers run under the BKL (boot, or a task), so no other core remaps at
+    // the same time, and the TLB maintenance is broadcast (inner shareable) so
+    // other cores drop the old entries too.
     uint64_t daif;
     asm volatile("mrs %0, daif" : "=r"(daif));
     asm volatile("msr daifset, #2" ::: "memory");
@@ -206,7 +209,7 @@ void mmu_map_coherent(uintptr_t base, size_t size) {
         // an invalid entry and a TLB flush.
         *entry = 0;
         asm volatile("dsb ishst" ::: "memory");
-        asm volatile("tlbi vaae1, %0" ::"r"(addr >> PAGE_SHIFT) : "memory");
+        asm volatile("tlbi vaae1is, %0" ::"r"(addr >> PAGE_SHIFT) : "memory");
         asm volatile("dsb ish" ::: "memory");
         *entry = addr | MMU_COHERENT_BLOCK_FLAGS;
     }

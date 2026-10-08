@@ -524,6 +524,12 @@ void syscall_handle(struct trapframe *tf) {
         task_msleep(a0);
         ret = 0;
         break;
+    case SYS_forbid:
+        ret = task_forbid();
+        break;
+    case SYS_permit:
+        ret = task_permit();
+        break;
     case SYS_volume_info:
         ret = sys_volume_info((unsigned)a0, (struct kvolume_info *)a1);
         break;

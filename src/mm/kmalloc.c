@@ -13,7 +13,7 @@
 
 #include "mm/kmalloc.h"
 
-#include "arch/irq.h"
+#include "arch/spinlock.h"
 #include "lib/printf.h"
 #include "lib/string.h"
 #include "mm.h"
@@ -71,6 +71,10 @@ struct kheap_class {
     size_t used;
     bool has_empty;              // one fully free slab is kept cached
 };
+
+// heap_lock (IRQ-safe: Circle allocates in USB interrupt handlers) covers all
+// heap state. Lock order: heap, then frames (slabs and runs come from there).
+static struct spinlock heap_lock = SPINLOCK_INIT("heap");
 
 static struct kheap_class classes[KMALLOC_CLASSES];
 static size_t large_allocs;
@@ -171,7 +175,7 @@ void *kmalloc_aligned(size_t size, size_t align) {
         return NULL;
     }
 
-    uint64_t flags = irq_save();
+    uint64_t flags = spin_lock_irqsave(&heap_lock);
     void *ptr = NULL;
     if (align <= KMALLOC_MIN_ALIGN && size <= KMALLOC_MAX_SMALL) {
         unsigned cls = 0;
@@ -187,7 +191,7 @@ void *kmalloc_aligned(size_t size, size_t align) {
     } else {
         failed_allocs++;
     }
-    irq_restore(flags);
+    spin_unlock_irqrestore(&heap_lock, flags);
     return ptr;
 }
 
@@ -257,7 +261,7 @@ void kfree(void *ptr) {
     if (ptr == NULL) {
         return;
     }
-    uint64_t flags = irq_save();
+    uint64_t flags = spin_lock_irqsave(&heap_lock);
     if (((uintptr_t)ptr & (KMALLOC_MIN_ALIGN - 1)) != 0) {
         report_bad_free(ptr, "misaligned");
     } else {
@@ -271,11 +275,11 @@ void kfree(void *ptr) {
             report_bad_free(ptr, "unknown");
         }
     }
-    irq_restore(flags);
+    spin_unlock_irqrestore(&heap_lock, flags);
 }
 
 void kmalloc_get_stats(struct kmalloc_stats *out) {
-    uint64_t flags = irq_save();
+    uint64_t flags = spin_lock_irqsave(&heap_lock);
     size_t live = large_allocs;
     for (unsigned i = 0; i < KMALLOC_CLASSES; i++) {
         out->classes[i].block_size = class_sizes[i];
@@ -290,5 +294,5 @@ void kmalloc_get_stats(struct kmalloc_stats *out) {
     out->total_allocs = total_allocs;
     out->failed_allocs = failed_allocs;
     out->bad_frees = bad_frees;
-    irq_restore(flags);
+    spin_unlock_irqrestore(&heap_lock, flags);
 }
