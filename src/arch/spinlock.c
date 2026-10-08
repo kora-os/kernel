@@ -73,7 +73,20 @@ static void arch_unlock(volatile uint32_t *word) {
 }
 #endif
 
+// Exclusives (LDAXR/STXR) are only architecturally reliable on Normal
+// cacheable memory. Before this core's MMU and data cache are on, every access
+// is Device-nGnRnE, and on real Cortex-A53/A72 cores the store-exclusive then
+// fails forever: a silent hang that QEMU, which emulates exclusives anyway,
+// never shows. Refuse loudly instead.
+static void check_usable(const struct spinlock *lock, struct cpu *c) {
+    if (!c->caches_on && !c->panicking) {
+        panic("spinlock '%s' used on cpu %u before its MMU and caches are on", lock->name,
+              c->id);
+    }
+}
+
 static void check_recursion(const struct spinlock *lock, struct cpu *c) {
+    check_usable(lock, c);
     if (lock->locked && lock->owner == c->id + 1 && !c->panicking) {
         panic("spinlock '%s' taken twice on cpu %u", lock->name, c->id);
     }

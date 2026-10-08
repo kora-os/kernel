@@ -24,7 +24,10 @@ static _Thread_local struct cpu *thread_cpu;
 static struct cpu test_cpus[MAX_CPUS];
 static _Thread_local int irq_depth;
 
+static bool caches_off;  // simulate a core whose MMU and caches are still off
+
 struct cpu *this_cpu(void) {
+    thread_cpu->caches_on = !caches_off;
     return thread_cpu;
 }
 
@@ -106,7 +109,14 @@ static void test_single_core(void) {
     CHECK(irq_depth == 0 && test_cpus[0].locks_held == 0, "irqrestore unmasks");
 }
 
+static void lock_before_caches(void) {
+    thread_cpu = &test_cpus[0];
+    caches_off = true;
+    spin_lock(&guarded);  // on hardware this would hang in STXR forever
+}
+
 static void test_guards(void) {
+    CHECK(panics_in_child(lock_before_caches), "spinlock before the MMU and caches panics");
     CHECK(panics_in_child(lock_twice), "recursive spin_lock panics");
     CHECK(panics_in_child(trylock_twice), "recursive spin_trylock panics");
     CHECK(panics_in_child(unlock_foreign), "unlock by a non-holder panics");

@@ -682,8 +682,14 @@ def main():
     q = Qemu(args.qemu, os.path.abspath(args.kernel), os.path.abspath(args.out), args.machine, args.ram, extra, args.el2)
     failed = False
     try:
-        # The kernel heap checks itself before any later bring-up step uses it.
-        q.expect(rb"^\[heap\] self-test ok, \d+ of \d+ pages free", timeout=90)
+        try:
+            # The kernel heap checks itself before any later bring-up step
+            # uses it; it is also the first sign the kernel booted at all.
+            q.expect(rb"^\[heap\] self-test ok, \d+ of \d+ pages free", timeout=90)
+        except Failure as e:
+            print("FAIL - kernel boots (heap self-test): %s" % e)
+            print("qemu smoke: FAILED (artifacts in %s)" % args.out)
+            sys.exit(1)  # QEMU is still stopped by the finally below
         if args.disk:
             q.expect(rb"\[blkdev\] using VirtIO disk")
         if args.expect_root_failure:

@@ -1,5 +1,6 @@
 #include "mm/mmu.h"
 #include "arch/cache.h"
+#include "arch/percpu.h"
 #include "arch/sysregs.h"
 #include "common.h"
 #include "mm.h"
@@ -167,6 +168,9 @@ void mmu_init(void) {
     sctlr |= SCTLR_MMU_ENABLED | SCTLR_D_CACHE | SCTLR_I_CACHE;
     asm volatile("msr sctlr_el1, %0" ::"r"(sctlr));
     asm volatile("isb");
+
+    // Normal cacheable memory from here on: spinlocks (exclusives) work now.
+    this_cpu()->caches_on = true;
 }
 
 void mmu_map_coherent(uintptr_t base, size_t size) {

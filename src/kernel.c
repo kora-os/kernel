@@ -36,9 +36,8 @@ void putc(void *p, char c) {
 
 void kernel_main(uintptr_t dtb) {
   // Per-CPU data first: spinlocks and the scheduler find this core through it.
-  // kernel_main is then task 0 and holds the big kernel lock.
+  // No spinlock may be taken before mmu_init() below (see src/arch/spinlock.c).
   percpu_init(0);
-  task_init_boot();
 
 #ifdef KORAOS_VIRT
   if (!virt_platform_init(dtb)) {
@@ -51,8 +50,7 @@ void kernel_main(uintptr_t dtb) {
   uart_putc('K');
   uart_putc('\n');
 
-  init_printf(NULL, putc);
-  printf_lock_init();
+  init_printf(NULL, putc);  // unlocked until printf_lock_init() below
 
   // Run C++ global constructors now that printf is available. (Constructors
   // must not allocate yet: the frame allocator is brought up further down.)
@@ -64,6 +62,12 @@ void kernel_main(uintptr_t dtb) {
   // Enable the MMU with a flat, fully-permissive identity map, then bring up
   // the physical page allocator for later user-stack allocation.
   mmu_init();
+
+  // Caches are on: spinlocks work. kernel_main becomes task 0, holding the
+  // big kernel lock, and printf starts taking its lock.
+  task_init_boot();
+  printf_lock_init();
+
   frame_alloc_init();
 
   // Exercise the kernel heap once before anything depends on it.

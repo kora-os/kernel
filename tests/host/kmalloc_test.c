@@ -103,6 +103,7 @@ void tfp_printf(char *fmt, ...) {
 static struct cpu test_cpu;
 
 struct cpu *this_cpu(void) {
+    test_cpu.caches_on = true;
     return &test_cpu;
 }
 

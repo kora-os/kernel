@@ -19,6 +19,7 @@ struct cpu {
     struct task *fp_owner;    // whose state is in this core's FP/SIMD registers
     int locks_held;           // spinlocks this core holds (debug checks)
     bool panicking;           // panic(): bypass locks so the message gets out
+    bool caches_on;           // MMU and data cache enabled: spinlocks usable
 };
 
 extern struct cpu cpus[MAX_CPUS];
