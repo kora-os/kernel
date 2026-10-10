@@ -683,6 +683,13 @@ def main():
     failed = False
     try:
         try:
+            # The first line names the build (git commit, "-dirty" for local
+            # changes), so a log always shows which kernel ran.
+            m = q.expect(rb"^KoraOS \d+\.\d+ \(([0-9a-zA-Z.+-]+)\)\r?\n", timeout=90)
+            build = m.group(1).decode()
+            if build == "unknown" and os.path.isdir(os.path.join(ROOT, ".git")):
+                raise Failure("boot line has no build identifier in a git checkout")
+            print("ok   - boot line names the build (%s)" % build)
             # The kernel heap checks itself before any later bring-up step
             # uses it; it is also the first sign the kernel booted at all.
             q.expect(rb"^\[heap\] self-test ok, \d+ of \d+ pages free", timeout=90)

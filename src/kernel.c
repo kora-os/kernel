@@ -47,8 +47,11 @@ void kernel_main(uintptr_t dtb) {
   (void)dtb;
 #endif
   uart_init();
-  uart_putc('K');
-  uart_putc('\n');
+  // First words on the UART: which kernel this is, down to the commit, so a
+  // log always shows whether the board runs the build you think it does.
+  uart_puts("KoraOS " KORAOS_VERSION " (");
+  uart_puts(koraos_build_id);
+  uart_puts(")\n");
 
   init_printf(NULL, putc);  // unlocked until printf_lock_init() below
 

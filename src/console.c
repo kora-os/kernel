@@ -40,7 +40,7 @@ void console_cmd_get_el(const char *args) {
 }
 
 void console_cmd_version(const char *args) {
-  printf("KoraOS version %s\n", KORAOS_VERSION);
+  printf("KoraOS version %s (%s)\n", KORAOS_VERSION, koraos_build_id);
 }
 
 // Interrupt health at a glance: the tick count should track the uptime (100 per
