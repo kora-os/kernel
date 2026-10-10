@@ -4,6 +4,7 @@
 #include "fs/fat32.h"
 #include "fs/namespace.h"
 #include "arch/fpsimd.h"
+#include "arch/spinlock.h"
 #include "arch/trapframe.h"
 
 // Process model. Every task has its own kernel stack, with the EL0 register
@@ -74,6 +75,8 @@ typedef struct task {
     struct task *wq_next;             // next sleeper on that queue
     uint64_t wake_tick;               // BLOCK_SLEEP: systick count to wake at
     bool orphan;                      // its parent exited: reaped automatically
+    bool bkl;                         // holds the BKL (dropped while switched out)
+    int forbid;                       // forbid() depth: keeps the BKL and the core
     void *image;                      // loaded ELF region (for reclaim)
     size_t image_pages;
     void *stack;                      // user stack region (for reclaim)
@@ -114,10 +117,12 @@ int task_wait(int pid);
 // Block the current task for at least `ms` milliseconds (rounded up to ticks).
 void task_msleep(uint64_t ms);
 
-// Sleep on `wq` until wait_queue_wake_all(). Call with IRQs masked, after
-// checking the condition being waited for, so a wake-up cannot slip between
-// the check and the sleep; returns with IRQs still masked.
-void wait_queue_sleep(struct wait_queue *wq);
+// Sleep on `wq` until wait_queue_wake_all(). Call holding `cond`, the
+// spinlock protecting the condition being waited for (taken with
+// spin_lock_irqsave), after checking it: the task is queued before `cond` is
+// released, so a waker, which takes `cond` to change the condition, cannot slip
+// in between. Returns holding `cond` again.
+void wait_queue_sleep(struct wait_queue *wq, struct spinlock *cond);
 
 // Make every task sleeping on `wq` runnable. Safe from interrupt handlers.
 void wait_queue_wake_all(struct wait_queue *wq);
@@ -127,8 +132,28 @@ void wait_queue_wake_all(struct wait_queue *wq);
 void sched_tick(uint64_t now);
 
 // On the way back to EL0 (from src/arch/vectors.S): switch tasks if a
-// reschedule was requested. Called with IRQs masked.
+// reschedule was requested, unless the task is forbid()den. Called with IRQs
+// masked and without the BKL.
 void sched_preempt_check(void);
+
+// Make the boot thread task 0 of this core; it starts out holding the BKL.
+void task_init_boot(void);
+
+// The big kernel lock (docs/locking.md). Taken on every kernel entry from EL0
+// and released on the way back (from src/arch/vectors.S), except while the task
+// is forbid()den; dropped while a task is switched out. The boot thread
+// releases it for good once it only serves the serial line.
+void bkl_enter_from_el0(void);
+void bkl_exit_to_el0(void);
+void bkl_release_for_good(void);
+int bkl_holder_pid(void);  // -1 if free
+
+// forbid()/permit() (syscalls 17/18): keep the BKL across returns to EL0 and
+// stop preemption on this core, nesting. Blocking breaks the forbid while the
+// task sleeps, as on AmigaOS. They return the new depth (permit: -1 if the
+// task was not forbidden).
+int task_forbid(void);
+int task_permit(void);
 
 // pid of the current task (0 for the kernel's own boot task).
 int task_getpid(void);
@@ -160,5 +185,7 @@ void task_for_each(void (*fn)(const task_t *t, void *ctx), void *ctx);
 // --- implemented in src/arch/entry.S ---
 // Save the callee-saved context into *from and resume *to.
 void cpu_switch(struct cpu_context *from, struct cpu_context *to);
-// First return of a new task: restore its trap frame (at sp) and eret to EL0.
+// First return of a new task: release the sched_lock it inherited
+// (schedule_tail), restore its trap frame (at sp) and eret to EL0.
 void ret_to_user(void);
+void schedule_tail(void);

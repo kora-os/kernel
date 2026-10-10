@@ -24,7 +24,9 @@
 #define SYS_alloc_pages 14
 #define SYS_free_pages  15
 #define SYS_msleep      16
-// Slots 17 through 31 are reserved for task and memory work.
+#define SYS_forbid      17
+#define SYS_permit      18
+// Slots 19 through 31 are reserved for task and memory work.
 #define SYS_chdir   32
 #define SYS_getcwd  33
 #define SYS_volume_info 34

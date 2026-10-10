@@ -4,6 +4,7 @@
 
 #include "arch/fpsimd.h"
 
+#include "arch/percpu.h"
 #include "proc/task.h"
 
 #define CPACR_FPEN_SHIFT 20
@@ -11,9 +12,9 @@
 #define CPACR_FPEN_NONE (0ul << CPACR_FPEN_SHIFT)  // trap EL0 and EL1
 #define CPACR_FPEN_ALL (3ul << CPACR_FPEN_SHIFT)   // trap nothing
 
-// The task whose values are in the FP/SIMD registers, or NULL. One per core
-// once secondary cores run tasks (tasks never migrate).
-static task_t *fp_owner;
+// The task whose values are in this core's FP/SIMD registers is
+// this_cpu()->fp_owner (tasks never migrate between cores). Only the owning
+// core touches it, with IRQs masked (traps and the scheduler), so no lock.
 
 static void set_access(bool allowed) {
     uint64_t cpacr;
@@ -23,15 +24,16 @@ static void set_access(bool allowed) {
 }
 
 void fpsimd_switch_to(task_t *next) {
-    set_access(next != NULL && next == fp_owner);
+    set_access(next != NULL && next == this_cpu()->fp_owner);
 }
 
 void fpsimd_trap(void) {
-    task_t *t = task_running();
+    struct cpu *c = this_cpu();
+    task_t *t = c->curr;
     set_access(true);
-    if (fp_owner != t) {
-        if (fp_owner != NULL) {
-            fpsimd_save(&fp_owner->fp);
+    if (c->fp_owner != t) {
+        if (c->fp_owner != NULL) {
+            fpsimd_save(&c->fp_owner->fp);
         }
         if (t->fp_used) {
             fpsimd_load(&t->fp);
@@ -39,13 +41,14 @@ void fpsimd_trap(void) {
             fpsimd_zero();
             t->fp_used = true;
         }
-        fp_owner = t;
+        c->fp_owner = t;
     }
 }
 
 void fpsimd_release(task_t *t) {
-    if (fp_owner == t) {
-        fp_owner = NULL;
+    struct cpu *c = this_cpu();
+    if (c->fp_owner == t) {
+        c->fp_owner = NULL;
         set_access(false);
     }
 }

@@ -14,7 +14,7 @@ extern "C" {
 // least KMALLOC_MIN_ALIGN aligned and padded to a multiple of it, so two blocks
 // never share a cache line (DMA cache maintenance on one cannot corrupt
 // another). Memory is returned zeroed. All entry points are safe to call from
-// interrupt handlers (they mask IRQs around their bookkeeping).
+// interrupt handlers and from any core (an IRQ-safe spinlock covers the heap).
 
 #define KMALLOC_MIN_ALIGN 64
 #define KMALLOC_MAX_SMALL 1344

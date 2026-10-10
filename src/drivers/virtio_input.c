@@ -33,6 +33,18 @@ static struct {
     bool active;
 } keyboard;
 
+// keyboard_lock (IRQ-safe) serializes queue setup against the interrupt
+// handler. Host tests run single-threaded without it.
+#ifdef VIRTIO_INPUT_HOST_TEST
+static uint64_t keyboard_lock_take(void) { return 0; }
+static void keyboard_lock_drop(uint64_t flags) { (void)flags; }
+#else
+#include "arch/spinlock.h"
+static struct spinlock keyboard_lock = SPINLOCK_INIT("virtio keyboard");
+static uint64_t keyboard_lock_take(void) { return spin_lock_irqsave(&keyboard_lock); }
+static void keyboard_lock_drop(uint64_t flags) { spin_unlock_irqrestore(&keyboard_lock, flags); }
+#endif
+
 static void barrier(void) {
 #ifdef VIRTIO_INPUT_HOST_TEST
     __atomic_thread_fence(__ATOMIC_SEQ_CST);
@@ -93,8 +105,16 @@ static void stop_keyboard(void) {
     // Queues and event buffers remain reserved: the device may still own them.
 }
 
+static void keyboard_events(void);
+
 static void keyboard_irq(void *ctx) {
     (void)ctx;
+    uint64_t flags = keyboard_lock_take();
+    keyboard_events();
+    keyboard_lock_drop(flags);
+}
+
+static void keyboard_events(void) {
     if (!keyboard.active) {
         return;
     }
@@ -191,22 +211,14 @@ static bool initialize_keyboard(void) {
 
 bool virtio_input_init(void) {
     // Kernel bring-up already has systick IRQs enabled: serialize queue setup
-    // against the producer and restore the caller's CPU interrupt mask.
-    uint64_t daif = 0;
-#ifndef VIRTIO_INPUT_HOST_TEST
-    asm volatile("mrs %0, daif" : "=r"(daif));
-    asm volatile("msr daifset, #2" ::: "memory");
-#endif
+    // against the interrupt handler.
+    uint64_t flags = keyboard_lock_take();
     bool result = keyboard.active;
     if (!keyboard.attempted) {
         keyboard.attempted = true;
         result = initialize_keyboard();
     }
-#ifndef VIRTIO_INPUT_HOST_TEST
-    asm volatile("msr daif, %0" ::"r"(daif) : "memory");
-#else
-    (void)daif;
-#endif
+    keyboard_lock_drop(flags);
     return result;
 }
 #endif

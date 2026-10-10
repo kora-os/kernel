@@ -168,6 +168,16 @@ int getpid(void);
 void yield(void);
 void msleep(unsigned long ms);  /* at least ms milliseconds, in 10 ms ticks */
 
+/* forbid()/permit(), after AmigaOS's Forbid()/Permit(): forbid() takes the big
+ * kernel lock and keeps it until the matching permit(), so no other core can
+ * be inside the kernel meanwhile, and this task is not preempted (interrupts
+ * still run). Use it to look at or poke kernel structures safely. Calls nest
+ * and return the new depth (permit: -1 if not forbidden). Blocking (read,
+ * msleep, wait) breaks the forbid until the task runs again, as Wait() does on
+ * the Amiga; exiting ends it. */
+int forbid(void);
+int permit(void);
+
 static inline int spawn(const char *name, int argc, char *const argv[]) {
     return spawn_flags(name, argc, argv, 0);
 }

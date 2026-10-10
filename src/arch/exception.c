@@ -3,6 +3,7 @@
 #include "arch/sysregs.h"
 #include "arch/trapframe.h"
 #include "common.h"
+#include "lib/panic.h"
 #include "lib/printf.h"
 #include "sys/syscall.h"
 
@@ -41,6 +42,7 @@ static void halt(void) {
 
 void handle_invalid_entry(uint64_t type, uint64_t esr, uint64_t far,
                           struct trapframe *tf) {
+    panic_begin();
     printf("\n*** Unexpected exception: %s ***\n", vector_name(type));
     printf("  ESR=0x%lx EC=0x%lx FAR=0x%lx ELR=0x%lx\n", esr, ESR_EC(esr), far,
            tf->elr);
@@ -48,6 +50,7 @@ void handle_invalid_entry(uint64_t type, uint64_t esr, uint64_t far,
 }
 
 void handle_sync_el1(uint64_t esr, uint64_t far, struct trapframe *tf) {
+    panic_begin();
     printf("\n*** Synchronous exception in EL1 (kernel fault) ***\n");
     if (ESR_EC(esr) == ESR_EC_FP_ASIMD) {
         printf("  kernel code used FP/SIMD; the kernel must be integer-only\n");
@@ -69,6 +72,7 @@ void handle_sync_el0(uint64_t esr, uint64_t far, struct trapframe *tf) {
         fpsimd_trap();  // the faulting instruction is retried on return
         return;
     }
+    panic_begin();
     printf("\n*** User fault (EL0) ***\n");
     printf("  ESR=0x%lx EC=0x%lx FAR=0x%lx ELR=0x%lx\n", esr, ESR_EC(esr), far,
            tf->elr);

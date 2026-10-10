@@ -6,8 +6,14 @@
 
 #include "arch/irq.h"
 
+#include "arch/spinlock.h"
 #include "intc.h"
 #include "peripherals/irq.h"
+
+// irq_lock (IRQ-safe) keeps a handler/context pair consistent while it is
+// (dis)connected and read for dispatch, which may happen on any core (per-core
+// timer interrupts). Handlers run without it, so one may disconnect itself.
+static struct spinlock irq_lock = SPINLOCK_INIT("irq table");
 
 static struct {
     irq_handler_t handler;
@@ -28,8 +34,10 @@ void irq_connect(unsigned irq, irq_handler_t handler, void *ctx) {
     if (irq >= IRQ_COUNT) {
         return;
     }
+    uint64_t flags = spin_lock_irqsave(&irq_lock);
     irq_table[irq].handler = handler;
     irq_table[irq].ctx = ctx;
+    spin_unlock_irqrestore(&irq_lock, flags);
     intc_enable(irq);
 }
 
@@ -38,16 +46,23 @@ void irq_disconnect(unsigned irq) {
         return;
     }
     intc_disable(irq);
+    uint64_t flags = spin_lock_irqsave(&irq_lock);
     irq_table[irq].handler = NULL;
     irq_table[irq].ctx = NULL;
+    spin_unlock_irqrestore(&irq_lock, flags);
 }
 
 void irq_dispatch(unsigned irq) {
-    if (irq < IRQ_COUNT) {
-        irq_table[irq].hits++;
-        if (irq_table[irq].handler != NULL) {
-            irq_table[irq].handler(irq_table[irq].ctx);
-        }
+    if (irq >= IRQ_COUNT) {
+        return;
+    }
+    spin_lock(&irq_lock);  // in an interrupt: IRQs already masked
+    irq_table[irq].hits++;
+    irq_handler_t handler = irq_table[irq].handler;
+    void *ctx = irq_table[irq].ctx;
+    spin_unlock(&irq_lock);
+    if (handler != NULL) {
+        handler(ctx);
     }
 }
 
