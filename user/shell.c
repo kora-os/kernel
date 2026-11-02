@@ -19,7 +19,7 @@ static struct assign_info assign_buffer;
 static int read_command_line(void) {
     size_t used = 0;
     while (used < sizeof(line) - 1) {
-        long n = read(0, line + used, sizeof(line) - 1 - used);
+        long n = kgetline(line + used, sizeof(line) - 1 - used);
         if (n <= 0) {
             return 0;
         }
@@ -31,7 +31,7 @@ static int read_command_line(void) {
     }
     char discard[64];
     for (;;) {
-        long n = read(0, discard, sizeof(discard));
+        long n = kgetline(discard, sizeof(discard));
         if (n <= 0 || discard[n - 1] == '\n') {
             break;
         }

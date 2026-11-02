@@ -38,6 +38,13 @@ void tty_flush(void);
 // killed.
 int tty_getc(void);
 
+// Raw console read, behind read(0, ...): block until at least one byte arrives,
+// then take whatever else is already queued, up to `len` (> 0). No echo, no
+// line buffering and no translation: line editing is the reader's business
+// (libk's kgetline). Same calling rules as tty_getc. Returns the byte count,
+// or -1 if the waiting task was killed.
+long tty_read(char *buf, size_t len);
+
 // Scroll the screen's history view by `halfpages` half screens (positive = back
 // in time), e.g. for Shift+PgUp/PgDn. Called from IRQ context by the keyboard
 // driver; applied while the terminal waits for input.

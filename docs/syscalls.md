@@ -61,8 +61,11 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
   descriptor at fd 3 or above writes at its cursor; append selects current EOF
   for every call. Returns accepted bytes, possibly a short write on exhaustion,
   or `-1`. `sync` reports durable completion.
-- **`read`**: `fd` 0 reads a line from the console (echoed, backspace honoured,
-  returns at newline or when the buffer fills). `fd ≥ 3` reads from an open file.
+- **`read`**: `fd` 0 reads raw console bytes: it blocks until at least one
+  arrives, then returns those already queued, up to `len`. Nothing is echoed,
+  buffered into lines or translated (Enter arrives as `\r`, cursor keys as VT
+  escape sequences). libk's `kgetline` reads an echoed line with backspace, as
+  the shell does. `fd ≥ 3` reads from an open file.
 - **`alloc_pages`** / **`free_pages`**: Amiga-style memory: a run of `count`
   contiguous, zeroed 4 KB pages (`KORAOS_PAGE_SIZE`) anywhere in RAM, returned
   by its base address. The kernel records each run against the calling

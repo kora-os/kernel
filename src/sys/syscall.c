@@ -140,67 +140,13 @@ static long sys_write(int fd, const char *buf, uint64_t len) {
     return count < 0 ? -1 : count;
 }
 
-// Read a line from the terminal, echoing as it goes and honouring backspace.
-// Returns at a newline or when the buffer fills. Other control bytes are not
-// echoed, and escape sequences (arrow keys from a serial terminal, or the
-// terminal's own status replies) are swallowed whole: there is no line editing
-// to give them meaning yet.
-static long read_console_line(char *buf, uint64_t len) {
-    uint64_t i = 0;
-    enum { ESC_NONE, ESC_START, ESC_BODY } esc = ESC_NONE;
-    while (i < len) {
-        int ch = tty_getc();
-        if (ch < 0) {
-            break;  // killed: the task dies on its way back to EL0
-        }
-        char c = (char)ch;
-        if (c == 0x1b) {
-            esc = ESC_START;
-            continue;
-        }
-        if (esc == ESC_START) {
-            // ESC [ ... and ESC O x run to a final byte; other ESC x are done.
-            esc = (c == '[' || c == 'O') ? ESC_BODY : ESC_NONE;
-            continue;
-        }
-        if (esc == ESC_BODY) {
-            if (c >= 0x40 && c <= 0x7e) {
-                esc = ESC_NONE;
-            }
-            continue;
-        }
-        if (c == '\r') {
-            c = '\n';
-        }
-        if (c == 0x7f || c == '\b') {  // delete / backspace
-            if (i > 0) {
-                i--;
-                tty_putc('\b');
-                tty_putc(' ');
-                tty_putc('\b');
-            }
-            continue;
-        }
-        if (c != '\n' && (c < 0x20 || c > 0x7e)) {
-            continue;
-        }
-        tty_putc(c);  // echo
-        buf[i++] = c;
-        if (c == '\n') {
-            break;
-        }
-    }
-    tty_flush();
-    return (long)i;
-}
-
-// read(fd, buf, len): fd 0 (stdin) reads a console line; fd >= FD_BASE reads
-// from an open file. Returns bytes read, or -1.
+// read(fd, buf, len): fd 0 (stdin) reads raw console bytes (see tty_read);
+// fd >= FD_BASE reads from an open file. Returns bytes read, or -1.
 static long sys_read(int fd, char *buf, uint64_t len) {
     if (fd == 0) {
         if (len == 0) return 0;
         if (!uptr_ok((uint64_t)buf, len)) return -1;
-        return read_console_line(buf, len);
+        return tty_read(buf, (size_t)len);
     }
     open_file_t *of = fd_lookup(fd);
     if (of == NULL || of->file.is_dir || (of->file.flags & 3u) == FAT32_O_WRONLY ||
