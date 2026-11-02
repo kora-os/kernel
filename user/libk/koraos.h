@@ -358,3 +358,56 @@ static inline void kput_int(long v) {
     }
     write(1, out, (size_t)j);
 }
+
+/* Read a line from the console: read(0) hands over raw bytes, so this does the
+ * editing. It echoes as it goes, honours backspace and turns CR into '\n';
+ * other control bytes are dropped and escape sequences (cursor keys, the
+ * terminal's status replies) are swallowed whole. Returns at a newline or when
+ * the buffer fills, with no NUL added: the byte count, or what read returned
+ * (0 or -1) if nothing was read. One byte per read, so typed-ahead lines stay
+ * queued for the next call. */
+static inline ssize_t kgetline(char *buf, size_t len) {
+    size_t i = 0;
+    enum { ESC_NONE, ESC_START, ESC_BODY } esc = ESC_NONE;
+    while (i < len) {
+        char c;
+        ssize_t n = read(0, &c, 1);
+        if (n <= 0) {
+            return i > 0 ? (ssize_t)i : n;
+        }
+        if (c == 0x1b) {
+            esc = ESC_START;
+            continue;
+        }
+        if (esc == ESC_START) {
+            /* ESC [ ... and ESC O x run to a final byte; other ESC x are done. */
+            esc = (c == '[' || c == 'O') ? ESC_BODY : ESC_NONE;
+            continue;
+        }
+        if (esc == ESC_BODY) {
+            if (c >= 0x40 && c <= 0x7e) {
+                esc = ESC_NONE;
+            }
+            continue;
+        }
+        if (c == '\r') {
+            c = '\n';
+        }
+        if (c == 0x7f || c == '\b') { /* delete / backspace */
+            if (i > 0) {
+                i--;
+                write(1, "\b \b", 3);
+            }
+            continue;
+        }
+        if (c != '\n' && (c < 0x20 || c > 0x7e)) {
+            continue;
+        }
+        write(1, &c, 1); /* echo */
+        buf[i++] = c;
+        if (c == '\n') {
+            break;
+        }
+    }
+    return (ssize_t)i;
+}

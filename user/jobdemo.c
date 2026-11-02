@@ -199,7 +199,7 @@ int main(int argc, char **argv) {
         }
         free(saved);
         char key[16];
-        read(0, key, sizeof(key));
+        kgetline(key, sizeof(key));
     }
     return 0;
 }
