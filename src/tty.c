@@ -154,6 +154,21 @@ int tty_getc(void) {
     return (unsigned char)c;
 }
 
+long tty_read(char *buf, size_t len) {
+    int ch = tty_getc();
+    if (ch < 0) {
+        return -1;  // killed: the task dies on its way back to EL0
+    }
+    buf[0] = (char)ch;
+    size_t n = 1;
+    uint64_t flags = spin_lock_irqsave(&input_lock);
+    while (n < len && input_pop(&buf[n])) {
+        n++;
+    }
+    spin_unlock_irqrestore(&input_lock, flags);
+    return (long)n;
+}
+
 // Screen output with the Unix newline translation (ONLCR): the terminal treats
 // LF as a pure line feed, as xterm does, so '\n' is sent as CR LF.
 static void screen_out(char c) {

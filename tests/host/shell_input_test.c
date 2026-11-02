@@ -39,8 +39,7 @@ ssize_t shell_mock_read(int fd, void *buffer, size_t size) {
     char *destination = buffer;
     while (count < size && (!read_chunk || count < read_chunk) && input_position < input_size) {
         char value = input[input_position++];
-        destination[count++] = value;
-        if (value == '\n') break; // The console syscall returns at a newline.
+        destination[count++] = value;  // raw console bytes: no stop at newline
     }
     return (ssize_t)count;
 }
@@ -134,6 +133,26 @@ static void fragmented_reads(void) {
     reset();
     append("echo a");
     CHECK(read_command_line() == 0 && spawn_calls == 0, "EOF before newline cannot dispatch prefix");
+}
+static void line_editing(void) {
+    char buffer[16];
+    reset();
+    append("ab\x7f" "c\x1b[A\x1b[1;5D\x1bOx\x01" "d\r" "next\n");
+    ssize_t count = kgetline(buffer, sizeof(buffer) - 1);
+    buffer[count > 0 ? count : 0] = 0;
+    CHECK(count == 4 && kstreq(buffer, "acd\n"),
+          "backspace edits, CR ends the line, escapes and control bytes dropped");
+    CHECK(output_contains("ab\b \bcd\n"), "printable bytes, rubout and newline echoed");
+    count = kgetline(buffer, sizeof(buffer) - 1);
+    buffer[count > 0 ? count : 0] = 0;
+    CHECK(count == 5 && kstreq(buffer, "next\n"), "typed-ahead line left for the next call");
+    reset();
+    append("xyz\n");
+    count = kgetline(buffer, 2);
+    CHECK(count == 2 && buffer[0] == 'x' && buffer[1] == 'y' && input_position == 2,
+          "a full buffer returns without reading further");
+    reset();
+    CHECK(kgetline(buffer, sizeof(buffer)) == 0, "EOF with nothing read passes read's 0 through");
 }
 static void line_boundaries(void) {
     reset();
@@ -268,5 +287,5 @@ static void core_pinning(void) {
           output_contains("shell: cannot run echo on cpu 9"), "spawn failure on a pinned core reported");
 }
 
-TEST_MAIN(fragmented_reads, line_boundaries, drained_line_not_dispatched,
+TEST_MAIN(fragmented_reads, line_editing, line_boundaries, drained_line_not_dispatched,
           argument_boundaries, maximal_assign_line, quoted_tokens, background_jobs, core_pinning)
