@@ -487,6 +487,9 @@ if(BUILD_HW_VARIANT)
 endif()
 # QEMU virt uses independent VirtIO input and never links Circle.
 
+# Minimal libc (library and host unit tests; not part of the default build).
+add_subdirectory(user/libc)
+
 # Print configuration
 message(STATUS "Physical hardware board: Raspberry Pi ${RPI_VERSION}; QEMU raspi board: Pi ${QEMU_BOARD}")
 message(STATUS "Boot mount directory: ${BOOTMNT}")
