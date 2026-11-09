@@ -1,6 +1,6 @@
 {
     "cSpell.diagnosticLevel": "Hint",
-    "clangd.arguments": ["-I./include", "-I./src", "-I./peripherals"] ,
+    "clangd.arguments": ["--background-index", "--header-insertion=never"],
     "editor.inlayHints.enabled": "on",
     "editor.inlayHints.parameterHints": true,
     "editor.inlayHints.variableHints": true,
