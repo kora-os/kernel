@@ -11,7 +11,8 @@ cmake_minimum_required(VERSION 3.20)
 file(GLOB LIBC_SOURCES CONFIGURE_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/*.c")
 set(LIBC_INCLUDE_DIR "${CMAKE_CURRENT_LIST_DIR}/includes")
 
-add_library(koraos_libc STATIC EXCLUDE_FROM_ALL ${LIBC_SOURCES})
+add_library(koraos_libc STATIC EXCLUDE_FROM_ALL
+    includes/ctype.h ${LIBC_SOURCES})
 target_include_directories(koraos_libc PUBLIC "${LIBC_INCLUDE_DIR}")
 target_compile_options(koraos_libc PRIVATE
     --target=aarch64-none-elf -mcpu=cortex-a72
@@ -40,10 +41,16 @@ if(KORAOS_HOST_CC)
         COMMAND "${KORAOS_HOST_CC}" ${LIBC_HOST_FLAGS}
                 -o "${LIBC_TEST_OUT}/string_test"
                 "${LIBC_TEST_DIR}/string_test.c" "${CMAKE_CURRENT_LIST_DIR}/string.c"
+        COMMAND "${KORAOS_HOST_CC}" ${LIBC_HOST_FLAGS}
+                -o "${LIBC_TEST_OUT}/ctype_test"
+                "${LIBC_TEST_DIR}/ctype_test.c" "${CMAKE_CURRENT_LIST_DIR}/ctype.c"
         COMMAND "${LIBC_TEST_OUT}/string_test"
+        COMMAND "${LIBC_TEST_OUT}/ctype_test"
         DEPENDS "${LIBC_TEST_DIR}/string_test.c" "${LIBC_TEST_DIR}/test.h"
+                "${LIBC_TEST_DIR}/ctype_test.c"
                 "${LIBC_TEST_DIR}/host_rename.h"
                 "${CMAKE_CURRENT_LIST_DIR}/string.c" "${LIBC_INCLUDE_DIR}/string.h"
+                "${CMAKE_CURRENT_LIST_DIR}/ctype.c" "${LIBC_INCLUDE_DIR}/ctype.h"
         COMMENT "Building and running the libc unit tests on the host"
         VERBATIM)
 else()
