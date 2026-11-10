@@ -163,7 +163,7 @@ char *strrstr(const char *haystack, const char *needle) {
 
 void *memcpy(void *dest, const void *src, size_t n) {
     char *d = dest;
-    const char *s = src;
+    const unsigned char *s = src;
     while (n--) {
         *d++ = *s++;
     }
