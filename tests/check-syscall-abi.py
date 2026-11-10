@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Check the independent kernel definitions, libk definitions and SVC stubs."""
+"""Check the independent kernel definitions, libk/libc definitions and SVC stubs."""
 from pathlib import Path
 import re
 import sys
@@ -17,10 +17,15 @@ def main():
     errors = []
     kernel = constants("include/sys/syscall.h", "SYS_")
     user = constants("user/libk/abi.h", "SYS_")
+    libc = constants("user/libc/src/internal/syscall_abi.h", "SYS_")
     if kernel != user:
         for name in sorted(kernel.keys() | user.keys()):
             if kernel.get(name) != user.get(name):
                 errors.append(f"{name}: kernel={kernel.get(name)}, libk={user.get(name)}")
+    if kernel != libc:
+        for name in sorted(kernel.keys() | libc.keys()):
+            if kernel.get(name) != libc.get(name):
+                errors.append(f"{name}: kernel={kernel.get(name)}, libc={libc.get(name)}")
     if len(set(kernel.values())) != len(kernel):
         errors.append("duplicate syscall numbers")
     for name, number in {"SYNC": 37, "UNLINK": 38, "MKDIR": 39, "RMDIR": 40, "RENAME": 41}.items():
