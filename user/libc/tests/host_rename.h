@@ -22,6 +22,32 @@
 #define tolower kora_tolower
 #define toupper kora_toupper
 
+#define atof kora_atof
+#define atoi kora_atoi
+#define atol kora_atol
+#define atoll kora_atoll
+#define strfromd kora_strfromd
+#define strfromf kora_strfromf
+#define strfroml kora_strfroml
+#define strtod kora_strtod
+#define strtof kora_strtof
+#define strtold kora_strtold
+#define strtol kora_strtol
+#define strtoll kora_strtoll
+#define strtoul kora_strtoul
+#define strtoull kora_strtoull
+
+#define malloc kora_malloc
+#define free kora_free
+#define calloc kora_calloc
+#define realloc kora_realloc
+#define abort kora_abort
+#define exit kora_exit
+#define _Exit kora_Exit
+
+// The libc's syscall entry; tests link tests/fake_syscall.c in its place.
+#define __syscall kora_syscall
+
 #define strcpy kora_strcpy
 #define strcat kora_strcat
 #define strlen kora_strlen

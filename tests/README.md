@@ -75,6 +75,33 @@ in-memory fault fixtures with no filesystem-integrity claim. All fixtures live
 under `build/host-tests/write-fixtures`; the immutable shared userfs image is
 never writable media.
 
+## libc unit tests (`user/libc/tests/`)
+
+The libc has its own host test target, built with the host compiler under
+ASan/UBSan (it needs a configured build directory, such as `build`):
+
+```bash
+cmake --build build --target libc_tests
+```
+
+Each `<name>_test.c` is built with the libc sources it covers; add one with
+`libc_host_test(<name> SOURCES ...)` in `user/libc/CMakeLists.txt`. The libc
+headers shadow the host's, and `host_rename.h` renames every libc symbol
+(`malloc` becomes `kora_malloc`, and so on) so the code under test never
+collides with, or is silently replaced by, the host libc or the sanitizer's
+interceptors. Code that makes syscalls goes through the single `__syscall()`
+entry; tests link `fake_syscall.c`, a fake kernel serving page runs (with a
+page budget to simulate exhaustion), `yield` and `exit`, in place of
+`src/sys/syscall.S`.
+
+| Test | Covers |
+|------|--------|
+| `string_test.c`, `ctype_test.c` | `src/string/string.c`, `src/ctype/ctype.c` |
+| `stdlib_convert_test.c` | `ato*`, `strto*`: white space, signs, bases 0/2–36 and prefixes, end pointers. Overflow, errno and exponent forms are not implemented yet and not tested |
+| `stdlib_exit_test.c` | `exit`, `_Exit` and `abort` reach `SYS_EXIT` with the right status |
+| `malloc_test.c` | `src/stdlib/malloc.c`: alignment, neighbour separation, coalescing, pool growth and release, direct page-run blocks, bad and double frees, `realloc`/`calloc`, exhaustion and failed `realloc`, a 200 000-round stress with `__malloc_info` consistency checks |
+| `malloc_threads_test.c` | The same heap under four concurrent pthreads (malloc/realloc/free, direct blocks), then a pool consistency check |
+
 ## Integer-only kernel check
 
 ```bash
