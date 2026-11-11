@@ -77,6 +77,11 @@
 #define memcmp kora_memcmp
 #define strerror kora_strerror
 
+#define snprintf kora_snprintf
+#define sprintf kora_sprintf
+#define vsnprintf kora_vsnprintf
+#define vsprintf kora_vsprintf
+
 #define __errno_location kora_errno_location
 
 #endif // LIBC_HOST_RENAME_H

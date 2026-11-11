@@ -2,16 +2,18 @@
 // EL0 regression fixture for the libc on the real target: what the host unit
 // tests cannot reach. The AArch64 binary128 strtold path, floating point in
 // EL0 through libc code, errno, qsort/bsearch on the 4 KB main stack, the
-// rand sequence (the same on every platform), and an atexit handler run by
-// crt0's exit() after main returns. Prints "libcprobe: checks passed", then
-// the handler prints "libcprobe: atexit ran"; any failure prints its check
-// and exits non-zero.
+// rand sequence (the same on every platform), snprintf with the AAPCS64
+// va_list (the host tests run on other variadic conventions), and an atexit
+// handler run by crt0's exit() after main returns. Prints "libcprobe: checks
+// passed", then the handler prints "libcprobe: atexit ran"; any failure
+// prints its check and exits non-zero.
 #include "../../user/libk/koraos.h"
 
 #include <errno.h>
 #include <float.h>
 #include <limits.h>
 #include <stdint.h>
+#include <stdio.h>
 
 static int failed;
 
@@ -95,6 +97,20 @@ static void test_heap(void) {
     check(getenv("PATH") == NULL, "getenv");
 }
 
+static void test_snprintf(void) {
+    char buf[160];
+    // More integer arguments than the eight argument registers, with doubles
+    // (which travel in FP registers) in between, so va_arg walks both save
+    // areas and then the stack.
+    int n = snprintf(buf, sizeof buf, "%d %ld %s %c %x %llu %p %hhd %f %d %zu %e %-4d|%05d %s",
+                     -1, 123456789012L, "str", 'c', 0xbeefu, 18446744073709551615ull,
+                     (void *)0x1000, 300, 1.0, 42, (size_t)7, 2.0, 9, -12, "end");
+    const char *want = "-1 123456789012 str c beef 18446744073709551615 0x1000 44 %f 42 7 %e "
+                       "9   |-0012 end";
+    check(n == (int)strlen(want) && strcmp(buf, want) == 0, "snprintf with the AAPCS64 va_list");
+    check(snprintf(NULL, 0, "%8.3s|%+d", "abcdef", 5) == 11, "snprintf measures");
+}
+
 static void at_exit_handler(void) {
     kputs("libcprobe: atexit ran\n");
 }
@@ -104,6 +120,7 @@ int main(void) {
     test_floats();
     test_sort();
     test_heap();
+    test_snprintf();
     if (failed) {
         return 1;
     }
