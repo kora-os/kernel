@@ -10,4 +10,8 @@
 // it works in C99 and is unaffected by <stdnoreturn.h>'s `noreturn` macro.
 #define _LIBC_NORETURN __attribute__((__noreturn__))
 
+// printf-style argument checking: format string in parameter `fmt`, the
+// variable arguments from parameter `first` (0 for a va_list).
+#define _LIBC_PRINTF(fmt, first) __attribute__((__format__(__printf__, fmt, first)))
+
 #endif // _LIBC_CDEFS_H

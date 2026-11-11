@@ -50,7 +50,7 @@ from step 4, on-target checks in the QEMU smoke tests. CI runs both.
 | 2 | `errno.h`; freestanding headers (`stddef.h` completed, `stdint.h`, `limits.h`, `stdbool.h`, `stdarg.h`, `float.h`, ...); `strto*` overflow with `ERANGE`; `strerror` | done (#80) |
 | 3 | Rest of `stdlib.h`: `abs`/`div` families, `qsort`, `bsearch`, `rand`/`srand`, `atexit`/`at_quick_exit`, `getenv` | done (#81) |
 | 4 | libc/libk reconciliation: libc owns `crt0`, malloc and `mem*`; libk keeps the OS API and links libc; user programs build against libc and may use FP; on-target `libcprobe` smoke step | in progress |
-| 5 | `snprintf`/`vsnprintf` family: integers, strings, pointers, all flags and lengths | planned |
+| 5 | `snprintf`/`vsnprintf` family: integers, strings, pointers, all flags and lengths | in progress |
 | 6 | Float conversions: `%f`/`%e`/`%g`/`%a` and a correctly rounded `strtod` family (exponents, hex, inf/nan) | planned |
 | 7 | `FILE` with buffered `stdout`/`stderr`, `printf`/`puts`/`putchar`/`fputs`/`fflush`, flush at exit | planned |
 | 8 | File streams: `fopen`/`fclose`/`fread`/`fwrite`/`fseek`/`ftell`/`fgets`/`fgetc`/`ungetc`, `remove`, `rename` | planned |
