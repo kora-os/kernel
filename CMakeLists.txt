@@ -487,8 +487,11 @@ if(BUILD_HW_VARIANT)
 endif()
 # QEMU virt uses independent VirtIO input and never links Circle.
 
-# Minimal libc (library and host unit tests; not part of the default build).
-add_subdirectory(user/libc)
+# The libc (library, link and header checks, host unit tests; built on request,
+# or by the legacy userfs above, which links it into the user programs).
+if(NOT TARGET koraos_libc)
+    add_subdirectory(user/libc)
+endif()
 
 # Print configuration
 message(STATUS "Physical hardware board: Raspberry Pi ${RPI_VERSION}; QEMU raspi board: Pi ${QEMU_BOARD}")

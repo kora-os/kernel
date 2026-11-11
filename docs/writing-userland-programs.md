@@ -1,7 +1,8 @@
 # Writing a Userland Program
 
 This describes how to write, build, and run a userland program for KoraOS **as
-it is today**: there is no on-device compiler and no libc. Programs are
+it is today**: there is no on-device compiler and the C library is still
+small. Programs are
 cross-compiled on the host into position-independent ELF executables, installed
 onto the FAT32 image under `/bin`, and loaded from there at runtime.
 
@@ -9,25 +10,33 @@ onto the FAT32 image under `/bin`, and loaded from there at runtime.
 
 A program runs in EL0 with a deliberately small runtime:
 
-- **No libc.** No `printf`, no `<string.h>`. You have the syscalls (see
-  [syscalls.md](syscalls.md)), a handful of inline helpers in
+- **A small C library, no stdio yet.** [`user/libc`](../user/libc) provides
+  the freestanding headers (`<stddef.h>`, `<stdint.h>`, `<limits.h>`,
+  `<stdbool.h>`, `<stdarg.h>`, `<float.h>`, ...), `<string.h>`, `<ctype.h>`,
+  `<errno.h>` and `<stdlib.h>` (conversions, `qsort`/`bsearch`, `rand`,
+  `atexit`, the heap); `printf` and files through `FILE` are on the way (see
+  [libc-plan.md](../project_doc/libc-plan.md)). Until then, write with
+  `write()` or libk's inline helpers in
   [`user/libk/koraos.h`](../user/libk/koraos.h) (`kputs`, `kput_int`,
-  `kstrlen`, `kstreq`), `memset`/`memcpy`/`memmove`, and a heap. Anything
-  else, you write yourself.
-- **No floating point in C, for now.** Programs are built with
-  `-mgeneral-regs-only` (the libc port will lift this). The kernel does keep
-  each task's FP/SIMD registers, so hand-written assembly can use them; see
-  [`tests/user/fpregs.S`](../tests/user/fpregs.S).
+  `kstrlen`, `kstreq`). `koraos.h` includes the libc headers, so it is the
+  only header a program needs; the KoraOS calls themselves are in
+  [syscalls.md](syscalls.md).
+- **Floating point.** C code may use `float` and `double`: the kernel keeps
+  each task's FP/SIMD registers and switches them lazily. `long double` is
+  IEEE binary128, which the hardware cannot compute with, and there is no
+  compiler-rt: avoid arithmetic in it (the link fails on `__addtf3` and
+  friends).
 - **A ~4 KB stack.** A program's main thread gets a single-page user stack
   (other threads get 16 KB), so keep large buffers off the stack (use `malloc`,
   or static arrays).
 - **A heap that grows with the system's free memory.** `malloc`, `free`,
-  `calloc` and `realloc` (16-byte aligned) come from
-  [`user/libk/malloc.c`](../user/libk/malloc.c), a TLSF allocator over 64 KB
+  `calloc` and `realloc` (16-byte aligned) come from the libc
+  ([`user/libc/src/stdlib/malloc.c`](../user/libc/src/stdlib/malloc.c)), a
+  TLSF allocator over 64 KB
   pools of pages; blocks over 256 KB get page runs of their own. For whole
   pages, call `alloc_pages`/`free_pages` directly. Whatever you do not free is
   reclaimed when your program is reaped. `kheap_info()` reports the heap's
-  pools and usage. The heap is shared by all your threads, behind one mutex.
+  pools and usage. The heap is shared by all your threads, behind one lock.
 - **A flat identity map.** Pointers are physical addresses; e.g. `fb_info()`
   hands you the framebuffer address and you write pixels to it directly.
 - **Preemptive processes on every core.** Each program runs on one core for
@@ -59,8 +68,9 @@ A program runs in EL0 with a deliberately small runtime:
   [`user/jobdemo.c`](../user/jobdemo.c) and [`user/pindemo.c`](../user/pindemo.c)
   are worked examples of jobs and of pinned sub-processes.
 - **`main` signature.** Either `int main(void)` or `int main(int argc, char
-  **argv)`; the entry stub [`user/crt0.S`](../user/crt0.S) calls `main` and
-  passes its return value to `exit`.
+  **argv)`; the libc's entry stub
+  [`user/libc/src/crt/crt0.S`](../user/libc/src/crt/crt0.S) calls `main` and
+  passes its return value to `exit`, which runs the `atexit` handlers.
 
 ## The smallest program
 
@@ -95,14 +105,18 @@ Register the program in [`cmake/userfs.cmake`](../cmake/userfs.cmake), inside th
 koraos_add_user_program(greet "${USER_DIR}/greet.c")
 ```
 
-That is all. `koraos_add_user_program` compiles the source together with the userland
-runtime (`crt0.S` + `syscall.S`) into a standalone **position-independent** ELF
+That is all. `koraos_add_user_program` compiles the source together with libk
+(`syscall.S`, the mutex, jobs and heap diagnostics) and links the libc archive
+(entry point, C library, malloc) into a standalone **position-independent** ELF
 (`-fPIE -Wl,-pie`), using the same cross toolchain as the kernel:
 
 ```
 --target=aarch64-none-elf -mcpu=cortex-a72 -ffreestanding -nostdlib
--fno-builtin -fno-stack-protector -mgeneral-regs-only -fPIE -O2
+-fno-builtin -fno-stack-protector -fPIE -O2 -isystem user/libc/includes
 ```
+
+Extra flags for one program go after `FLAGS`, for example
+`koraos_add_user_program(fpprobe ... FLAGS -mgeneral-regs-only)`.
 
 The linker is told to emit classic `DT_RELA` relocations
 (`--pack-dyn-relocs=none`), because the kernel's ELF loader

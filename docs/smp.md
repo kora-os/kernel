@@ -90,7 +90,7 @@ later (`job_queue`, `job_result`), one thread per job.
 A process lives until its last thread exits. `exit()` from any thread, or
 `kill()`, marks the others killed; each dies on its own core at its next
 kernel entry or return to EL0, so no inter-processor interrupt is needed (see
-[locking.md](locking.md)). libk's `malloc` takes a mutex (`mutex_t`: spin, then
+[locking.md](locking.md)). The libc's `malloc` takes a lock (spin, then
 `yield()`), so every thread can share one heap.
 
 Two demos show both styles of placement:

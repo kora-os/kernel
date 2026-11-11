@@ -19,6 +19,14 @@ if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
     set(LIBC_STANDALONE ON)
 endif()
 
+# The libc's flags are fixed below (like the user programs' in
+# cmake/userfs.cmake), so the archive, and every program linking it, is the
+# same in every build type: drop the per-configuration defaults here.
+foreach(config DEBUG RELEASE RELWITHDEBINFO MINSIZEREL)
+    set(CMAKE_C_FLAGS_${config} "")
+    set(CMAKE_ASM_FLAGS_${config} "")
+endforeach()
+
 set(LIBC_DIR "${CMAKE_CURRENT_LIST_DIR}")
 set(LIBC_SRC_DIR "${LIBC_DIR}/src")
 set(LIBC_INCLUDE_DIR "${LIBC_DIR}/includes")

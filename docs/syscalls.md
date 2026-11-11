@@ -258,7 +258,9 @@ struct fb_info {           /* filled by fb_info() */
 
 ## Adding a syscall
 
-1. Add the number to **both** `include/sys/syscall.h` and `user/libk/abi.h`.
+1. Add the number to `include/sys/syscall.h`, `user/libk/abi.h` and
+   `user/libc/src/internal/syscall_abi.h` (`tests/check-syscall-abi.py`
+   checks that all three agree).
 2. Add an assembly stub in `user/libk/syscall.S` (`SYSCALL name, SYS_NAME`).
 3. Add the C prototype (and any structs) to `user/libk/koraos.h`.
 4. Implement `sys_<name>` and add a `case` in `syscall_handle` in

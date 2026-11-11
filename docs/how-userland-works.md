@@ -67,7 +67,7 @@ program holds three kinds of memory, all from the same pool:
 |--------|------|-------|
 | image  | a few pages | code + data + BSS, placed by `elf_load` |
 | stacks | 1 page (4 KB) for the main thread, 4 pages (16 KB) per other thread | `SP_EL0` starts at the top; `argv` lives on the main stack |
-| page runs | any number | from `alloc_pages`, recorded per program; libk's `malloc` pools live here |
+| page runs | any number | from `alloc_pages`, recorded per program; the libc's `malloc` pools live here |
 
 When a program is reaped, all of them are returned to the pool, including page
 runs the program never freed.

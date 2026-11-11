@@ -48,13 +48,7 @@ SYSCALL mkdir,       SYS_MKDIR
 SYSCALL rmdir,       SYS_RMDIR
 SYSCALL rename,      SYS_RENAME
 
-// exit() never returns; if the kernel ever did return here, spin rather than
-// running off into whatever follows.
-.global exit
-exit:
-    mov x8, #SYS_EXIT
-    svc #0
-1:  b 1b
+// exit() and the program entry point come from the libc (user/libc).
 
 // Every thread_create() thread starts here, with x0 = fn and x1 = arg (see
 // thread_create in koraos.h): it runs fn(arg) and passes its result to

@@ -1,11 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Host tests for libk under threads: the atomics (koraos.h), the mutex
-// (user/libk/mutex.c), malloc
-// shared by many threads at once (user/libk/malloc.c) and the job API
-// (user/libk/job.c). Built with LIBK_HOST_TEST and -pthread: host threads
-// stand in for KoraOS threads (thread_new/thread_join are stubbed with
-// pthreads) and alloc_pages/free_pages with page-aligned host memory.
+// (user/libk/mutex.c) and the job API (user/libk/job.c). Built with
+// LIBK_HOST_TEST and -pthread: host threads stand in for KoraOS threads
+// (thread_new/thread_join are stubbed with pthreads), and libk's allocator
+// calls land in counting wrappers over the host's malloc, so every job block
+// is shown to be freed. The heap itself is the libc's, tested under threads
+// by user/libc/tests/malloc_threads_test.c.
 
 #include "test.h"
 
@@ -13,10 +14,14 @@ typedef unsigned long host_thread_t;
 int pthread_create(host_thread_t *thread, const void *attr, void *(*start)(void *), void *arg);
 int pthread_join(host_thread_t thread, void **result);
 int sched_yield(void);
-int posix_memalign(void **out, size_t align, size_t size);
+void *malloc(unsigned long size);
 void free(void *ptr);
 
-// The host's free; koraos.h below renames free to libk_free.
+// The host's allocator, reached before koraos.h renames malloc and free.
+static void *host_malloc(unsigned long size) {
+    return malloc(size);
+}
+
 static void host_free(void *ptr) {
     free(ptr);
 }
@@ -36,60 +41,23 @@ static void stub_release(void) {
     __atomic_store_n(&stub_lock, 0, __ATOMIC_RELEASE);
 }
 
-// alloc_pages/free_pages stubs ------------------------------------------
+// libk's allocator calls: the host's, counted -----------------------------
 
-#define MAX_RUNS 4096
+static long blocks_live;
 
-static struct {
-    void *base;
-    size_t pages;
-} runs[MAX_RUNS];
-static size_t pages_live;
-
-void *alloc_pages(size_t count) {
-    void *p = NULL;
-    if (count == 0 || posix_memalign(&p, KORAOS_PAGE_SIZE, count * KORAOS_PAGE_SIZE) != 0) {
-        return NULL;
+void *libk_malloc(size_t size) {
+    void *p = host_malloc(size);
+    if (p != NULL) {
+        __atomic_fetch_add(&blocks_live, 1, __ATOMIC_RELAXED);
     }
-    memset(p, 0, count * KORAOS_PAGE_SIZE);
-    stub_acquire();
-    for (unsigned i = 0; i < MAX_RUNS; i++) {
-        if (runs[i].base == NULL) {
-            runs[i].base = p;
-            runs[i].pages = count;
-            pages_live += count;
-            stub_release();
-            return p;
-        }
-    }
-    stub_release();
-    host_free(p);
-    return NULL;
+    return p;
 }
 
-int free_pages(void *base) {
-    stub_acquire();
-    for (unsigned i = 0; i < MAX_RUNS; i++) {
-        if (runs[i].base != NULL && runs[i].base == base) {
-            runs[i].base = NULL;
-            pages_live -= runs[i].pages;
-            stub_release();
-            host_free(base);
-            return 0;
-        }
+void libk_free(void *ptr) {
+    if (ptr != NULL) {
+        __atomic_fetch_sub(&blocks_live, 1, __ATOMIC_RELAXED);
     }
-    stub_release();
-    return -1;
-}
-
-static void release_all_runs(void) {
-    for (unsigned i = 0; i < MAX_RUNS; i++) {
-        if (runs[i].base != NULL) {
-            host_free(runs[i].base);
-            runs[i].base = NULL;
-        }
-    }
-    pages_live = 0;
+    host_free(ptr);
 }
 
 void yield(void) {
@@ -238,74 +206,6 @@ static void test_atomics(void) {
     CHECK(atomic_get(&x) == 2, "set/get");
 }
 
-// Every worker keeps a set of live blocks, each filled with a pattern unique
-// to the worker and block; any overlap between threads shows up as a mismatch.
-#define SLOTS 64
-#define ROUNDS 20000
-
-static unsigned bad_blocks;
-
-static void *churn(void *arg) {
-    unsigned id = (unsigned)(unsigned long)arg;
-    unsigned char *blocks[SLOTS] = {0};
-    size_t sizes[SLOTS] = {0};
-    unsigned seed = 0x9e3779b9u * (id + 1);
-    unsigned bad = 0;
-    for (unsigned round = 0; round < ROUNDS; round++) {
-        seed = seed * 1103515245u + 12345u;
-        unsigned slot = (seed >> 8) % SLOTS;
-        unsigned char tag = (unsigned char)(id * 31 + slot);
-        if (blocks[slot] != NULL) {
-            for (size_t i = 0; i < sizes[slot]; i++) {
-                bad += blocks[slot][i] != tag;
-            }
-        }
-        unsigned op = (seed >> 20) % 4;
-        // Mostly pool blocks; now and then a direct one (its own page run).
-        size_t size = (seed >> 4) % 64 == 0 ? 300000 : (seed >> 12) % 3000;
-        if (op == 0 && blocks[slot] != NULL) {
-            free(blocks[slot]);
-            blocks[slot] = NULL;
-        } else if (op == 1 && blocks[slot] != NULL) {
-            unsigned char *grown = realloc(blocks[slot], size + 1);
-            if (grown == NULL) {
-                bad++;
-                continue;
-            }
-            blocks[slot] = grown;
-            sizes[slot] = size + 1;
-            memset(grown, tag, sizes[slot]);
-        } else {
-            free(blocks[slot]);
-            blocks[slot] = op == 2 ? calloc(1, size) : malloc(size);
-            if (blocks[slot] == NULL) {
-                bad++;
-                continue;
-            }
-            sizes[slot] = size;
-            memset(blocks[slot], tag, size);
-        }
-    }
-    for (unsigned slot = 0; slot < SLOTS; slot++) {
-        free(blocks[slot]);
-    }
-    __atomic_fetch_add(&bad_blocks, bad, __ATOMIC_RELAXED);
-    return NULL;
-}
-
-static void test_malloc_parallel(void) {
-    run_workers(churn);
-    CHECK(bad_blocks == 0, "%u corrupted or failed blocks", bad_blocks);
-    struct kheap_info i;
-    kheap_info(&i);
-    CHECK(i.corrupt == 0, "%zu pool inconsistencies", i.corrupt);
-    CHECK(i.bad_frees == 0, "%zu bad frees", i.bad_frees);
-    CHECK(i.used_blocks == 0, "%zu blocks still used", i.used_blocks);
-    CHECK(i.direct_allocs == 0, "%zu direct blocks left", i.direct_allocs);
-    CHECK(pages_live == i.pool_bytes / KORAOS_PAGE_SIZE, "%zu pages held for %zu pool bytes",
-          pages_live, i.pool_bytes);
-}
-
 static long sum_to(void *arg) {
     long n = (long)arg;
     long sum = 0;
@@ -328,13 +228,7 @@ static void test_jobs(void) {
         CHECK(got == n * (n + 1) / 2, "job %ld returned %ld", i, got);
     }
     CHECK(job_queue(sum_to, (void *)1, BAD_CORE) == NULL, "a job on a bad core was queued");
-    struct kheap_info info;
-    kheap_info(&info);
-    CHECK(info.used_blocks == 0, "jobs left %zu blocks", info.used_blocks);
+    CHECK(blocks_live == 0, "jobs left %ld blocks", blocks_live);
 }
 
-static void test_cleanup(void) {
-    release_all_runs();  // the heap's cached pools: LSan must see no leaks
-}
-
-TEST_MAIN(test_atomics, test_mutex_excludes, test_malloc_parallel, test_jobs, test_cleanup)
+TEST_MAIN(test_atomics, test_mutex_excludes, test_jobs)

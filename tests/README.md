@@ -19,7 +19,7 @@ it rejects the kernel's own `strlen` declaration under `-Werror`.
 
 - Add `tests/host/<name>_test.c` and a `run_test <name> <kernel sources...>` line
   in `tests/run-host-tests.sh`. Set `TEST_FLAGS` around the line for extra
-  compiler flags (the libk malloc test uses it).
+  compiler flags (the libk threads test uses it).
 - Include `test.h` and the kernel header under test. Do **not** include system
   headers: the kernel's `common.h` defines its own fixed-width types, which
   clash with `<stdint.h>`. `test.h` declares the few libc functions tests need.
@@ -34,7 +34,6 @@ Current suites:
 |------|--------|
 | `fat_namespace_test.c` | Create/exclusive-create, Greek/astral/maximal LFNs, strict UTF-8 and FAT names, short-alias collisions and lookup, directory growth/slot reuse, unlink/mkdir/rmdir/rename, object/cwd/assign guards, relative and qualified paths, cross-volume rejection, observed-allocation OOM sweeps, transient/persistent I/O recovery, raw VFAT/dot-link validation and fsck/mtools checks |
 | `fat_write_test.c` | Existing-file writes on disposable 64 MiB mtools media: sector preservation, append, fragmented chains, first allocation, shared handle metadata, truncate and freed-cluster reuse, disk full, partition-view write/flush capabilities, FAT mirroring/active FAT/high bits, stale FSInfo, dirty eviction, retry after injected read/write/flush errors, cold remount, fsck and host readback |
-| `libk_malloc_test.c` | `user/libk/malloc.c` (built with `LIBK_HOST_TEST`, which renames it `libk_malloc` and so on): alignment, neighbour separation, coalescing, pool growth and release, direct page-run blocks, bad and double frees, `realloc`/`calloc`, exhaustion, a 200 000-round stress with `kheap_info` consistency checks |
 | `user_mem_test.c` | `src/proc/user_mem.c`: per-task page-run records behind `alloc_pages`/`free_pages`, foreign and double frees, reclaim on teardown, no leaks on failure |
 | `cp_test.c` | Actual file-copy utility: partial reads/writes, exclusive destination preservation, partial-error output and durable-sync failure |
 | `shell_input_test.c` | Real EL0 shell parser with renamed syscall stubs: fragmented reads, maximal complete lines, oversized-line draining, next-command preservation, 16/17-token boundary, terminated arguments, maximal assign target, quoted/escaped/empty tokens, literal operator provenance and malformed quoting |
@@ -208,7 +207,10 @@ running its idle task (cores 1 and up) and that each core's own timer ticks,
 runs `heaptest` (seeded kernel heap stress)
 and checks that `heap` reports no leaks or bad frees, runs `fpprobe` (a parent
 and child each fill all 32 vector registers and FPCR; the child must start from
-zeroed registers and the parent's must survive), checks `tasks` (init and the shell
+zeroed registers and the parent's must survive), runs `libcprobe` (the libc
+on the target: the binary128 `strtold` path, FP through libc code, `errno`,
+`qsort`/`bsearch`, the `rand` sequence, the heap, and an `atexit` handler that
+crt0's `exit` runs after `main` returns), checks `tasks` (init and the shell
 asleep, kernel stack high-water mark under three quarters), runs `schedprobe`
 (`msleep(300)` takes at least 300 ms; a background job busy-looping without
 syscalls must not stop the shell from running `echo`, so the tick preempts it;
