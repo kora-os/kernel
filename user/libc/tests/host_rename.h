@@ -73,6 +73,15 @@
 #define memmove kora_memmove
 #define memcmp kora_memcmp
 #define strerror kora_strerror
+#define memchr kora_memchr
+#define strchr kora_strchr
+#define strrchr kora_strrchr
+#define strspn kora_strspn
+#define strcspn kora_strcspn
+#define strpbrk kora_strpbrk
+#define strtok kora_strtok
+#define strcoll kora_strcoll
+#define strxfrm kora_strxfrm
 
 #define snprintf kora_snprintf
 #define sprintf kora_sprintf

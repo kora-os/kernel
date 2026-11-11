@@ -163,6 +163,7 @@ if(KORAOS_HOST_CC)
     set(LIBC_MALLOC_SOURCES src/stdlib/malloc.c src/string/string.c ${LIBC_FAKE_KERNEL})
 
     libc_host_test(string SOURCES src/string/string.c)
+    libc_host_test(string_search SOURCES src/string/search.c src/string/string.c)
     libc_host_test(ctype SOURCES src/ctype/ctype.c)
     libc_host_test(stdlib_convert SOURCES src/stdlib/convert.c src/stdlib/strtod.c src/ctype/ctype.c
                    src/string/string.c src/errno/errno.c)

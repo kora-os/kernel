@@ -105,6 +105,7 @@ page budget to simulate exhaustion), `yield` and `exit`, in place of
 | Test | Covers |
 |------|--------|
 | `string_test.c`, `ctype_test.c` | `src/string/string.c`, `src/ctype/ctype.c` |
+| `string_search_test.c` | `src/string/search.c`: `memchr` at every position and length, `strchr`/`strrchr` (the NUL is searchable, bytes above 127), `strspn`/`strcspn`/`strpbrk`, `strtok` with changing delimiter sets, `strcoll`/`strxfrm` in the C locale |
 | `stdlib_convert_test.c` | `ato*`, `strto*`: white space, signs, bases 0/2–36 and prefixes (a bare `0x` is `0`), end pointers (at the start when there are no digits), clamping with `ERANGE` at every limit, `EINVAL` for a bad base, errno untouched on success. The float conversions have their own test |
 | `headers_test.c` | The freestanding headers (`stddef.h`, `stdint.h`, `limits.h`, `stdbool.h`, `stdarg.h`, `float.h`, `stdalign.h`, `iso646.h`): static assertions in `headers_static_checks.h` (also compiled for AArch64) plus runtime checks such as `va_arg` past the register arguments and `va_copy` |
 | `errno_test.c` | `errno` storage, distinct codes, `strerror` for every code and the unknown fallback |
