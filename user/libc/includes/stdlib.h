@@ -3,6 +3,8 @@
 
 #include <stddef.h>
 
+#include <_libc/cdefs.h>
+
 double atof(const char *nptr);
 int atoi(const char *nptr);
 long int atol(const char *nptr);
@@ -29,8 +31,8 @@ void *calloc(size_t nmemb, size_t size);
 void free(void *ptr);
 void *malloc(size_t size);
 void *realloc(void *ptr, size_t size);
-[[noreturn]] void abort(void);
-[[noreturn]] void exit(int status);
-[[noreturn]] void _Exit(int status);
+_LIBC_NORETURN void abort(void);
+_LIBC_NORETURN void exit(int status);
+_LIBC_NORETURN void _Exit(int status);
 
 #endif // LIBC_STDLIB_H

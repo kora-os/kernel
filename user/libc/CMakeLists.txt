@@ -64,6 +64,55 @@ else()
     add_custom_target(libc_link_check DEPENDS "${LIBC_LINK_CHECK_ELF}")
 endif()
 
+# Every public header must compile on its own (and twice, for the include
+# guards) for AArch64, in C99, C11 and C17, with pedantic errors: MicroPython
+# and the eventual on-OS compiler build C99. The headers' static assertions
+# (tests/headers_static_checks.h) are also compiled for the target here.
+file(GLOB LIBC_PUBLIC_HEADERS CONFIGURE_DEPENDS "${LIBC_INCLUDE_DIR}/*.h")
+set(LIBC_HEADER_CHECK_DIR "${CMAKE_CURRENT_BINARY_DIR}/header-check")
+set(LIBC_HEADER_STAMPS)
+foreach(header IN LISTS LIBC_PUBLIC_HEADERS)
+    get_filename_component(name "${header}" NAME_WE)
+    set(src "${LIBC_HEADER_CHECK_DIR}/${name}.c")
+    file(WRITE "${src}.in" "#include <${name}.h>\n#include <${name}.h>\nint libc_header_check_${name};\n")
+    configure_file("${src}.in" "${src}" COPYONLY)
+    foreach(std c99 c11 c17)
+        set(stamp "${LIBC_HEADER_CHECK_DIR}/${name}.${std}.stamp")
+        add_custom_command(
+            OUTPUT "${stamp}"
+            COMMAND ${CMAKE_C_COMPILER} --target=aarch64-none-elf -ffreestanding -nostdinc
+                    -std=${std} -pedantic-errors -Wall -Wextra -Werror
+                    -isystem "${LIBC_INCLUDE_DIR}" -fsyntax-only "${src}"
+            COMMAND ${CMAKE_COMMAND} -E touch "${stamp}"
+            DEPENDS "${src}" ${LIBC_PUBLIC_HEADERS}
+            COMMENT "Header check: <${name}.h> in ${std}"
+            VERBATIM)
+        list(APPEND LIBC_HEADER_STAMPS "${stamp}")
+    endforeach()
+endforeach()
+set(LIBC_STATIC_CHECKS_SRC "${LIBC_HEADER_CHECK_DIR}/static_checks.c")
+file(WRITE "${LIBC_STATIC_CHECKS_SRC}.in"
+    "#include <float.h>\n#include <limits.h>\n#include <stdalign.h>\n#include <stdbool.h>\n"
+    "#include <stddef.h>\n#include <stdint.h>\n#include \"headers_static_checks.h\"\n")
+configure_file("${LIBC_STATIC_CHECKS_SRC}.in" "${LIBC_STATIC_CHECKS_SRC}" COPYONLY)
+set(stamp "${LIBC_HEADER_CHECK_DIR}/static_checks.stamp")
+add_custom_command(
+    OUTPUT "${stamp}"
+    COMMAND ${CMAKE_C_COMPILER} --target=aarch64-none-elf -ffreestanding -nostdinc -std=c11
+            -Wall -Wextra -Werror -isystem "${LIBC_INCLUDE_DIR}" -I "${LIBC_DIR}/tests"
+            -fsyntax-only "${LIBC_STATIC_CHECKS_SRC}"
+    COMMAND ${CMAKE_COMMAND} -E touch "${stamp}"
+    DEPENDS "${LIBC_STATIC_CHECKS_SRC}" "${LIBC_DIR}/tests/headers_static_checks.h"
+            ${LIBC_PUBLIC_HEADERS}
+    COMMENT "Header check: static assertions on AArch64"
+    VERBATIM)
+list(APPEND LIBC_HEADER_STAMPS "${stamp}")
+if(LIBC_STANDALONE)
+    add_custom_target(libc_header_check ALL DEPENDS ${LIBC_HEADER_STAMPS})
+else()
+    add_custom_target(libc_header_check DEPENDS ${LIBC_HEADER_STAMPS})
+endif()
+
 # Unit tests run on the host, so they need the host compiler rather than the
 # cross compiler selected by the toolchain file. The libc headers come first on
 # the include path and shadow the host's; host_rename.h renames the libc symbols
@@ -107,8 +156,10 @@ if(KORAOS_HOST_CC)
 
     libc_host_test(string SOURCES src/string/string.c)
     libc_host_test(ctype SOURCES src/ctype/ctype.c)
-    libc_host_test(stdlib_convert SOURCES src/stdlib/convert.c src/ctype/ctype.c)
+    libc_host_test(stdlib_convert SOURCES src/stdlib/convert.c src/ctype/ctype.c src/errno/errno.c)
     libc_host_test(binary128)
+    libc_host_test(headers)
+    libc_host_test(errno SOURCES src/errno/errno.c src/string/strerror.c src/string/string.c)
     libc_host_test(stdlib_exit SOURCES src/stdlib/exit.c ${LIBC_FAKE_KERNEL})
     libc_host_test(malloc SOURCES ${LIBC_MALLOC_SOURCES})
     libc_host_test(malloc_threads SOURCES ${LIBC_MALLOC_SOURCES} FLAGS -pthread)
