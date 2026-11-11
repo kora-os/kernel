@@ -99,12 +99,16 @@ headers shadow the host's, and `host_rename.h` renames every libc symbol
 collides with, or is silently replaced by, the host libc or the sanitizer's
 interceptors. Code that makes syscalls goes through the single `__syscall()`
 entry; tests link `fake_syscall.c`, a fake kernel serving page runs (with a
-page budget to simulate exhaustion), `yield` and `exit`, in place of
-`src/sys/syscall.S`.
+page budget to simulate exhaustion), `yield`, `exit` and a console (captured
+fd 1 and 2 with optional short or failing writes, scripted fd 0), in place of
+`src/sys/syscall.S`. `test.h` reaches the host's own `printf` and `fflush` by
+symbol name (`test_printf`), since the libc's are renamed for the code under
+test.
 
 | Test | Covers |
 |------|--------|
 | `string_test.c`, `ctype_test.c` | `src/string/string.c`, `src/ctype/ctype.c` |
+| `string_search_test.c` | `src/string/search.c`: `memchr` at every position and length, `strchr`/`strrchr` (the NUL is searchable, bytes above 127), `strspn`/`strcspn`/`strpbrk`, `strtok` with changing delimiter sets, `strcoll`/`strxfrm` in the C locale |
 | `stdlib_convert_test.c` | `ato*`, `strto*`: white space, signs, bases 0/2–36 and prefixes (a bare `0x` is `0`), end pointers (at the start when there are no digits), clamping with `ERANGE` at every limit, `EINVAL` for a bad base, errno untouched on success. The float conversions have their own test |
 | `headers_test.c` | The freestanding headers (`stddef.h`, `stdint.h`, `limits.h`, `stdbool.h`, `stdarg.h`, `float.h`, `stdalign.h`, `iso646.h`): static assertions in `headers_static_checks.h` (also compiled for AArch64) plus runtime checks such as `va_arg` past the register arguments and `va_copy` |
 | `errno_test.c` | `errno` storage, distinct codes, `strerror` for every code and the unknown fallback |
@@ -114,6 +118,7 @@ page budget to simulate exhaustion), `yield` and `exit`, in place of
 | `stdlib_misc_test.c` | `abs`/`div` families at the limits (no signed-overflow UB), `rand`/`srand` sequences, range and rough uniformity, `getenv` |
 | `stdio_snprintf_test.c` | The `snprintf` family, mostly differential: about 490 000 combinations of flags, width and precision (literal and `*`), length modifier and edge values for `d i o u x X c s`, and about 250 000 for `f e E g G a A` (halfway cases, carries, extremes, random doubles, `%.40f` expansions), must match the host libc's `snprintf` byte for byte. By hand: inf/nan, `%a` subnormals and ties (the host libcs disagree there), `(null)`, `%p`, unknown conversions, truncation and return values, every `%n` length, UTF-8 for `%lc`/`%ls` (precision never splits a character, `EILSEQ`), `EOVERFLOW`. libcprobe repeats a many-argument `snprintf` on the target, whose AAPCS64 `va_list` the hosts do not use |
 | `stdlib_strtod_test.c` | `strtod`/`strtof` against the host's (correctly rounded) ones, bits and end pointer: hand-picked hard cases, 40 000 random decimal strings, round trips of random doubles in six formats, and exact midpoints between neighbouring doubles (up to 767 digits, also just above and below them). By hand: inf/nan forms, hex edge cases, errno, inputs past the 800 kept digits |
+| `stdio_write_test.c` | Stream output over the fake console: when line, full and no buffering write (including the caller's `setvbuf` buffer and writes larger than it), short writes retried, failing writes (`EIO`, error indicators, per-call return values), `fflush(NULL)`, `perror`, `exit` flushing after the `atexit` handlers and `_Exit` not flushing, and 4 threads printing 1 200 lines with none torn |
 | `malloc_test.c` | `src/stdlib/malloc.c`: alignment, neighbour separation, coalescing, pool growth and release, direct page-run blocks, bad and double frees, `realloc`/`calloc`, exhaustion and failed `realloc`, a 200 000-round stress with `__malloc_info` consistency checks |
 | `malloc_threads_test.c` | The same heap under four concurrent pthreads (malloc/realloc/free, direct blocks), then a pool consistency check |
 

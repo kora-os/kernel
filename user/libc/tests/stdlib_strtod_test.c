@@ -58,7 +58,7 @@ static void compare(const char *s) {
     if (!same || !fsame) {
         test_failures++;
         if (++mismatches <= 20) {
-            printf("FAIL \"%.80s%s\": host %016llx (+%d) %08x, libc %016llx (+%d) %08x\n", s,
+            test_printf("FAIL \"%.80s%s\": host %016llx (+%d) %08x, libc %016llx (+%d) %08x\n", s,
                    strlen(s) > 80 ? "..." : "", (unsigned long long)dbits(want),
                    (int)(want_end - s), fbits(fwant), (unsigned long long)dbits(got),
                    (int)(got_end - s), fbits(fgot));

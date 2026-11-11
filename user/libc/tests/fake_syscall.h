@@ -10,6 +10,9 @@
 //   SYS_YIELD                         sched_yield()
 //   SYS_EXIT                          records the status and jumps back to the
 //                                     test that armed fake_arm_exit()
+//   SYS_WRITE to fd 1 and 2           captured per fd (fake_output), with
+//                                     optional short or failing writes
+//   SYS_READ from fd 0                scripted input (fake_set_input)
 //
 // Everything else fails the way the kernel does for an unknown call (-1).
 // Allocation is thread safe so the same stand-in serves the pthread tests.
@@ -42,5 +45,20 @@ void longjmp(fake_jmp_buf *env, int value) __attribute__((noreturn));
 
 void fake_arm_exit(fake_jmp_buf *env);
 int fake_exit_status(void);
+
+// The console. fake_output(fd) is what was written to fd 1 or 2 so far, NUL
+// terminated (the length in *len if not NULL); fake_writes(fd) counts the
+// SYS_WRITE calls. fake_reset_console() clears both, the input and the
+// write limits.
+const char *fake_output(int fd, size_t *len);
+unsigned fake_writes(int fd);
+void fake_reset_console(void);
+// Each SYS_WRITE takes at most `n` bytes (0: no limit), like a short write.
+void fake_set_write_chunk(size_t n);
+// While `fail` is set, SYS_WRITE returns -1 and stores nothing.
+void fake_fail_writes(int fail);
+// fd 0 returns these bytes, at most `chunk` per read (0: all asked for),
+// then 0 (end of input).
+void fake_set_input(const char *data, size_t len, size_t chunk);
 
 #endif // LIBC_FAKE_SYSCALL_H

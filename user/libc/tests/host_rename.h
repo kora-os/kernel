@@ -73,11 +73,40 @@
 #define memmove kora_memmove
 #define memcmp kora_memcmp
 #define strerror kora_strerror
+#define memchr kora_memchr
+#define strchr kora_strchr
+#define strrchr kora_strrchr
+#define strspn kora_strspn
+#define strcspn kora_strcspn
+#define strpbrk kora_strpbrk
+#define strtok kora_strtok
+#define strcoll kora_strcoll
+#define strxfrm kora_strxfrm
 
 #define snprintf kora_snprintf
 #define sprintf kora_sprintf
 #define vsnprintf kora_vsnprintf
 #define vsprintf kora_vsprintf
+#define printf kora_printf
+#define fprintf kora_fprintf
+#define vprintf kora_vprintf
+#define vfprintf kora_vfprintf
+#define fflush kora_fflush
+#define setvbuf kora_setvbuf
+#define setbuf kora_setbuf
+#define fputc kora_fputc
+#define fputs kora_fputs
+#define putc kora_putc
+#define putchar kora_putchar
+#define puts kora_puts
+#define fwrite kora_fwrite
+#define clearerr kora_clearerr
+#define feof kora_feof
+#define ferror kora_ferror
+#define perror kora_perror
+#define stdin kora_stdin
+#define stdout kora_stdout
+#define stderr kora_stderr
 
 #define __errno_location kora_errno_location
 

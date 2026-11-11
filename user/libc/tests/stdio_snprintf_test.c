@@ -40,7 +40,7 @@ static void compare(const char *fmt, ...) {
     if (!same) {
         test_failures++;
         if (++mismatches <= 20) {  // enough to diagnose, not a flood
-            printf("FAIL \"%s\": host \"%s\" (%d), libc \"%s\" (%d)\n", fmt, want, rw, got, rg);
+            test_printf("FAIL \"%s\": host \"%s\" (%d), libc \"%s\" (%d)\n", fmt, want, rw, got, rg);
         }
     }
 }
@@ -213,7 +213,7 @@ static void compare_float(const char *fmt, double v) {
     if (rw != rg || strcmp(big_want, big_got) != 0) {
         test_failures++;
         if (++mismatches <= 20) {
-            printf("FAIL \"%s\" of %a: host \"%.60s\" (%d), libc \"%.60s\" (%d)\n", fmt, v,
+            test_printf("FAIL \"%s\" of %a: host \"%.60s\" (%d), libc \"%.60s\" (%d)\n", fmt, v,
                    big_want, rw, big_got, rg);
         }
     }
