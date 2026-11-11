@@ -314,11 +314,13 @@ until milestone 9 has a track record on real cards.
 
 ## Milestone 12 – libc port
 
-Port a small C library (picolibc or newlib) onto the KoraOS syscalls, using the
-milestone 6 allocator, milestone 7 FP context switching and threads (for
-`pthread`), milestone 8 current
-directory and milestone 9 writes. The kernel syscall ABI stays private; POSIX
-shapes are provided by the library, not the kernel.
+A small native C library in `user/libc` rather than a port of musl, picolibc
+or newlib: public headers are strictly ISO C, the OS API stays in libk, and
+every syscall goes through one `__syscall()` entry that host tests replace
+with a fake kernel. It builds on the milestone 6 allocator, milestone 7 FP
+context switching and threads, milestone 8 current directory and milestone 9
+writes. The kernel syscall ABI stays private. The steps, and the end goals
+they serve (the koracli shell and MicroPython), are in `libc-plan.md`.
 
 ## QEMU virt development platform
 

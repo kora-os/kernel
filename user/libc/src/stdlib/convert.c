@@ -1,6 +1,8 @@
 #include <stdlib.h>
 #include <ctype.h>
 
+#include "binary128.h"
+
 double atof(const char *nptr) {
     double result = 0.0;
     int sign = 1;
@@ -171,37 +173,20 @@ float strtof(const char *nptr, char **endptr) {
     return (float)(sign * result);
 }
 
+// Parsed as a double and widened: no binary128 arithmetic (see binary128.h),
+// so strtold is exactly as precise as strtod.
 long double strtold(const char *nptr, char **endptr) {
-    long double result = 0.0;
-    int sign = 1;
-    while (isspace((unsigned char)*nptr)) {
-        nptr++;
-    }
-    if (*nptr == '-') {
-        sign = -1;
-        nptr++;
-    } else if (*nptr == '+') {
-        nptr++;
-    }
-    while (isdigit((unsigned char)*nptr)) {
-        result = result * 10 + (*nptr - '0');
-        nptr++;
-    }
-    if (*nptr == '.') {
-        nptr++;
-        long double frac = 0.0;
-        long double base = 0.1;
-        while (isdigit((unsigned char)*nptr)) {
-            frac += (*nptr - '0') * base;
-            base *= 0.1;
-            nptr++;
-        }
-        result += frac;
-    }
-    if (endptr) {
-        *endptr = (char *)nptr;
-    }
-    return sign * result;
+    double d = strtod(nptr, endptr);
+#if defined(__aarch64__) && __LDBL_MANT_DIG__ == 113
+    union {
+        unsigned long long words[2];
+        long double value;
+    } wide;
+    __double_to_binary128(d, wide.words);
+    return wide.value;
+#else
+    return d;  // a host long double the hardware converts to (x87, or double itself)
+#endif
 }
 
 long int strtol(const char *nptr, char **endptr, int base) {
