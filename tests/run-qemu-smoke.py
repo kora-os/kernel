@@ -439,6 +439,15 @@ def run(q, graphics=True, keyboard=False, repeat=0, multi_volume=False, write_te
                 raise Failure("explicit sync failed")
         yield "EL0 writes, UTF-8 paths, quoted file tools and sync", writable_filesystem
 
+        def libc_files():
+            q.send("libcprobe files\r")
+            m = q.expect(rb"^libcprobe: ([^\r\n]*)\r?\n", timeout=60)
+            if m.group(1) != b"files checked":
+                raise Failure("libcprobe files: %s" % m.group(1).decode(errors="replace"))
+            q.expect(rb"exited with 0")
+            q.expect(PROMPT)
+        yield "libc file streams: write, read back, append, update, seek, rename, remove", libc_files
+
     def debug_console():
         q.send("\x14")  # Ctrl-T
         q.expect(rb"\[serial -> kernel console")

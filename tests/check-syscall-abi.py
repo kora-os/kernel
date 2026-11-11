@@ -37,18 +37,22 @@ def main():
         if macro != "SYS_" + name.upper() or macro not in user:
             errors.append(f"{name}: wrong or missing syscall macro {macro}")
         seen.add(macro)
-    # exit comes from the libc, which ends programs through SYS_EXIT.
+    # exit and rename come from the libc, through its own __syscall entry.
     if "__syscall1(SYS_EXIT," in (ROOT / "user/libc/src/stdlib/exit.c").read_text():
         seen.add("SYS_EXIT")
+    if "__syscall2(SYS_RENAME," in (ROOT / "user/libc/src/stdio/remove.c").read_text():
+        seen.add("SYS_RENAME")
     if seen != set(user):
         errors.append(f"SVC stubs differ from ABI: missing={sorted(set(user) - seen)}, extra={sorted(seen - set(user))}")
     fat = constants("include/fs/fat32.h", "FAT32_O_")
     libk = constants("user/libk/koraos.h", "O_")
+    libc_flags = constants("user/libc/src/internal/syscall_abi.h", "KORA_O_")
     flags = {"RDONLY": 0, "WRONLY": 1, "RDWR": 2, "CREAT": 0x100,
              "TRUNC": 0x200, "APPEND": 0x400, "EXCL": 0x800}
     for name, value in flags.items():
-        if fat.get("FAT32_O_" + name) != value or libk.get("O_" + name) != value:
-            errors.append(f"open flag {name} must match {value:#x} in FAT and libk")
+        if (fat.get("FAT32_O_" + name) != value or libk.get("O_" + name) != value or
+                libc_flags.get("KORA_O_" + name) != value):
+            errors.append(f"open flag {name} must match {value:#x} in FAT, libk and libc")
     if errors:
         print("syscall ABI: FAILED", *errors, sep="\n", file=sys.stderr)
         return 1

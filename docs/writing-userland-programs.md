@@ -14,14 +14,16 @@ A program runs in EL0 with a deliberately small runtime:
   the freestanding headers (`<stddef.h>`, `<stdint.h>`, `<limits.h>`,
   `<stdbool.h>`, `<stdarg.h>`, `<float.h>`, ...), `<string.h>`, `<ctype.h>`,
   `<errno.h>`, `<stdlib.h>` (conversions, `qsort`/`bsearch`, `rand`,
-  `atexit`, the heap) and output in `<stdio.h>` (`printf`, `puts`,
-  `fprintf(stderr, ...)`, `snprintf`; `stdout` is line buffered and `exit`
-  flushes it). Opening files and reading through `FILE` are on the way (see
-  [libc-plan.md](../project_doc/libc-plan.md)). libk's inline helpers in
+  `atexit`, the heap) and `<stdio.h>` (`printf` and friends, `fopen`,
+  `fgets`, `fread`, `fwrite`, `fseek`, `remove`, `rename`; `stdout` is line
+  buffered, `exit` flushes and closes everything; no `scanf` yet). `stdin`
+  is the raw console: no echo, and Enter arrives as `'\r'`. See
+  [libc-plan.md](../project_doc/libc-plan.md) for what is still missing.
+  libk's inline helpers in
   [`user/libk/koraos.h`](../user/libk/koraos.h) (`kputs`, `kput_int`,
   `kstrlen`, `kstreq`) write straight to the console, unbuffered: call
-  `fflush(stdout)` before mixing them with `printf`. `koraos.h` includes the
-  libc headers it needs; add `<stdio.h>` for streams. The KoraOS calls
+  `fflush(stdout)` before mixing them with `printf`. `koraos.h` includes
+  `<stddef.h>`, `<stdio.h>`, `<stdlib.h>` and `<string.h>`. The KoraOS calls
   themselves are in [syscalls.md](syscalls.md).
 - **Floating point.** C code may use `float` and `double`: the kernel keeps
   each task's FP/SIMD registers and switches them lazily. `long double` is

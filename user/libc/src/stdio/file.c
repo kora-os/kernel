@@ -1,7 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // The standard streams, buffering and flushing (C11 7.21.3, 7.21.5): stdout
-// is line buffered (it is the console), stderr unbuffered, stdin buffered.
+// is line buffered (it is the console), stderr unbuffered, and stdin line
+// buffered, which for input means one byte per read (see fread.c).
 // The first buffered write installs __stdio_exit as exit()'s hook, so every
 // stream is flushed when the program exits, and programs that never use
 // stdio do not link it.
@@ -17,9 +18,9 @@ static unsigned char stdout_buffer[BUFSIZ];
 static unsigned char stdin_buffer[BUFSIZ];
 
 static FILE standard[3] = {
-    {0, F_READ, _IOFBF, stdin_buffer, sizeof stdin_buffer, 0, LOCK_INIT, NULL},
-    {1, F_WRITE, _IOLBF, stdout_buffer, sizeof stdout_buffer, 0, LOCK_INIT, NULL},
-    {2, F_WRITE, _IONBF, NULL, 0, 0, LOCK_INIT, NULL},
+    {0, F_READ, _IOLBF, stdin_buffer, sizeof stdin_buffer, 0, 0, 0, EOF, LOCK_INIT, NULL},
+    {1, F_WRITE, _IOLBF, stdout_buffer, sizeof stdout_buffer, 0, 0, 0, EOF, LOCK_INIT, NULL},
+    {2, F_WRITE, _IONBF, NULL, 0, 0, 0, 0, EOF, LOCK_INIT, NULL},
 };
 
 FILE *stdin = &standard[0];
@@ -96,8 +97,34 @@ static void flush_one(FILE *f) {
     __unlock(&f->lock);
 }
 
+// At exit: flush the standard streams, close everything fopen opened (so
+// each file's directory entry is complete).
 void __stdio_exit(void) {
-    __stdio_each(flush_one);
+    for (int i = 0; i < 3; i++) {
+        flush_one(&standard[i]);
+    }
+    for (;;) {
+        __lock(&list_lock);
+        FILE *f = open_streams;
+        __unlock(&list_lock);
+        if (f == NULL) {
+            return;
+        }
+        fclose(f);
+    }
+}
+
+int __stdio_end_read(FILE *f) {
+    size_t ahead = f->rlen - f->rpos + (f->ungot != EOF ? 1 : 0);
+    f->rpos = f->rlen = 0;
+    f->ungot = EOF;
+    if (ahead > 0 && f->fd >= KORA_FD_BASE &&
+        __syscall3(SYS_LSEEK, f->fd, -(long)ahead, SEEK_CUR) < 0) {
+        f->flags |= F_ERR;
+        errno = EIO;
+        return EOF;
+    }
+    return 0;
 }
 
 int fflush(FILE *stream) {
@@ -135,6 +162,9 @@ int setvbuf(FILE *restrict stream, char *restrict buf, int mode, size_t size) {
     __lock(&stream->lock);
     if (stream->wlen > 0) {
         __fflush_unlocked(stream);
+    }
+    if (stream->rlen > stream->rpos) {
+        __stdio_end_read(stream);  // keep what was read ahead readable
     }
     if (buf != NULL && size > 0 && mode != _IONBF) {
         if (stream->flags & F_OWNBUF) {

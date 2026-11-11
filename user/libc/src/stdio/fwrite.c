@@ -36,6 +36,9 @@ size_t __fwrite_unlocked(const void *data, size_t n, FILE *f) {
     if (n == 0) {
         return 0;
     }
+    if ((f->rlen > 0 || f->ungot != EOF) && __stdio_end_read(f) == EOF) {
+        return 0;
+    }
     __stdio_exit_hook = __stdio_exit;
     __stdio_setup_buffer(f);
     if (f->mode == _IONBF) {
