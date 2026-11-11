@@ -26,6 +26,10 @@ jobs:
           sudo apt-get install -y --no-install-recommends mtools dosfstools
       - name: Host sanitizer suites
         run: tests/run-host-tests.sh
+      - name: Install libc cross toolchain
+        run: sudo apt-get install -y --no-install-recommends clang lld llvm cmake
+      - name: libc cross build, link check and unit tests
+        run: tests/run-libc-tests.sh
       - name: Scratch MBR image tests
         run: tests/run-mbr-image-tests.py
       - name: Build and launcher orchestration tests

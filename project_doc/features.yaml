@@ -176,9 +176,10 @@ categories:
         prs: [48]
       - id: libc
         name: C library
-        status: planned
-        description: A real libc (picolibc or newlib) ported onto KoraOS syscalls.
+        status: in_progress
+        description: A small native ISO C library on the KoraOS syscalls, the base for koracli and MicroPython.
         milestone: 12
+        prs: [76, 77, 78]
 
   - id: shell
     name: Shell

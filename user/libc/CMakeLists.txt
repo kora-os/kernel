@@ -1,12 +1,23 @@
-# Minimal libc. For now it is configured with the kernel (add_subdirectory from
-# the top-level CMakeLists.txt); it is meant to be split into its own project.
+# Minimal libc. Configured either standalone (what tests/run-libc-tests.sh and
+# CI do) or with the kernel (add_subdirectory from the top-level CMakeLists.txt).
 #
-#   koraos_libc  the AArch64 static library (not part of the default build)
-#   libc_tests   builds and runs the unit tests on the host under ASan/UBSan
+#   koraos_libc       the AArch64 static library
+#   libc_link_check   links the whole library into a user-style PIE, so an
+#                     undefined symbol (such as a compiler-rt helper the
+#                     compiler called behind our back) fails the build
+#   libc_tests        builds and runs the unit tests on the host under ASan/UBSan
 #
-#   cmake --build build/<dir> --target libc_tests
+#   cmake -S user/libc -B build/libc
+#   cmake --build build/libc --target koraos_libc libc_link_check libc_tests
 
 cmake_minimum_required(VERSION 3.20)
+
+if(CMAKE_SOURCE_DIR STREQUAL CMAKE_CURRENT_SOURCE_DIR)
+    set(CMAKE_TOOLCHAIN_FILE "${CMAKE_CURRENT_LIST_DIR}/../../cmake/aarch64-toolchain.cmake"
+        CACHE PATH "AArch64 toolchain file")
+    project(KoraOSLibc C ASM)
+    set(LIBC_STANDALONE ON)
+endif()
 
 set(LIBC_DIR "${CMAKE_CURRENT_LIST_DIR}")
 set(LIBC_SRC_DIR "${LIBC_DIR}/src")
@@ -14,13 +25,44 @@ set(LIBC_INCLUDE_DIR "${LIBC_DIR}/includes")
 set(LIBC_INTERNAL_DIR "${LIBC_SRC_DIR}/internal")
 file(GLOB_RECURSE LIBC_SOURCES CONFIGURE_DEPENDS "${LIBC_SRC_DIR}/*.c" "${LIBC_SRC_DIR}/*.S")
 
-add_library(koraos_libc STATIC EXCLUDE_FROM_ALL ${LIBC_SOURCES})
+# Standalone, the library is part of `all`; inside the kernel build it is only
+# built on request.
+if(LIBC_STANDALONE)
+    add_library(koraos_libc STATIC ${LIBC_SOURCES})
+else()
+    add_library(koraos_libc STATIC EXCLUDE_FROM_ALL ${LIBC_SOURCES})
+endif()
 target_include_directories(koraos_libc PUBLIC "${LIBC_INCLUDE_DIR}")
 target_include_directories(koraos_libc PRIVATE "${LIBC_INTERNAL_DIR}")
-target_compile_options(koraos_libc PRIVATE
+# Position independent (it links into PIE user programs) and allowed to use
+# FP/SIMD: the kernel switches those registers lazily per task. There is no
+# compiler-rt, so libc code must not do arithmetic in long double (binary128);
+# libc_link_check catches it if it does.
+set(LIBC_TARGET_FLAGS
     --target=aarch64-none-elf -mcpu=cortex-a72
-    -ffreestanding -nostdlib -fno-builtin -fno-stack-protector
-    -mgeneral-regs-only -Wall -Wextra)
+    -ffreestanding -nostdlib -fno-builtin -fno-stack-protector -fPIE
+    -std=c11 -O2 -Wall -Wextra -Werror)
+target_compile_options(koraos_libc PRIVATE ${LIBC_TARGET_FLAGS})
+
+# The user program link flags (cmake/userfs.cmake), with the whole archive
+# pulled in: lld rejects any symbol the library uses but does not define.
+set(LIBC_LINK_CHECK_ELF "${CMAKE_CURRENT_BINARY_DIR}/libc_link_check.elf")
+add_custom_command(
+    OUTPUT "${LIBC_LINK_CHECK_ELF}"
+    COMMAND ${CMAKE_C_COMPILER} ${LIBC_TARGET_FLAGS}
+            -fuse-ld=lld -Wl,-pie -Wl,-e,_start -Wl,--pack-dyn-relocs=none
+            -Wl,-z,norelro -Wl,-z,noexecstack -Wl,-z,max-page-size=4096
+            "${LIBC_DIR}/tests/link_check.c"
+            -Wl,--whole-archive "$<TARGET_FILE:koraos_libc>" -Wl,--no-whole-archive
+            -o "${LIBC_LINK_CHECK_ELF}"
+    DEPENDS koraos_libc "${LIBC_DIR}/tests/link_check.c"
+    COMMENT "Linking the whole libc into a PIE (undefined symbol check)"
+    VERBATIM)
+if(LIBC_STANDALONE)
+    add_custom_target(libc_link_check ALL DEPENDS "${LIBC_LINK_CHECK_ELF}")
+else()
+    add_custom_target(libc_link_check DEPENDS "${LIBC_LINK_CHECK_ELF}")
+endif()
 
 # Unit tests run on the host, so they need the host compiler rather than the
 # cross compiler selected by the toolchain file. The libc headers come first on
@@ -66,6 +108,7 @@ if(KORAOS_HOST_CC)
     libc_host_test(string SOURCES src/string/string.c)
     libc_host_test(ctype SOURCES src/ctype/ctype.c)
     libc_host_test(stdlib_convert SOURCES src/stdlib/convert.c src/ctype/ctype.c)
+    libc_host_test(binary128)
     libc_host_test(stdlib_exit SOURCES src/stdlib/exit.c ${LIBC_FAKE_KERNEL})
     libc_host_test(malloc SOURCES ${LIBC_MALLOC_SOURCES})
     libc_host_test(malloc_threads SOURCES ${LIBC_MALLOC_SOURCES} FLAGS -pthread)
