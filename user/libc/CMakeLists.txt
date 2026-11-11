@@ -164,7 +164,8 @@ if(KORAOS_HOST_CC)
 
     libc_host_test(string SOURCES src/string/string.c)
     libc_host_test(ctype SOURCES src/ctype/ctype.c)
-    libc_host_test(stdlib_convert SOURCES src/stdlib/convert.c src/ctype/ctype.c src/errno/errno.c)
+    libc_host_test(stdlib_convert SOURCES src/stdlib/convert.c src/stdlib/strtod.c src/ctype/ctype.c
+                   src/string/string.c src/errno/errno.c)
     libc_host_test(binary128)
     libc_host_test(headers)
     libc_host_test(errno SOURCES src/errno/errno.c src/string/strerror.c src/string/string.c)
@@ -172,7 +173,9 @@ if(KORAOS_HOST_CC)
     libc_host_test(stdlib_sort SOURCES src/stdlib/sort.c src/string/string.c)
     libc_host_test(stdlib_misc SOURCES src/stdlib/integer.c src/stdlib/rand.c src/stdlib/getenv.c)
     libc_host_test(stdio_snprintf SOURCES src/stdio/snprintf.c src/stdio/format.c
-                   src/string/string.c src/errno/errno.c FLAGS -Wno-format)
+                   src/stdio/format_float.c src/string/string.c src/errno/errno.c FLAGS -Wno-format)
+    libc_host_test(stdlib_strtod SOURCES src/stdlib/strtod.c src/ctype/ctype.c src/string/string.c
+                   src/errno/errno.c)
     libc_host_test(malloc SOURCES ${LIBC_MALLOC_SOURCES})
     libc_host_test(malloc_threads SOURCES ${LIBC_MALLOC_SOURCES} FLAGS -pthread)
 

@@ -1,39 +1,12 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// The integer conversions of <stdlib.h> (C11 7.22.1): atoi, atol, atoll and
+// the strtol family. The floating-point ones are in strtod.c.
+
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
 #include <stdlib.h>
-
-#include "binary128.h"
-
-double atof(const char *nptr) {
-    double result = 0.0;
-    int sign = 1;
-    while (isspace((unsigned char)*nptr)) {
-        nptr++;
-    }
-    if (*nptr == '-') {
-        sign = -1;
-        nptr++;
-    } else if (*nptr == '+') {
-        nptr++;
-    }
-    while (isdigit((unsigned char)*nptr)) {
-        result = result * 10 + (*nptr - '0');
-        nptr++;
-    }
-    if (*nptr == '.') {
-        nptr++;
-        double frac = 0.0;
-        double base = 0.1;
-        while (isdigit((unsigned char)*nptr)) {
-            frac += (*nptr - '0') * base;
-            base *= 0.1;
-            nptr++;
-        }
-        result += frac;
-    }
-    return sign * result;
-}
 
 // atoi and friends are strtol in base 10 with no end pointer. Out-of-range
 // input is undefined behaviour for them; here it clamps like strtol (and sets
@@ -48,105 +21,6 @@ long int atol(const char *nptr) {
 
 long long int atoll(const char *nptr) {
     return strtoll(nptr, NULL, 10);
-}
-
-/*
-We need snprintf for these
-
-
-int strfromd(char *restrict s, size_t n, const char *restrict format, double fp) {
-    return snprintf(s, n, format, fp);
-}
-
-int strfromf(char *restrict s, size_t n, const char *restrict format, float fp) {
-    return snprintf(s, n, format, fp);
-}
-
-int strfroml(char *restrict s, size_t n, const char *restrict format, long double fp) {
-    return snprintf(s, n, format, fp);
-}
-*/
-
-double strtod(const char *nptr, char **endptr) {
-    double result = 0.0;
-    int sign = 1;
-    while (isspace((unsigned char)*nptr)) {
-        nptr++;
-    }
-    if (*nptr == '-') {
-        sign = -1;
-        nptr++;
-    } else if (*nptr == '+') {
-        nptr++;
-    }
-    while (isdigit((unsigned char)*nptr)) {
-        result = result * 10 + (*nptr - '0');
-        nptr++;
-    }
-    if (*nptr == '.') {
-        nptr++;
-        double frac = 0.0;
-        double base = 0.1;
-        while (isdigit((unsigned char)*nptr)) {
-            frac += (*nptr - '0') * base;
-            base *= 0.1;
-            nptr++;
-        }
-        result += frac;
-    }
-    if (endptr) {
-        *endptr = (char *)nptr;
-    }
-    return sign * result;
-}
-
-float strtof(const char *nptr, char **endptr) {
-    double result = 0.0;
-    int sign = 1;
-    while (isspace((unsigned char)*nptr)) {
-        nptr++;
-    }
-    if (*nptr == '-') {
-        sign = -1;
-        nptr++;
-    } else if (*nptr == '+') {
-        nptr++;
-    }
-    while (isdigit((unsigned char)*nptr)) {
-        result = result * 10 + (*nptr - '0');
-        nptr++;
-    }
-    if (*nptr == '.') {
-        nptr++;
-        double frac = 0.0;
-        double base = 0.1;
-        while (isdigit((unsigned char)*nptr)) {
-            frac += (*nptr - '0') * base;
-            base *= 0.1;
-            nptr++;
-        }
-        result += frac;
-    }
-    if (endptr) {
-        *endptr = (char *)nptr;
-    }
-    return (float)(sign * result);
-}
-
-// Parsed as a double and widened: no binary128 arithmetic (see binary128.h),
-// so strtold is exactly as precise as strtod.
-long double strtold(const char *nptr, char **endptr) {
-    double d = strtod(nptr, endptr);
-#if defined(__aarch64__) && __LDBL_MANT_DIG__ == 113
-    union {
-        unsigned long long words[2];
-        long double value;
-    } wide;
-    __double_to_binary128(d, wide.words);
-    return wide.value;
-#else
-    return d;  // a host long double the hardware converts to (x87, or double itself)
-#endif
 }
 
 // The integer strto* functions share one parser. It accepts optional white

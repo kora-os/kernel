@@ -105,10 +105,31 @@ static void test_snprintf(void) {
     int n = snprintf(buf, sizeof buf, "%d %ld %s %c %x %llu %p %hhd %f %d %zu %e %-4d|%05d %s",
                      -1, 123456789012L, "str", 'c', 0xbeefu, 18446744073709551615ull,
                      (void *)0x1000, 300, 1.0, 42, (size_t)7, 2.0, 9, -12, "end");
-    const char *want = "-1 123456789012 str c beef 18446744073709551615 0x1000 44 %f 42 7 %e "
-                       "9   |-0012 end";
+    const char *want = "-1 123456789012 str c beef 18446744073709551615 0x1000 44 1.000000 42 7 "
+                       "2.000000e+00 9   |-0012 end";
     check(n == (int)strlen(want) && strcmp(buf, want) == 0, "snprintf with the AAPCS64 va_list");
     check(snprintf(NULL, 0, "%8.3s|%+d", "abcdef", 5) == 11, "snprintf measures");
+
+    // Floats: exact decimal output, and %L reading a binary128 argument
+    // (narrowed by hand: there is no compiler-rt).
+    n = snprintf(buf, sizeof buf, "%.3f|%e|%g|%a|%.0f|%.2f|%Lf|%Lg|%G", 3.14159, 1e-300, 0.0001,
+                 1.0, 2.5, 0.125, (long double)1.5, strtold("1e100", NULL), 1e100);
+    want = "3.142|1.000000e-300|0.0001|0x1p+0|2|0.12|1.500000|1e+100|1E+100";
+    check(n == (int)strlen(want) && strcmp(buf, want) == 0, "snprintf floats");
+    snprintf(buf, sizeof buf, "%.17g", 0.1);
+    check(strcmp(buf, "0.10000000000000001") == 0, "%.17g of 0.1");
+}
+
+static void test_strtod(void) {
+    char *end;
+    check(strtod("0x1.8p1", &end) == 3.0 && *end == '\0', "strtod hex");
+    check(strtod("2.2250738585072011e-308", NULL) == 0x0.fffffffffffffp-1022,
+          "strtod near the subnormal boundary");
+    check(strtod("9007199254740993", NULL) == 9007199254740992.0, "strtod ties to even");
+    check(strtof("3.4028235e38", NULL) == 0x1.fffffep127f, "strtof FLT_MAX");
+    errno = 0;
+    check(strtod("1e400", NULL) > DBL_MAX && errno == ERANGE, "strtod overflow");
+    errno = 0;
 }
 
 static void at_exit_handler(void) {
@@ -121,6 +142,7 @@ int main(void) {
     test_sort();
     test_heap();
     test_snprintf();
+    test_strtod();
     if (failed) {
         return 1;
     }
