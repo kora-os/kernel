@@ -35,7 +35,13 @@ _Static_assert(SAME_TYPE(UINT64_C(0), uint_least64_t), "UINT64_C type");
 _Static_assert(SAME_TYPE(INT64_C(0), int_least64_t), "INT64_C type");
 _Static_assert(SAME_TYPE(INT32_C(0), int), "INT32_C type");
 _Static_assert(SAME_TYPE(INTMAX_C(0), intmax_t), "INTMAX_C type");
+_Static_assert(SAME_TYPE(UINT32_C(0), uint_least32_t), "UINT32_C type");
+_Static_assert(SAME_TYPE(UINTMAX_C(0), uintmax_t), "UINTMAX_C type");
+_Static_assert(SAME_TYPE(INT8_C(0), int) && SAME_TYPE(UINT16_C(0), int), "narrow constants are int");
 _Static_assert(WCHAR_MIN <= 0 && WCHAR_MAX > 0, "wchar_t range");
+_Static_assert((wchar_t)-1 < 0 ? WCHAR_MIN < 0 : WCHAR_MIN == 0, "WCHAR_MIN signedness");
+_Static_assert(WINT_MIN <= 0 && WINT_MAX > 0, "wint_t range");
+_Static_assert(SIG_ATOMIC_MIN < 0 && SIG_ATOMIC_MAX > 0, "sig_atomic_t range");
 
 // <limits.h>
 _Static_assert(CHAR_BIT == 8, "CHAR_BIT");

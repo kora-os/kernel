@@ -87,22 +87,51 @@ typedef __UINTMAX_TYPE__ uintmax_t;
 #define PTRDIFF_MIN (-PTRDIFF_MAX - 1)
 #define SIZE_MAX __SIZE_MAX__
 #define SIG_ATOMIC_MAX __SIG_ATOMIC_MAX__
-#define SIG_ATOMIC_MIN __SIG_ATOMIC_MIN__
+#define SIG_ATOMIC_MIN (-SIG_ATOMIC_MAX - 1)
 #define WCHAR_MAX __WCHAR_MAX__
-#define WCHAR_MIN __WCHAR_MIN__
 #define WINT_MAX __WINT_MAX__
+// Older compilers (clang before 19) do not predefine __WCHAR_MIN__ and
+// __WINT_MIN__; derive them from the signedness.
+#if defined(__WCHAR_MIN__)
+#define WCHAR_MIN __WCHAR_MIN__
+#elif defined(__WCHAR_UNSIGNED__)
+#define WCHAR_MIN 0U
+#else
+#define WCHAR_MIN (-WCHAR_MAX - 1)
+#endif
+#if defined(__WINT_MIN__)
 #define WINT_MIN __WINT_MIN__
+#elif defined(__WINT_UNSIGNED__)
+#define WINT_MIN 0U
+#else
+#define WINT_MIN (-WINT_MAX - 1)
+#endif
 
 // Integer constant macros: the literal gets the suffix of the matching type.
-#define INT8_C(c) __INT8_C(c)
-#define UINT8_C(c) __UINT8_C(c)
-#define INT16_C(c) __INT16_C(c)
-#define UINT16_C(c) __UINT16_C(c)
-#define INT32_C(c) __INT32_C(c)
+// GCC and recent clang predefine __INT64_C() and friends; older clang only
+// the suffixes (__INT64_C_SUFFIX__). Types narrower than int need none.
+#define _LIBC_C_JOIN(c, suffix) c##suffix
+#define _LIBC_C(c, suffix) _LIBC_C_JOIN(c, suffix)
+#define INT8_C(c) c
+#define UINT8_C(c) c
+#define INT16_C(c) c
+#define UINT16_C(c) c
+#define INT32_C(c) c
+#if defined(__UINT32_C)
 #define UINT32_C(c) __UINT32_C(c)
+#else
+#define UINT32_C(c) _LIBC_C(c, __UINT32_C_SUFFIX__)
+#endif
+#if defined(__INT64_C)
 #define INT64_C(c) __INT64_C(c)
 #define UINT64_C(c) __UINT64_C(c)
 #define INTMAX_C(c) __INTMAX_C(c)
 #define UINTMAX_C(c) __UINTMAX_C(c)
+#else
+#define INT64_C(c) _LIBC_C(c, __INT64_C_SUFFIX__)
+#define UINT64_C(c) _LIBC_C(c, __UINT64_C_SUFFIX__)
+#define INTMAX_C(c) _LIBC_C(c, __INTMAX_C_SUFFIX__)
+#define UINTMAX_C(c) _LIBC_C(c, __UINTMAX_C_SUFFIX__)
+#endif
 
 #endif // LIBC_STDINT_H
