@@ -87,8 +87,11 @@ under ASan/UBSan. CI runs it in the `Host unit tests` job:
 tests/run-libc-tests.sh
 ```
 
+The script also compiles every public header on its own for AArch64 in C99,
+C11 and C17 with `-pedantic-errors` (`libc_header_check`).
+
 Inside a configured kernel build directory the same targets exist
-(`cmake --build build --target koraos_libc libc_link_check libc_tests`).
+(`cmake --build build --target koraos_libc libc_link_check libc_header_check libc_tests`).
 
 Each `<name>_test.c` is built with the libc sources it covers; add one with
 `libc_host_test(<name> SOURCES ...)` in `user/libc/CMakeLists.txt`. The libc
@@ -103,7 +106,9 @@ page budget to simulate exhaustion), `yield` and `exit`, in place of
 | Test | Covers |
 |------|--------|
 | `string_test.c`, `ctype_test.c` | `src/string/string.c`, `src/ctype/ctype.c` |
-| `stdlib_convert_test.c` | `ato*`, `strto*`: white space, signs, bases 0/2–36 and prefixes, end pointers. Overflow, errno and exponent forms are not implemented yet and not tested |
+| `stdlib_convert_test.c` | `ato*`, `strto*`: white space, signs, bases 0/2–36 and prefixes (a bare `0x` is `0`), end pointers (at the start when there are no digits), clamping with `ERANGE` at every limit, `EINVAL` for a bad base, errno untouched on success. Float exponent and inf/nan forms are not implemented yet and not tested |
+| `headers_test.c` | The freestanding headers (`stddef.h`, `stdint.h`, `limits.h`, `stdbool.h`, `stdarg.h`, `float.h`, `stdalign.h`, `iso646.h`): static assertions in `headers_static_checks.h` (also compiled for AArch64) plus runtime checks such as `va_arg` past the register arguments and `va_copy` |
+| `errno_test.c` | `errno` storage, distinct codes, `strerror` for every code and the unknown fallback |
 | `binary128_test.c` | `src/internal/binary128.h`: the integer-only double to binary128 widening behind `strtold` (normals, signed zeros, subnormals, infinities, NaN payloads), checked as bit patterns |
 | `stdlib_exit_test.c` | `exit`, `_Exit` and `abort` reach `SYS_EXIT` with the right status |
 | `malloc_test.c` | `src/stdlib/malloc.c`: alignment, neighbour separation, coalescing, pool growth and release, direct page-run blocks, bad and double frees, `realloc`/`calloc`, exhaustion and failed `realloc`, a 200 000-round stress with `__malloc_info` consistency checks |

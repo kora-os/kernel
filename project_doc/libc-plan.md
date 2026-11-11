@@ -45,8 +45,8 @@ from step 4, on-target checks in the QEMU smoke tests. CI runs both.
 | # | Theme | Status |
 |---|-------|--------|
 | 0 | string, ctype, stdlib conversions, malloc and the syscall layer | done (#76, #77, #78) |
-| 1 | Cross-build libc in CI with an undefined-symbol link check; FP allowed in libc; `strtold` without binary128 arithmetic | in progress |
-| 2 | `errno.h`; freestanding headers (`stddef.h` completed, `stdint.h`, `limits.h`, `stdbool.h`, `stdarg.h`, `float.h`, ...); `strto*` overflow with `ERANGE` | planned |
+| 1 | Cross-build libc in CI with an undefined-symbol link check; FP allowed in libc; `strtold` without binary128 arithmetic | done (#79) |
+| 2 | `errno.h`; freestanding headers (`stddef.h` completed, `stdint.h`, `limits.h`, `stdbool.h`, `stdarg.h`, `float.h`, ...); `strto*` overflow with `ERANGE`; `strerror` | in progress |
 | 3 | Rest of `stdlib.h`: `abs`/`div` families, `qsort`, `bsearch`, `rand`/`srand`, `atexit`, `getenv` | planned |
 | 4 | libc/libk reconciliation: libc owns `crt0`, malloc and `mem*`; libk keeps the OS API and links libc; user programs build against libc and may use FP; on-target `libcprobe` smoke step | planned |
 | 5 | `snprintf`/`vsnprintf` family: integers, strings, pointers, all flags and lengths | planned |

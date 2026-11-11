@@ -9,6 +9,8 @@
 
 #include "test.h"
 
+#include <errno.h>
+#include <limits.h>
 #include <stdlib.h>
 
 static int near_enough(long double got, long double want) {
@@ -116,6 +118,103 @@ static void test_strtoull(void) {
     CHECK(strtoull("010", NULL, 0) == 8, "strtoull base 0 octal");
 }
 
+static void test_integer_range_errors(void) {
+    char *end;
+    const char *s;
+
+    errno = 0;
+    CHECK(strtol("9223372036854775807", NULL, 10) == LONG_MAX && errno == 0,
+          "strtol LONG_MAX is in range");
+    CHECK(strtol("-9223372036854775808", NULL, 10) == LONG_MIN && errno == 0,
+          "strtol LONG_MIN is in range");
+    s = "9223372036854775808 tail";
+    CHECK(strtol(s, &end, 10) == LONG_MAX && errno == ERANGE, "strtol LONG_MAX + 1 clamps");
+    CHECK(end == s + 19, "strtol consumes every digit of an overflowing number");
+    errno = 0;
+    CHECK(strtol("-9223372036854775809", NULL, 10) == LONG_MIN && errno == ERANGE,
+          "strtol LONG_MIN - 1 clamps");
+    errno = 0;
+    s = "99999999999999999999999999999999999999x";
+    CHECK(strtol(s, &end, 10) == LONG_MAX && errno == ERANGE && *end == 'x',
+          "strtol far past the range");
+    errno = 0;
+    CHECK(strtol("-0x8000000000000000", NULL, 16) == LONG_MIN && errno == 0,
+          "strtol LONG_MIN in hex");
+    CHECK(strtol("0x8000000000000000", NULL, 16) == LONG_MAX && errno == ERANGE,
+          "strtol 2^63 in hex clamps");
+
+    errno = 0;
+    CHECK(strtoll("-9223372036854775808", NULL, 10) == LLONG_MIN && errno == 0, "strtoll LLONG_MIN");
+    CHECK(strtoll("9223372036854775808", NULL, 10) == LLONG_MAX && errno == ERANGE,
+          "strtoll overflow");
+
+    errno = 0;
+    CHECK(strtoul("18446744073709551615", NULL, 10) == ULONG_MAX && errno == 0,
+          "strtoul ULONG_MAX is in range");
+    CHECK(strtoul("18446744073709551616", NULL, 10) == ULONG_MAX && errno == ERANGE,
+          "strtoul ULONG_MAX + 1 clamps");
+    errno = 0;
+    CHECK(strtoul("-18446744073709551615", NULL, 10) == 1 && errno == 0,
+          "strtoul negates a full-width magnitude");
+    CHECK(strtoul("-18446744073709551616", NULL, 10) == ULONG_MAX && errno == ERANGE,
+          "strtoul negative overflow clamps to ULONG_MAX");
+    errno = 0;
+    CHECK(strtoull("1" "0000000000000000000000", NULL, 10) == ULLONG_MAX && errno == ERANGE,
+          "strtoull overflow");
+
+    // atoi and friends clamp like strtol before narrowing.
+    errno = 0;
+    CHECK(atol("-9223372036854775809") == LONG_MIN && errno == ERANGE, "atol clamps");
+    errno = 0;
+    CHECK(atoll("9223372036854775808") == LLONG_MAX && errno == ERANGE, "atoll clamps");
+}
+
+static void test_integer_errno_untouched(void) {
+    errno = 12345;
+    strtol("42", NULL, 10);
+    strtoul("-1", NULL, 10);
+    strtoll("", NULL, 10);
+    strtoull("junk", NULL, 0);
+    CHECK(errno == 12345, "successful and empty conversions leave errno alone");
+    errno = 0;
+}
+
+static void test_integer_edges(void) {
+    char *end;
+    const char *s;
+
+    s = "   ";
+    CHECK(strtol(s, &end, 10) == 0 && end == s, "only white space: no digits, end at the start");
+    s = "  -x";
+    CHECK(strtol(s, &end, 10) == 0 && end == s, "sign without digits: end at the start");
+    s = "+";
+    CHECK(strtoul(s, &end, 10) == 0 && end == s, "a lone sign");
+    s = "0x";
+    CHECK(strtol(s, &end, 0) == 0 && end == s + 1, "0x with no hex digit is 0 followed by x");
+    s = "0xg";
+    CHECK(strtol(s, &end, 16) == 0 && end == s + 1, "0xg in base 16 is 0 followed by xg");
+    s = "0x1A";
+    CHECK(strtol(s, &end, 16) == 26 && end == s + 4, "base 16 accepts the 0x prefix");
+    s = "0x1A";
+    CHECK(strtol(s, &end, 10) == 0 && end == s + 1, "base 10 stops at x");
+    s = "08";
+    CHECK(strtol(s, &end, 0) == 0 && end == s + 1, "base 0 octal stops at 8");
+    CHECK(strtol("-0", NULL, 10) == 0, "-0");
+    CHECK(strtol("+0x7fffffffffffffff", NULL, 0) == LONG_MAX, "+ with a hex prefix");
+    CHECK(strtol("1", NULL, 36) == 1 && strtol("Z", NULL, 36) == 35, "base 36 digits");
+    s = "12";
+    CHECK(strtol(s, &end, 2) == 1 && end == s + 1, "base 2 stops at 2");
+
+    errno = 0;
+    s = "123";
+    CHECK(strtol(s, &end, 1) == 0 && errno == EINVAL && end == s, "base 1 is invalid");
+    errno = 0;
+    CHECK(strtol(s, &end, 37) == 0 && errno == EINVAL && end == s, "base 37 is invalid");
+    errno = 0;
+    CHECK(strtoul(s, &end, -1) == 0 && errno == EINVAL && end == s, "negative base is invalid");
+    errno = 0;
+}
+
 static void test_strtod(void) {
     char *end;
     const char *s = "  -2.5xyz";
@@ -151,4 +250,5 @@ static void test_strtold(void) {
 }
 
 TEST_MAIN(test_atoi_family, test_atof, test_strtol, test_strtoll, test_strtoul,
-          test_strtoull, test_strtod, test_strtof, test_strtold)
+          test_strtoull, test_integer_range_errors, test_integer_errno_untouched,
+          test_integer_edges, test_strtod, test_strtof, test_strtold)

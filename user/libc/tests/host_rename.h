@@ -61,5 +61,8 @@
 #define memset kora_memset
 #define memmove kora_memmove
 #define memcmp kora_memcmp
+#define strerror kora_strerror
+
+#define __errno_location kora_errno_location
 
 #endif // LIBC_HOST_RENAME_H
