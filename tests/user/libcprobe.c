@@ -4,9 +4,11 @@
 // EL0 through libc code, errno, qsort/bsearch on the 4 KB main stack, the
 // rand sequence (the same on every platform), snprintf with the AAPCS64
 // va_list (the host tests run on other variadic conventions), and an atexit
-// handler run by crt0's exit() after main returns. Prints "libcprobe: checks
-// passed", then the handler prints "libcprobe: atexit ran"; any failure
-// prints its check and exits non-zero.
+// handler run by crt0's exit() after main returns. stdout is made fully
+// buffered, so "libcprobe: checks passed" (printf) and then the handler's
+// "libcprobe: atexit ran" (puts) only appear if exit() flushes stdout after
+// running the handlers. A failed check prints itself (unbuffered) and the
+// program exits non-zero.
 #include "../../user/libk/koraos.h"
 
 #include <errno.h>
@@ -133,10 +135,11 @@ static void test_strtod(void) {
 }
 
 static void at_exit_handler(void) {
-    kputs("libcprobe: atexit ran\n");
+    puts("libcprobe: atexit ran");
 }
 
 int main(void) {
+    check(setvbuf(stdout, NULL, _IOFBF, 0) == 0, "setvbuf");
     test_integers();
     test_floats();
     test_sort();
@@ -147,6 +150,6 @@ int main(void) {
         return 1;
     }
     check(atexit(at_exit_handler) == 0, "atexit");
-    kputs("libcprobe: checks passed\n");
-    return 0;  // crt0 passes this to exit(), which runs the handler
+    printf("libcprobe: %s\n", "checks passed");
+    return 0;  // crt0 passes this to exit(): the handler runs, then stdout is flushed
 }

@@ -1,15 +1,22 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Minimal host-side test support for the libc tests. The libc headers are on
-// the include path instead of the host's, so the host's printf is declared by
-// hand rather than pulled in from <stdio.h>.
+// the include path instead of the host's, and host_rename.h renames the
+// libc's own printf and fflush (kora_printf, ...), so the host's are bound by
+// symbol name here: test_printf and test_fflush always reach the host libc,
+// whatever the code under test does with its streams.
 #ifndef LIBC_TEST_H
 #define LIBC_TEST_H
 
 #include <stddef.h>
 
-int printf(const char *fmt, ...);
-int fflush(void *stream);
+#define TEST_STRINGIFY2(x) #x
+#define TEST_STRINGIFY(x) TEST_STRINGIFY2(x)
+// The host's symbol `name` (with the platform's prefix: _printf on macOS).
+#define TEST_HOST_SYMBOL(name) __asm__(TEST_STRINGIFY(__USER_LABEL_PREFIX__) #name)
+
+int test_printf(const char *fmt, ...) TEST_HOST_SYMBOL(printf);
+int test_fflush(void *stream) TEST_HOST_SYMBOL(fflush);
 
 extern int test_failures;
 extern int test_checks;
@@ -19,9 +26,9 @@ extern int test_checks;
         test_checks++;                                  \
         if (!(cond)) {                                  \
             test_failures++;                            \
-            printf("FAIL %s:%d: ", __FILE__, __LINE__); \
-            printf(__VA_ARGS__);                        \
-            printf("\n");                               \
+            test_printf("FAIL %s:%d: ", __FILE__, __LINE__); \
+            test_printf(__VA_ARGS__);                   \
+            test_printf("\n");                          \
         }                                               \
     } while (0)
 
@@ -34,9 +41,9 @@ extern int test_checks;
         for (unsigned i = 0; i < sizeof(tests) / sizeof(tests[0]); i++) { \
             tests[i]();                                                   \
         }                                                                 \
-        printf("%s: %d checks, %d failures\n", __FILE__, test_checks,     \
+        test_printf("%s: %d checks, %d failures\n", __FILE__, test_checks, \
                test_failures);                                            \
-        fflush(NULL);                                                     \
+        test_fflush(NULL);                                                \
         return test_failures != 0;                                        \
     }
 

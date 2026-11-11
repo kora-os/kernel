@@ -175,6 +175,11 @@ if(KORAOS_HOST_CC)
     libc_host_test(stdlib_misc SOURCES src/stdlib/integer.c src/stdlib/rand.c src/stdlib/getenv.c)
     libc_host_test(stdio_snprintf SOURCES src/stdio/snprintf.c src/stdio/format.c
                    src/stdio/format_float.c src/string/string.c src/errno/errno.c FLAGS -Wno-format)
+    set(LIBC_STDIO_SOURCES src/stdio/file.c src/stdio/fwrite.c src/stdio/printf.c
+        src/stdio/format.c src/stdio/format_float.c src/stdio/snprintf.c src/string/string.c
+        src/string/search.c src/string/strerror.c src/errno/errno.c src/stdlib/exit.c
+        src/stdlib/malloc.c ${LIBC_FAKE_KERNEL})
+    libc_host_test(stdio_write SOURCES ${LIBC_STDIO_SOURCES} FLAGS -pthread -Wno-format)
     libc_host_test(stdlib_strtod SOURCES src/stdlib/strtod.c src/ctype/ctype.c src/string/string.c
                    src/errno/errno.c)
     libc_host_test(malloc SOURCES ${LIBC_MALLOC_SOURCES})

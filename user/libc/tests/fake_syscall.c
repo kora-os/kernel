@@ -79,11 +79,106 @@ static int free_pages_locked(void *base) {
     return -1;
 }
 
+#define CONSOLE_CAPACITY (1u << 20)
+
+static struct {
+    char data[CONSOLE_CAPACITY];
+    size_t len;
+    unsigned writes;
+} console[3];
+static size_t write_chunk;
+static int writes_fail;
+static const char *input;
+static size_t input_len, input_pos, input_chunk;
+
+static long fake_write(int fd, const char *buf, size_t len) {
+    if (fd != 1 && fd != 2) {
+        return -1;
+    }
+    lock_state();
+    console[fd].writes++;
+    if (writes_fail) {
+        unlock_state();
+        return -1;
+    }
+    if (write_chunk != 0 && len > write_chunk) {
+        len = write_chunk;
+    }
+    if (len > CONSOLE_CAPACITY - 1 - console[fd].len) {
+        len = CONSOLE_CAPACITY - 1 - console[fd].len;
+    }
+    __builtin_memcpy(console[fd].data + console[fd].len, buf, len);
+    console[fd].len += len;
+    console[fd].data[console[fd].len] = '\0';
+    unlock_state();
+    return (long)len;
+}
+
+static long fake_read(int fd, char *buf, size_t len) {
+    if (fd != 0) {
+        return -1;
+    }
+    lock_state();
+    size_t left = input_len - input_pos;
+    size_t n = len < left ? len : left;
+    if (input_chunk != 0 && n > input_chunk) {
+        n = input_chunk;
+    }
+    __builtin_memcpy(buf, input + input_pos, n);
+    input_pos += n;
+    unlock_state();
+    return (long)n;
+}
+
+const char *fake_output(int fd, size_t *len) {
+    if (len != NULL) {
+        *len = console[fd].len;
+    }
+    return console[fd].data;
+}
+
+unsigned fake_writes(int fd) {
+    return console[fd].writes;
+}
+
+void fake_reset_console(void) {
+    lock_state();
+    for (int fd = 0; fd < 3; fd++) {
+        console[fd].len = 0;
+        console[fd].data[0] = '\0';
+        console[fd].writes = 0;
+    }
+    write_chunk = 0;
+    writes_fail = 0;
+    input = NULL;
+    input_len = input_pos = input_chunk = 0;
+    unlock_state();
+}
+
+void fake_set_write_chunk(size_t n) {
+    write_chunk = n;
+}
+
+void fake_fail_writes(int fail) {
+    writes_fail = fail;
+}
+
+void fake_set_input(const char *data, size_t len, size_t chunk) {
+    lock_state();
+    input = data;
+    input_len = len;
+    input_pos = 0;
+    input_chunk = chunk;
+    unlock_state();
+}
+
 long __syscall(long number, long a0, long a1, long a2, long a3) {
-    (void)a1;
-    (void)a2;
     (void)a3;
     switch (number) {
+    case SYS_WRITE:
+        return fake_write((int)a0, (const char *)a1, (size_t)a2);
+    case SYS_READ:
+        return fake_read((int)a0, (char *)a1, (size_t)a2);
     case SYS_ALLOC_PAGES: {
         lock_state();
         void *p = alloc_pages_locked((size_t)a0);

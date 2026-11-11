@@ -52,8 +52,8 @@ from step 4, on-target checks in the QEMU smoke tests. CI runs both.
 | 3 | Rest of `stdlib.h`: `abs`/`div` families, `qsort`, `bsearch`, `rand`/`srand`, `atexit`/`at_quick_exit`, `getenv` | done (#81) |
 | 4 | libc/libk reconciliation: libc owns `crt0`, malloc and `mem*`; libk keeps the OS API and links libc; user programs build against libc and may use FP; on-target `libcprobe` smoke step | in progress |
 | 5 | `snprintf`/`vsnprintf` family: integers, strings, pointers, all flags and lengths | done |
-| 6 | Float conversions: `%f`/`%e`/`%g`/`%a` and a correctly rounded `strtod` family (exponents, hex, inf/nan) | in progress |
-| 7 | `FILE` with buffered `stdout`/`stderr`, `printf`/`puts`/`putchar`/`fputs`/`fflush`, flush at exit | planned |
+| 6 | Float conversions: `%f`/`%e`/`%g`/`%a` and a correctly rounded `strtod` family (exponents, hex, inf/nan) | done |
+| 7 | `FILE` with buffered `stdout`/`stderr`, `printf`/`puts`/`putchar`/`fputs`/`fflush`, flush at exit; the rest of `<string.h>` | in progress |
 | 8 | File streams: `fopen`/`fclose`/`fread`/`fwrite`/`fseek`/`ftell`/`fgets`/`fgetc`/`ungetc`, `remove`, `rename` | planned |
 
 After step 8: koracli on libc (separate design discussion), then MicroPython.

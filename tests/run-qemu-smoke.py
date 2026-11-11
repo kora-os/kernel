@@ -555,7 +555,7 @@ def run(q, graphics=True, keyboard=False, repeat=0, multi_volume=False, write_te
         q.expect(rb"^libcprobe: atexit ran\r?\n")
         q.expect(rb"exited with 0")
         q.expect(PROMPT)
-    yield "libc on the target (binary128 strtold, FP, atexit via crt0)", libc_on_target
+    yield "libc on the target (floats, strtod, snprintf va_list, stdio flushed at exit)", libc_on_target
 
     def read_tasks():
         """Run `tasks` on the debug console: ({name: (state, stack)}, peak, size)."""
