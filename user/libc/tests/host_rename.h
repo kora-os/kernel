@@ -44,6 +44,20 @@
 #define abort kora_abort
 #define exit kora_exit
 #define _Exit kora_Exit
+#define atexit kora_atexit
+#define at_quick_exit kora_at_quick_exit
+#define quick_exit kora_quick_exit
+#define getenv kora_getenv
+#define rand kora_rand
+#define srand kora_srand
+#define qsort kora_qsort
+#define bsearch kora_bsearch
+#define abs kora_abs
+#define labs kora_labs
+#define llabs kora_llabs
+#define div kora_div
+#define ldiv kora_ldiv
+#define lldiv kora_lldiv
 
 // The libc's syscall entry; tests link tests/fake_syscall.c in its place.
 #define __syscall kora_syscall

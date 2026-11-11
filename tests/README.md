@@ -110,7 +110,9 @@ page budget to simulate exhaustion), `yield` and `exit`, in place of
 | `headers_test.c` | The freestanding headers (`stddef.h`, `stdint.h`, `limits.h`, `stdbool.h`, `stdarg.h`, `float.h`, `stdalign.h`, `iso646.h`): static assertions in `headers_static_checks.h` (also compiled for AArch64) plus runtime checks such as `va_arg` past the register arguments and `va_copy` |
 | `errno_test.c` | `errno` storage, distinct codes, `strerror` for every code and the unknown fallback |
 | `binary128_test.c` | `src/internal/binary128.h`: the integer-only double to binary128 widening behind `strtold` (normals, signed zeros, subnormals, infinities, NaN payloads), checked as bit patterns |
-| `stdlib_exit_test.c` | `exit`, `_Exit` and `abort` reach `SYS_EXIT` with the right status |
+| `stdlib_exit_test.c` | `exit`, `_Exit`, `quick_exit` and `abort` reach `SYS_EXIT` with the right status; `atexit`/`at_quick_exit` handlers run last first and once, a handler may register another, the 32-handler limit, `_Exit`/`abort` run none |
+| `stdlib_sort_test.c` | `qsort` over 15 sizes and 6 input shapes (sorted permutation, at most about 2 n log2 n comparisons), 1-byte, 3-byte, 24-byte and unaligned elements; `bsearch` hits and misses at every position |
+| `stdlib_misc_test.c` | `abs`/`div` families at the limits (no signed-overflow UB), `rand`/`srand` sequences, range and rough uniformity, `getenv` |
 | `malloc_test.c` | `src/stdlib/malloc.c`: alignment, neighbour separation, coalescing, pool growth and release, direct page-run blocks, bad and double frees, `realloc`/`calloc`, exhaustion and failed `realloc`, a 200 000-round stress with `__malloc_info` consistency checks |
 | `malloc_threads_test.c` | The same heap under four concurrent pthreads (malloc/realloc/free, direct blocks), then a pool consistency check |
 

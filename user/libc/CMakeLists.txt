@@ -161,6 +161,8 @@ if(KORAOS_HOST_CC)
     libc_host_test(headers)
     libc_host_test(errno SOURCES src/errno/errno.c src/string/strerror.c src/string/string.c)
     libc_host_test(stdlib_exit SOURCES src/stdlib/exit.c ${LIBC_FAKE_KERNEL})
+    libc_host_test(stdlib_sort SOURCES src/stdlib/sort.c src/string/string.c)
+    libc_host_test(stdlib_misc SOURCES src/stdlib/integer.c src/stdlib/rand.c src/stdlib/getenv.c)
     libc_host_test(malloc SOURCES ${LIBC_MALLOC_SOURCES})
     libc_host_test(malloc_threads SOURCES ${LIBC_MALLOC_SOURCES} FLAGS -pthread)
 
