@@ -13,10 +13,11 @@ A program runs in EL0 with a deliberately small runtime:
 - **A small C library, no stdio yet.** [`user/libc`](../user/libc) provides
   the freestanding headers (`<stddef.h>`, `<stdint.h>`, `<limits.h>`,
   `<stdbool.h>`, `<stdarg.h>`, `<float.h>`, ...), `<string.h>`, `<ctype.h>`,
-  `<errno.h>` and `<stdlib.h>` (conversions, `qsort`/`bsearch`, `rand`,
-  `atexit`, the heap); `printf` and files through `FILE` are on the way (see
-  [libc-plan.md](../project_doc/libc-plan.md)). Until then, write with
-  `write()` or libk's inline helpers in
+  `<errno.h>`, `<stdlib.h>` (conversions, `qsort`/`bsearch`, `rand`,
+  `atexit`, the heap) and `snprintf` in `<stdio.h>`; `printf` to the console
+  and files through `FILE` are on the way (see
+  [libc-plan.md](../project_doc/libc-plan.md)). Until then, format with
+  `snprintf` and write with `write()` or libk's inline helpers in
   [`user/libk/koraos.h`](../user/libk/koraos.h) (`kputs`, `kput_int`,
   `kstrlen`, `kstreq`). `koraos.h` includes the libc headers, so it is the
   only header a program needs; the KoraOS calls themselves are in
@@ -25,7 +26,7 @@ A program runs in EL0 with a deliberately small runtime:
   each task's FP/SIMD registers and switches them lazily. `long double` is
   IEEE binary128, which the hardware cannot compute with, and there is no
   compiler-rt: avoid arithmetic in it (the link fails on `__addtf3` and
-  friends).
+  friends). `strtold` and `%Lf` work at double precision.
 - **A ~4 KB stack.** A program's main thread gets a single-page user stack
   (other threads get 16 KB), so keep large buffers off the stack (use `malloc`,
   or static arrays).

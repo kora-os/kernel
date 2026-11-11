@@ -5,8 +5,7 @@
 // (both may be *), and the length modifiers hh h l ll j z t L. %lc and %ls
 // write UTF-8, the libc's only multibyte encoding.
 //
-// Floating-point conversions (a A e E f F g G) are not implemented yet: they
-// consume their argument and print the conversion specification itself.
+// The floating-point conversions (a A e E f F g G) are in format_float.c.
 //
 // Choices where the standard leaves the behaviour open: a null %s prints
 // "(null)", %p prints like %#lx but always with the 0x prefix ("0x0" for a
@@ -17,26 +16,10 @@
 #include <stdint.h>
 #include <string.h>
 
-#include "format.h"
+#include "binary128.h"
+#include "format_impl.h"
 
-#define FLAG_LEFT 1   // '-': pad on the right
-#define FLAG_PLUS 2   // '+': always a sign on signed conversions
-#define FLAG_SPACE 4  // ' ': a space where a plus sign would go
-#define FLAG_ALT 8    // '#': 0 or 0x prefix for o, x, X
-#define FLAG_ZERO 16  // '0': pad numbers with zeros
-
-#define NO_PRECISION (-1)
-
-enum length { LEN_NONE, LEN_HH, LEN_H, LEN_L, LEN_LL, LEN_J, LEN_Z, LEN_T, LEN_BIG_L };
-
-struct out {
-    format_put_fn put;
-    void *ctx;
-    size_t count;  // characters produced so far (never above INT_MAX)
-    int error;     // errno value once something failed; nothing more is written
-};
-
-static void emit(struct out *o, const char *s, size_t n) {
+void __format_emit(struct out *o, const char *s, size_t n) {
     if (o->error || n == 0) {
         return;
     }
@@ -48,7 +31,7 @@ static void emit(struct out *o, const char *s, size_t n) {
     o->count += n;
 }
 
-static void pad(struct out *o, char c, size_t n) {
+void __format_pad(struct out *o, char c, size_t n) {
     char chunk[32];
     if (n > (size_t)INT_MAX - o->count) {
         o->error = EOVERFLOW;  // before writing two billion spaces
@@ -57,23 +40,14 @@ static void pad(struct out *o, char c, size_t n) {
     memset(chunk, c, n < sizeof chunk ? n : sizeof chunk);
     while (n > 0 && !o->error) {
         size_t k = n < sizeof chunk ? n : sizeof chunk;
-        emit(o, chunk, k);
+        __format_emit(o, chunk, k);
         n -= k;
     }
 }
 
-// Spaces before (or, with '-', after) a field of `len` characters.
-static size_t field_padding(int width, size_t len) {
-    return width > 0 && (size_t)width > len ? (size_t)width - len : 0;
-}
-
-struct spec {
-    int flags;
-    int width;      // 0 when absent
-    int precision;  // NO_PRECISION when absent
-    enum length length;
-    char conv;
-};
+#define emit __format_emit
+#define pad __format_pad
+#define field_padding __format_field_padding
 
 static void format_integer(struct out *o, const struct spec *sp, uintmax_t value, int negative) {
     int base = sp->conv == 'o' ? 8 : (sp->conv == 'x' || sp->conv == 'X' || sp->conv == 'p') ? 16 : 10;
@@ -258,6 +232,19 @@ static void store_count(enum length length, size_t count, va_list *ap) {
 }
 
 // Reads a decimal field (width or precision); -1 if it does not fit an int.
+// A long double argument, narrowed to double: AArch64's binary128 cannot be
+// computed with (no compiler-rt), so its bits are converted by hand.
+static double long_double_arg(va_list *ap) {
+    long double v = va_arg(*ap, long double);
+#if defined(__aarch64__) && __LDBL_MANT_DIG__ == 113
+    unsigned long long words[2];
+    memcpy(words, &v, sizeof words);
+    return __binary128_to_double(words);
+#else
+    return (double)v;
+#endif
+}
+
 static int read_number(const char **p) {
     int n = 0;
     while (**p >= '0' && **p <= '9') {
@@ -407,13 +394,8 @@ int __format(format_put_fn put, void *ctx, const char *fmt, va_list args) {
         case 'F':
         case 'g':
         case 'G':
-            // Not implemented yet: keep the argument list in step.
-            if (sp.length == LEN_BIG_L) {
-                (void)va_arg(ap, long double);
-            } else {
-                (void)va_arg(ap, double);
-            }
-            emit(&o, start, (size_t)(fmt - start));
+            __format_float(&o, &sp, sp.length == LEN_BIG_L ? long_double_arg(&ap)
+                                                           : va_arg(ap, double));
             break;
         default:
             emit(&o, start, (size_t)(fmt - start));  // unknown: print it as written

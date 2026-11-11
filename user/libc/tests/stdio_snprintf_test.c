@@ -185,6 +185,96 @@ static void test_strings_and_chars_against_host(void) {
     compare("mixed %5d|%-8s|%#x|%c|%lld|%hhu", -12, "left", 255, 'Z', -9000000000LL, 511);
 }
 
+static unsigned long long float_rng = 0x2545f4914f6cdd1dull;
+
+static double random_double(void) {
+    float_rng ^= float_rng << 13;
+    float_rng ^= float_rng >> 7;
+    float_rng ^= float_rng << 17;
+    double d;
+    memcpy(&d, &float_rng, sizeof d);
+    return d;
+}
+
+// Doubles in every corner: halfway cases at many precisions (0.125, 2.5),
+// carries (9.9996, 0.96), the extremes, and random bit patterns.
+static const double float_values[] = {
+    0.0, -0.0, 1.0, -1.0, 0.1, 0.5, 1.5, 2.5, 0.125, 0.375, 1e-5, 1e-4, 0.96, 9.9996, 99.5,
+    999999.5, 123456.789, 1e15, 1e16, 1e17, 1e21, 1e22, 1e23, 4.35, 0.15, 1.0 / 3.0, 2.0 / 3.0,
+    5e-324, 2.2250738585072014e-308, 1.7976931348623157e308, 3.0e-310, 0.000123456, 1234567.0,
+};
+
+static char big_want[4096], big_got[4096];
+
+static void compare_float(const char *fmt, double v) {
+    int rw = snprintf(big_want, sizeof big_want, fmt, v);
+    int rg = kora_snprintf(big_got, sizeof big_got, fmt, v);
+    test_checks++;
+    if (rw != rg || strcmp(big_want, big_got) != 0) {
+        test_failures++;
+        if (++mismatches <= 20) {
+            printf("FAIL \"%s\" of %a: host \"%.60s\" (%d), libc \"%.60s\" (%d)\n", fmt, v,
+                   big_want, rw, big_got, rg);
+        }
+    }
+}
+
+#undef snprintf
+int snprintf(char *s, size_t n, const char *format, ...);
+
+static void test_floats_against_host(void) {
+    static const char *const fwidths[] = {"", "1", "12", "30"};
+    static const char *const fprecisions[] = {"", ".", ".0", ".1", ".2", ".3", ".6", ".10",
+                                              ".17", ".25", ".60"};
+    static const char flag_chars[] = "-+ #0";
+    char fmt[32], flags[8];
+    for (unsigned mask = 0; mask < 32; mask++) {
+        size_t nf = 0;
+        for (size_t i = 0; i < 5; i++) {
+            if (mask & (1u << i)) {
+                flags[nf++] = flag_chars[i];
+            }
+        }
+        flags[nf] = '\0';
+        for (size_t wi = 0; wi < sizeof fwidths / sizeof fwidths[0]; wi++) {
+            for (size_t pi = 0; pi < sizeof fprecisions / sizeof fprecisions[0]; pi++) {
+                for (const char *c = "feEgG"; *c; c++) {
+                    snprintf(fmt, sizeof fmt, "%%%s%s%s%c", flags, fwidths[wi], fprecisions[pi], *c);
+                    for (size_t v = 0; v < sizeof float_values / sizeof float_values[0]; v++) {
+                        compare_float(fmt, float_values[v]);
+                    }
+                }
+            }
+        }
+    }
+    // Random doubles, including huge %f expansions and every precision.
+    for (int i = 0; i < 3000; i++) {
+        double v = random_double();
+        if (v != v) {
+            continue;
+        }
+        snprintf(fmt, sizeof fmt, "%%.%dg", i % 20);
+        compare_float(fmt, v);
+        snprintf(fmt, sizeof fmt, "%%.%de", i % 30);
+        compare_float(fmt, v);
+        compare_float(i & 1 ? "%f" : "%.40f", v);
+        compare_float("%a", v);
+        compare_float("%.3A", v);  // a tie needs 40 exact bits: never at random
+    }
+    // %a of normal numbers (hosts disagree on subnormals: checked by hand).
+    for (size_t v = 0; v < sizeof float_values / sizeof float_values[0]; v++) {
+        double d = float_values[v];
+        if (d != 0 && (d > 2.3e-308 || d < -2.3e-308)) {
+            // No precision below 13: exact ties there are checked by hand.
+            static const char *const afmts[] = {"%a", "%A", "%.13a", "%.20a", "%#a", "%+20a",
+                                                "%-20a|", "%020a", "%#.15A"};
+            for (size_t f = 0; f < sizeof afmts / sizeof afmts[0]; f++) {
+                compare_float(afmts[f], d);
+            }
+        }
+    }
+}
+
 static int fmt_into(char *buf, size_t n, const char *fmt, ...) {
     __builtin_va_list ap;
     __builtin_va_start(ap, fmt);
@@ -209,9 +299,24 @@ static void test_open_choices(void) {
     CHECK(strcmp(buf, "%|%") == 0, "%%%% ignores width: %s", buf);
     kora_snprintf(buf, sizeof buf, "%+u|% x", 5u, 10u);
     CHECK(strcmp(buf, "5|a") == 0, "+ and space ignored on unsigned conversions: %s", buf);
-    // Floats are not implemented yet, but they must not unbalance the arguments.
+    // Floats and integers mixed keep the arguments in step, long double too.
     kora_snprintf(buf, sizeof buf, "%f|%d|%.3e|%Lg|%d", 1.5, 7, 2.0, (long double)3.0, 8);
-    CHECK(strcmp(buf, "%f|7|%.3e|%Lg|8") == 0, "float placeholders keep the arguments: %s", buf);
+    CHECK(strcmp(buf, "1.500000|7|2.000e+00|3|8") == 0, "floats between integers: %s", buf);
+    // NaN signs and infinities: never zero padded.
+    double inf = __builtin_inf(), nan = __builtin_nan("");
+    kora_snprintf(buf, sizeof buf, "[%f|%E|%-5g|%05f|%+F|% a]", inf, -inf, nan, -nan, inf, nan);
+    CHECK(strcmp(buf, "[inf|-INF|nan  | -nan|+INF| nan]") == 0, "inf and nan: %s", buf);
+    // %a of subnormals: 0x0.<fraction>p-1022 (as glibc prints them).
+    kora_snprintf(buf, sizeof buf, "%a|%A|%.1a", 0x1p-1074, 0x1.8p-1023, 0x1p-1074);
+    CHECK(strcmp(buf, "0x0.0000000000001p-1022|0X0.CP-1022|0x0.0p-1022") == 0, "%%a subnormals: %s",
+          buf);
+    // %a precision rounds to nearest, ties to even on the last digit kept
+    // (the leading one at precision 0); a carry into the leading digit is
+    // not renormalised. Host libcs disagree on ties, so these are by hand.
+    kora_snprintf(buf, sizeof buf, "%.1a|%.0a|%.0a|%.1a|%.1a|%#.0a", 0x1.f8p0, 0x1.8p0, 0x1.4p0,
+                  0x1.18p0, 0x1.28p0, 1.0);
+    CHECK(strcmp(buf, "0x2.0p+0|0x2p+0|0x1p+0|0x1.2p+0|0x1.2p+0|0x1.p+0") == 0,
+          "%%a rounding: %s", buf);
 }
 
 static void test_truncation_and_return(void) {
@@ -228,8 +333,8 @@ static void test_truncation_and_return(void) {
           "truncation inside padding: \"%s\"", buf);
     CHECK(fmt_into(buf, sizeof buf, "%s=%d", "v", 3) == 3 && strcmp(buf, "v=3") == 0, "vsnprintf");
     char big[32];
-    CHECK(kora_sprintf(big, "%08.3f|%-4d|%x", 0.0, 12, 0xbeefu) == 16 &&
-              strcmp(big, "%08.3f|12  |beef") == 0,
+    CHECK(kora_sprintf(big, "%08.3f|%-4d|%x", 0.0, 12, 0xbeefu) == 18 &&
+              strcmp(big, "0000.000|12  |beef") == 0,
           "sprintf: %s", big);
     char c = 0;
     CHECK(kora_snprintf(buf, sizeof buf, "a%cb", c) == 3 && buf[1] == '\0' && buf[2] == 'b',
@@ -295,5 +400,6 @@ static void test_overflow(void) {
           "a * width of INT_MIN: EOVERFLOW");
 }
 
-TEST_MAIN(test_integers_against_host, test_strings_and_chars_against_host, test_open_choices,
+TEST_MAIN(test_integers_against_host, test_strings_and_chars_against_host, test_floats_against_host,
+          test_open_choices,
           test_truncation_and_return, test_count_stores, test_utf8, test_overflow)

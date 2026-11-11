@@ -29,14 +29,6 @@ int atoi(const char *nptr);
 long int atol(const char *nptr);
 long long int atoll(const char *nptr);
 
-/*
-We need snprintf for these
-
-int strfromd(char *restrict s, size_t n, const char *restrict format, double fp);
-int strfromf(char *restrict s, size_t n, const char *restrict format, float fp);
-int strfroml(char *restrict s, size_t n, const char *restrict format, long double fp);
-*/
-
 double strtod(const char *restrict nptr, char **restrict endptr);
 float strtof(const char *restrict nptr, char **restrict endptr);
 long double strtold(const char *restrict nptr, char **restrict endptr);

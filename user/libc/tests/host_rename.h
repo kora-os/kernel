@@ -26,9 +26,6 @@
 #define atoi kora_atoi
 #define atol kora_atol
 #define atoll kora_atoll
-#define strfromd kora_strfromd
-#define strfromf kora_strfromf
-#define strfroml kora_strfroml
 #define strtod kora_strtod
 #define strtof kora_strtof
 #define strtold kora_strtold
