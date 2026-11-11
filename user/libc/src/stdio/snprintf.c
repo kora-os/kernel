@@ -20,6 +20,9 @@ struct buffer {
 static void put_buffer(void *ctx, const char *s, size_t n) {
     struct buffer *b = ctx;
     size_t k = n < b->room ? n : b->room;
+    if (k == 0) {
+        return;  // full, or measuring only: data may be NULL, and NULL + 0 is UB
+    }
     memcpy(b->data + b->used, s, k);
     b->used += k;
     b->room -= k;
