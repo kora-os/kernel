@@ -32,8 +32,9 @@ CPython is out of scope.
   host unit tests replace the kernel with `tests/fake_syscall.c`.
 - `errno` is `(*__errno_location())` from the start, so it can become per
   thread once the kernel saves `TPIDR_EL0`, without an ABI change.
-- Floating point is allowed in libc and (from step 4) in user programs: the
-  kernel switches FP/SIMD state lazily. `long double` is IEEE binary128 on
+- Floating point is allowed in libc and in user programs (except `fpprobe`,
+  which checks the registers by hand): the kernel switches FP/SIMD state
+  lazily. `long double` is IEEE binary128 on
   AArch64 and has no hardware support; libc never does arithmetic in it
   (there is no compiler-rt), only bit conversions.
 
@@ -47,8 +48,8 @@ from step 4, on-target checks in the QEMU smoke tests. CI runs both.
 | 0 | string, ctype, stdlib conversions, malloc and the syscall layer | done (#76, #77, #78) |
 | 1 | Cross-build libc in CI with an undefined-symbol link check; FP allowed in libc; `strtold` without binary128 arithmetic | done (#79) |
 | 2 | `errno.h`; freestanding headers (`stddef.h` completed, `stdint.h`, `limits.h`, `stdbool.h`, `stdarg.h`, `float.h`, ...); `strto*` overflow with `ERANGE`; `strerror` | done (#80) |
-| 3 | Rest of `stdlib.h`: `abs`/`div` families, `qsort`, `bsearch`, `rand`/`srand`, `atexit`/`at_quick_exit`, `getenv` | in progress |
-| 4 | libc/libk reconciliation: libc owns `crt0`, malloc and `mem*`; libk keeps the OS API and links libc; user programs build against libc and may use FP; on-target `libcprobe` smoke step | planned |
+| 3 | Rest of `stdlib.h`: `abs`/`div` families, `qsort`, `bsearch`, `rand`/`srand`, `atexit`/`at_quick_exit`, `getenv` | done (#81) |
+| 4 | libc/libk reconciliation: libc owns `crt0`, malloc and `mem*`; libk keeps the OS API and links libc; user programs build against libc and may use FP; on-target `libcprobe` smoke step | in progress |
 | 5 | `snprintf`/`vsnprintf` family: integers, strings, pointers, all flags and lengths | planned |
 | 6 | Float conversions: `%f`/`%e`/`%g`/`%a` and a correctly rounded `strtod` family (exponents, hex, inf/nan) | planned |
 | 7 | `FILE` with buffered `stdout`/`stderr`, `printf`/`puts`/`putchar`/`fputs`/`fflush`, flush at exit | planned |

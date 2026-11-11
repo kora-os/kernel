@@ -37,7 +37,8 @@ def main():
         if macro != "SYS_" + name.upper() or macro not in user:
             errors.append(f"{name}: wrong or missing syscall macro {macro}")
         seen.add(macro)
-    if re.search(r"^exit:\s*\n\s*mov x8, #SYS_EXIT", stubs, re.M):
+    # exit comes from the libc, which ends programs through SYS_EXIT.
+    if "__syscall1(SYS_EXIT," in (ROOT / "user/libc/src/stdlib/exit.c").read_text():
         seen.add("SYS_EXIT")
     if seen != set(user):
         errors.append(f"SVC stubs differ from ABI: missing={sorted(set(user) - seen)}, extra={sorted(seen - set(user))}")

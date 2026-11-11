@@ -2,14 +2,18 @@
 # legacy direct kernel configurations. Modern kernels only consume its image.
 include_guard(GLOBAL)
 
+# koraos_add_user_program(<name> <sources>... [FLAGS <extra compile flags>...])
+# links the sources with libk and the libc archive into a PIE.
 function(koraos_add_user_program NAME)
+    cmake_parse_arguments(P "" "" "FLAGS" ${ARGN})
     set(elf "${USER_BUILD_DIR}/${NAME}.elf")
     add_custom_command(
         OUTPUT "${elf}"
-        COMMAND ${CMAKE_C_COMPILER} ${USER_COMPILE_FLAGS} ${USER_LINK_FLAGS}
-                ${USER_RUNTIME_SOURCES} ${ARGN} -o "${elf}"
-        DEPENDS ${USER_RUNTIME_SOURCES} ${ARGN} ${USER_HEADERS} "${USER_HEADER_MANIFEST}"
-                "${CMAKE_CURRENT_FUNCTION_LIST_FILE}"
+        COMMAND ${CMAKE_C_COMPILER} ${USER_COMPILE_FLAGS} ${P_FLAGS} ${USER_LINK_FLAGS}
+                ${USER_RUNTIME_SOURCES} ${P_UNPARSED_ARGUMENTS} "$<TARGET_FILE:koraos_libc>"
+                -o "${elf}"
+        DEPENDS ${USER_RUNTIME_SOURCES} ${P_UNPARSED_ARGUMENTS} koraos_libc ${USER_HEADERS}
+                "${USER_HEADER_MANIFEST}" "${CMAKE_CURRENT_FUNCTION_LIST_FILE}"
         COMMENT "Building user program ${NAME}.elf (PIE)"
         VERBATIM)
     set(USER_PROGRAM_ELVES ${USER_PROGRAM_ELVES} "${elf}" PARENT_SCOPE)
@@ -19,9 +23,13 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
     set(USER_DIR "${SOURCE_ROOT}/user")
     set(USER_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/user")
     file(MAKE_DIRECTORY "${USER_BUILD_DIR}")
-    set(USER_RUNTIME_SOURCES "${USER_DIR}/crt0.S" "${USER_DIR}/libk/syscall.S"
-        "${USER_DIR}/libk/malloc.c" "${USER_DIR}/libk/mem.c" "${USER_DIR}/libk/mutex.c"
-        "${USER_DIR}/libk/job.c")
+    # The libc (user/libc) provides the entry point, the C library and malloc;
+    # libk adds the KoraOS API on top. Programs link both.
+    if(NOT TARGET koraos_libc)
+        add_subdirectory("${USER_DIR}/libc" "${CMAKE_BINARY_DIR}/libc")
+    endif()
+    set(USER_RUNTIME_SOURCES "${USER_DIR}/libk/syscall.S" "${USER_DIR}/libk/mutex.c"
+        "${USER_DIR}/libk/job.c" "${USER_DIR}/libk/heap.c")
     file(GLOB_RECURSE USER_HEADERS CONFIGURE_DEPENDS "${USER_DIR}/*.h")
     # Manifest content changes on removals too, ensuring generated outputs are
     # rebuilt even when the remaining dependencies are older than those outputs.
@@ -30,8 +38,8 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
     file(GENERATE OUTPUT "${USER_HEADER_MANIFEST}" CONTENT "${_headers}\n")
     set(USER_COMPILE_FLAGS
         --target=aarch64-none-elf -mcpu=cortex-a72 -ffreestanding -nostdlib
-        -fno-builtin -fno-stack-protector -mgeneral-regs-only -fPIE -O2 -Wall
-        "-I${USER_DIR}")
+        -fno-builtin -fno-stack-protector -fPIE -O2 -Wall
+        "-I${USER_DIR}" -isystem "${USER_DIR}/libc/includes")
     # Preserve ET_DYN, classic DT_RELA relocations and 4 KiB segment alignment.
     set(USER_LINK_FLAGS
         -nostdlib -fuse-ld=lld -Wl,-pie -Wl,-e,_start -Wl,--pack-dyn-relocs=none
@@ -44,14 +52,17 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
         koraos_add_user_program(${name} "${USER_DIR}/${name}.c")
     endforeach()
     koraos_add_user_program(allocprobe "${SOURCE_ROOT}/tests/user/allocprobe.c")
+    # fpprobe checks FP/SIMD registers it filled by hand, so its own C code
+    # must not use them in between.
     koraos_add_user_program(fpprobe "${SOURCE_ROOT}/tests/user/fpprobe.c"
-        "${SOURCE_ROOT}/tests/user/fpregs.S")
+        "${SOURCE_ROOT}/tests/user/fpregs.S" FLAGS -mgeneral-regs-only)
     koraos_add_user_program(schedprobe "${SOURCE_ROOT}/tests/user/schedprobe.c")
     koraos_add_user_program(forbidprobe "${SOURCE_ROOT}/tests/user/forbidprobe.c")
     koraos_add_user_program(threadprobe "${SOURCE_ROOT}/tests/user/threadprobe.c")
     koraos_add_user_program(sumprobe "${SOURCE_ROOT}/tests/user/sumprobe.c")
     koraos_add_user_program(nsprobe "${SOURCE_ROOT}/tests/user/nsprobe.c")
     koraos_add_user_program(writeprobe "${SOURCE_ROOT}/tests/user/writeprobe.c")
+    koraos_add_user_program(libcprobe "${SOURCE_ROOT}/tests/user/libcprobe.c")
 
     # Retain the previous --bindir glob installation order in /bin.
     list(SORT USER_PROGRAM_ELVES)

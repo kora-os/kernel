@@ -1,20 +1,46 @@
-/* KoraOS userland C API. Freestanding: no libc, no kernel headers -- everything
- * a user program needs is declared here. Links against user/libk/syscall.S.
+/* KoraOS userland API (libk): the OS calls and helpers that are not ISO C.
+ * The C library itself (user/libc: <stdlib.h>, <string.h>, ..., malloc and the
+ * program entry point) is included from here, so a program needs only this
+ * header. Links against user/libk/syscall.S and the libc archive.
  *
- * The calls are shaped like their POSIX namesakes so a fuller libc shim can wrap
- * them later, but the numbering is KoraOS-private (see abi.h). Not every call is
- * serviced by the kernel yet; unimplemented ones currently return -1.
+ * The calls are shaped like their POSIX namesakes, but the numbering is
+ * KoraOS-private (see abi.h). Not every call is serviced by the kernel yet;
+ * unimplemented ones currently return -1.
  */
 #pragma once
 
 #include "abi.h"
 
+#if __has_include(<_libc/cdefs.h>)
+#include <stddef.h>
+#include <stdlib.h>
+#include <string.h>
+#else
+/* Host unit tests build libk and user tools without the KoraOS libc on the
+ * include path, next to the host's libc: declare what libk itself uses. With
+ * LIBK_HOST_TEST, libk's allocator calls are renamed so a test can supply
+ * (counting) versions of them. */
 typedef unsigned long size_t;
-typedef long ssize_t;
-
 #ifndef NULL
 #define NULL ((void *)0)
 #endif
+#ifdef LIBK_HOST_TEST
+#define malloc libk_malloc
+#define free libk_free
+#define calloc libk_calloc
+#define realloc libk_realloc
+#endif
+void *malloc(size_t size);
+void free(void *ptr);
+void *calloc(size_t count, size_t size);
+void *realloc(void *ptr, size_t size);
+void *memset(void *dest, int c, size_t n);
+void *memcpy(void *dest, const void *src, size_t n);
+void *memmove(void *dest, const void *src, size_t n);
+void exit(int status) __attribute__((__noreturn__));
+#endif
+
+typedef long ssize_t;
 
 /* Framebuffer geometry, filled by fb_info(). With the flat identity map a user
  * program writes pixels directly to `addr`. */
@@ -106,29 +132,16 @@ int assign(const char *name, const char *target);
 /* Memory. alloc_pages() returns `count` contiguous zeroed pages (NULL on
  * failure); free_pages() takes the base address back (0, or -1 if the run is
  * not yours). Pages a program does not free are reclaimed when it is reaped.
- * malloc() and friends (user/libk/malloc.c) build a heap on top: 16-byte
- * aligned blocks from pools of pages, so the heap grows as long as the system
- * has free pages. Every thread of a program may use them at once. */
+ * The libc's malloc() and friends build a heap on top: 16-byte aligned blocks
+ * from pools of pages, so the heap grows as long as the system has free pages.
+ * Every thread of a program may use them at once. */
 #define KORAOS_PAGE_SIZE 4096
-
-#ifdef LIBK_HOST_TEST
-/* Host unit tests link libk's malloc next to the host libc: rename it so it
- * does not replace the host's own allocator. */
-#define malloc libk_malloc
-#define free libk_free
-#define calloc libk_calloc
-#define realloc libk_realloc
-#endif
 
 void *alloc_pages(size_t count);
 int free_pages(void *base);
 
-void *malloc(size_t size);
-void free(void *ptr);
-void *calloc(size_t count, size_t size);
-void *realloc(void *ptr, size_t size);
-
-/* Heap diagnostics, walked from the pools (for tests and curious programs). */
+/* Heap diagnostics, walked from the pools (for tests and curious programs;
+ * user/libk/heap.c over the libc's malloc). */
 struct kheap_info {
     size_t pools;          /* page-run pools backing malloc */
     size_t pool_bytes;     /* their total size */
@@ -141,11 +154,6 @@ struct kheap_info {
     size_t corrupt;        /* inconsistencies found in the pools (should be 0) */
 };
 void kheap_info(struct kheap_info *out);
-
-/* Memory primitives (user/libk/mem.c); the compiler may also emit calls. */
-void *memset(void *dest, int c, size_t n);
-void *memcpy(void *dest, const void *src, size_t n);
-void *memmove(void *dest, const void *src, size_t n);
 
 /* Process control. Scheduling is preemptive: every runnable thread gets time
  * slices of one 10 ms tick in turn on its core.
@@ -164,9 +172,8 @@ void *memmove(void *dest, const void *src, size_t n);
 #define SPAWN_CORE(n) ((((n) + 1) & 0xf) << 8)
 #define WNOHANG 1
 
-/* exit() ends the whole program, from any of its threads (returning from main
- * calls it): its other threads die too. */
-void exit(int status) __attribute__((noreturn));
+/* exit() (<stdlib.h>) ends the whole program, from any of its threads
+ * (returning from main calls it): its other threads die too. */
 int spawn_flags(const char *name, int argc, char *const argv[], int flags);
 int waitpid(int pid, int *code, int flags);
 int getpid(void);  /* the program's pid, the same in all its threads */
@@ -235,7 +242,7 @@ int sysinfo(struct sysinfo *out);
  * ends them all), with exit code 0 if nobody called exit(). */
 typedef long (*thread_fn)(void *arg);
 int thread_new(void (*start)(void), thread_fn fn, void *arg, int core);  /* raw */
-void thread_exit(long value) __attribute__((noreturn));
+void thread_exit(long value) __attribute__((__noreturn__));
 int thread_join(int tid, long *value);
 
 void libk_thread_start(void);  /* user/libk/syscall.S */

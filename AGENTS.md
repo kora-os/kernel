@@ -25,6 +25,10 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
   independent development; raspi3b is `qemu_raspi3b`, raspi4b (QEMU 9.0+, no USB)
   is `qemu_raspi4b`. User programs/FS generation
   live in `cmake/userfs.cmake` and `cmake/userfs`; kernels consume shared userfs.
+- User programs link the libc (`user/libc`, ISO C headers, entry point,
+  malloc) and libk (`user/libk`, the KoraOS API). `tests/run-libc-tests.sh`
+  cross-builds the libc, checks its link and headers and runs its host tests;
+  the plan is `project_doc/libc-plan.md`.
 - FAT32 writes are developed on disposable QEMU images only: virt disks
   (`tests/run-qemu-write.py`) and raspi3b/raspi4b SD and raspi3b USB scratch
   drives from a `--storage-writable` build (`tests/run-qemu-storage-write.py`),

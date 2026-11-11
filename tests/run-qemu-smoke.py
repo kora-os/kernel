@@ -547,6 +547,16 @@ def run(q, graphics=True, keyboard=False, repeat=0, multi_volume=False, write_te
         q.expect(PROMPT)
     yield "FP/SIMD registers are per task (lazy switching)", fp_context
 
+    def libc_on_target():
+        q.send("libcprobe\r")
+        m = q.expect(rb"^libcprobe: ([^\r\n]*)\r?\n")
+        if m.group(1) != b"checks passed":
+            raise Failure("libcprobe: %s" % m.group(1).decode(errors="replace"))
+        q.expect(rb"^libcprobe: atexit ran\r?\n")
+        q.expect(rb"exited with 0")
+        q.expect(PROMPT)
+    yield "libc on the target (binary128 strtold, FP, atexit via crt0)", libc_on_target
+
     def read_tasks():
         """Run `tasks` on the debug console: ({name: (state, stack)}, peak, size)."""
         listed, peak, size, _ = read_tasks_bkl()
