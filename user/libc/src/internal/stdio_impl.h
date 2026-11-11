@@ -4,6 +4,12 @@
 // public function takes the stream's lock and calls an _unlocked helper, so
 // one printf or puts is never interleaved with another thread's output on
 // the same stream.
+//
+// One buffer serves both directions: it holds either bytes waiting to be
+// written (wlen > 0) or bytes read ahead (rpos < rlen), never both. Writing
+// after reading moves the file back to the logical position first, and
+// reading after writing flushes, so update streams ("r+", "w+", "a+") work
+// without the fseek or fflush the standard asks for in between.
 #ifndef LIBC_STDIO_IMPL_H
 #define LIBC_STDIO_IMPL_H
 
@@ -25,6 +31,8 @@ struct __libc_file {
     unsigned char *buf;  // NULL until the first buffered I/O (or setvbuf)
     size_t size;         // capacity of buf
     size_t wlen;         // bytes waiting in buf to be written
+    size_t rpos, rlen;   // read-ahead: buf[rpos..rlen) not yet consumed
+    int ungot;           // a byte pushed back by ungetc, or EOF for none
     lock_t lock;
     struct __libc_file *next;  // open streams other than the standard three
 };
@@ -39,6 +47,12 @@ int __fflush_unlocked(FILE *f);
 size_t __fwrite_unlocked(const void *data, size_t n, FILE *f);
 // Makes sure f has its buffer (allocated on first use when it has none).
 void __stdio_setup_buffer(FILE *f);
+// Before writing: forgets read-ahead and moves the fd back to the logical
+// position. 0, or EOF with the error indicator set.
+int __stdio_end_read(FILE *f);
+// Flushes pending output, closes the fd and frees the stream (unless it is
+// one of the standard three). 0, or EOF if flushing or closing failed.
+int __fclose_unlocked(FILE *f);
 
 // Streams opened with fopen, for fflush(NULL) and exit.
 void __stdio_link(FILE *f);

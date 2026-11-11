@@ -9,6 +9,10 @@
 // "libcprobe: atexit ran" (puts) only appear if exit() flushes stdout after
 // running the handlers. A failed check prints itself (unbuffered) and the
 // program exits non-zero.
+//
+// `libcprobe files` instead checks the file streams on a writable current
+// directory: write, read back, append, update in place, positioning, rename
+// and remove, through the real FAT32 layer, then sync.
 #include "../../user/libk/koraos.h"
 
 #include <errno.h>
@@ -134,11 +138,70 @@ static void test_strtod(void) {
     errno = 0;
 }
 
+static void test_files(void) {
+    const char *name = "libc probe.txt", *moved = "libc probe moved.txt";
+    FILE *f = fopen(name, "w");
+    check(f != NULL, "fopen w");
+    if (f == NULL) {
+        return;
+    }
+    long total = 0, line10 = 0;  // the file size, and where line 10 starts
+    for (int i = 0; i < 200; i++) {  // more than one buffer and one cluster's worth
+        if (i == 10) {
+            line10 = total;
+        }
+        total += fprintf(f, "line %03d %.3f\n", i, i / 8.0);
+    }
+    check(fclose(f) == 0, "fclose after writing");
+
+    f = fopen(name, "r");
+    char line[64];
+    int lines = 0, good = 1;
+    while (fgets(line, sizeof line, f) != NULL) {
+        char *end;
+        good &= strtol(line + 5, &end, 10) == lines && strtod(end, NULL) == lines / 8.0;
+        lines++;
+    }
+    check(lines == 200 && good && feof(f) && !ferror(f), "read back with fgets");
+    check(fseek(f, 0, SEEK_END) == 0 && ftell(f) == total, "ftell at the end");
+    check(fseek(f, line10, SEEK_SET) == 0 && fgets(line, sizeof line, f) != NULL &&
+              strcmp(line, "line 010 1.250\n") == 0,
+          "fseek to a line");
+    fclose(f);
+
+    f = fopen(name, "a");
+    fputs("appended\n", f);
+    fclose(f);
+    f = fopen(name, "r+");
+    check(fseek(f, -9, SEEK_END) == 0 && fgetc(f) == 'a', "the appended line is last");
+    fseek(f, 0, SEEK_SET);
+    fputs("LINE", f);  // overwrite in place
+    check(fseek(f, 0, SEEK_SET) == 0 && fgets(line, sizeof line, f) != NULL &&
+              strcmp(line, "LINE 000 0.000\n") == 0,
+          "r+ overwrote in place");
+    fclose(f);
+
+    remove(moved);
+    check(rename(name, moved) == 0 && fopen(name, "r") == NULL && errno == ENOENT,
+          "rename, and the old name is gone");
+    check(remove(moved) == 0 && fopen(moved, "r") == NULL, "remove");
+    check(mkdir("libc probe dir") == 0 && remove("libc probe dir") == 0, "remove a directory");
+    // Make it durable, as every mutating tool must, and report a failure.
+    check(sync() == 0, "sync");
+}
+
 static void at_exit_handler(void) {
     puts("libcprobe: atexit ran");
 }
 
-int main(void) {
+int main(int argc, char **argv) {
+    if (argc > 1 && strcmp(argv[1], "files") == 0) {
+        test_files();
+        if (!failed) {
+            printf("libcprobe: files checked\n");
+        }
+        return failed;
+    }
     check(setvbuf(stdout, NULL, _IOFBF, 0) == 0, "setvbuf");
     test_integers();
     test_floats();

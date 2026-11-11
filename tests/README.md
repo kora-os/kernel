@@ -99,8 +99,9 @@ headers shadow the host's, and `host_rename.h` renames every libc symbol
 collides with, or is silently replaced by, the host libc or the sanitizer's
 interceptors. Code that makes syscalls goes through the single `__syscall()`
 entry; tests link `fake_syscall.c`, a fake kernel serving page runs (with a
-page budget to simulate exhaustion), `yield`, `exit` and a console (captured
-fd 1 and 2 with optional short or failing writes, scripted fd 0), in place of
+page budget to simulate exhaustion), `yield`, `exit`, a console (captured
+fd 1 and 2 with optional short or failing writes, scripted fd 0) and a small
+in-memory filesystem with the kernel's rules, in place of
 `src/sys/syscall.S`. `test.h` reaches the host's own `printf` and `fflush` by
 symbol name (`test_printf`), since the libc's are renamed for the code under
 test.
@@ -119,6 +120,7 @@ test.
 | `stdio_snprintf_test.c` | The `snprintf` family, mostly differential: about 490 000 combinations of flags, width and precision (literal and `*`), length modifier and edge values for `d i o u x X c s`, and about 250 000 for `f e E g G a A` (halfway cases, carries, extremes, random doubles, `%.40f` expansions), must match the host libc's `snprintf` byte for byte. By hand: inf/nan, `%a` subnormals and ties (the host libcs disagree there), `(null)`, `%p`, unknown conversions, truncation and return values, every `%n` length, UTF-8 for `%lc`/`%ls` (precision never splits a character, `EILSEQ`), `EOVERFLOW`. libcprobe repeats a many-argument `snprintf` on the target, whose AAPCS64 `va_list` the hosts do not use |
 | `stdlib_strtod_test.c` | `strtod`/`strtof` against the host's (correctly rounded) ones, bits and end pointer: hand-picked hard cases, 40 000 random decimal strings, round trips of random doubles in six formats, and exact midpoints between neighbouring doubles (up to 767 digits, also just above and below them). By hand: inf/nan forms, hex edge cases, errno, inputs past the 800 kept digits |
 | `stdio_write_test.c` | Stream output over the fake console: when line, full and no buffering write (including the caller's `setvbuf` buffer and writes larger than it), short writes retried, failing writes (`EIO`, error indicators, per-call return values), `fflush(NULL)`, `perror`, `exit` flushing after the `atexit` handlers and `_Exit` not flushing, and 4 threads printing 1 200 lines with none torn |
+| `stdio_file_test.c` | File streams over the fake kernel's in-memory filesystem (the kernel's open-flag rules, no seeking past the end, 16 fds): every `fopen` mode, `fgets`/`fgetc`/`fread` (block reads past the buffer, binary data), update streams switching between reading and writing without `fseek`, `fseek`/`ftell`/`fgetpos`/`fsetpos`, `ungetc`, errno for failed opens (`ENOENT`, `EEXIST`, `EISDIR`, `EACCES`, `EINVAL`), the 16-file limit, `remove`/`rename`, `exit` flushing and closing open files, `stdin` (prompt flushed first, raw bytes), `freopen` of `stdin` and `stdout` |
 | `malloc_test.c` | `src/stdlib/malloc.c`: alignment, neighbour separation, coalescing, pool growth and release, direct page-run blocks, bad and double frees, `realloc`/`calloc`, exhaustion and failed `realloc`, a 200 000-round stress with `__malloc_info` consistency checks |
 | `malloc_threads_test.c` | The same heap under four concurrent pthreads (malloc/realloc/free, direct blocks), then a pool consistency check |
 
@@ -216,8 +218,11 @@ and checks that `heap` reports no leaks or bad frees, runs `fpprobe` (a parent
 and child each fill all 32 vector registers and FPCR; the child must start from
 zeroed registers and the parent's must survive), runs `libcprobe` (the libc
 on the target: the binary128 `strtold` path, FP through libc code, `errno`,
-`qsort`/`bsearch`, the `rand` sequence, the heap, and an `atexit` handler that
-crt0's `exit` runs after `main` returns), checks `tasks` (init and the shell
+`qsort`/`bsearch`, the `rand` sequence, the heap, float formatting and
+`strtod`, a many-argument `snprintf`, and a fully buffered `stdout` that only
+`exit` flushes, after the `atexit` handler; on writable roots also
+`libcprobe files`: file streams through the real FAT32 layer, then `sync`),
+checks `tasks` (init and the shell
 asleep, kernel stack high-water mark under three quarters), runs `schedprobe`
 (`msleep(300)` takes at least 300 ms; a background job busy-looping without
 syscalls must not stop the shell from running `echo`, so the tick preempts it;

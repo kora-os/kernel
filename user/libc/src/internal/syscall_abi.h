@@ -49,4 +49,16 @@
 #define SYS_RMDIR       40
 #define SYS_RENAME      41
 
+/* open() flags, as the FAT32 layer defines them (checked too). */
+#define KORA_O_RDONLY 0
+#define KORA_O_WRONLY 1
+#define KORA_O_RDWR   2
+#define KORA_O_CREAT  0x100
+#define KORA_O_TRUNC  0x200
+#define KORA_O_APPEND 0x400
+#define KORA_O_EXCL   0x800
+
+/* Real files start at this fd; 0, 1 and 2 are the console. */
+#define KORA_FD_BASE 3
+
 #endif /* LIBC_SYSCALL_ABI_H */

@@ -13,6 +13,7 @@
 
 #if __has_include(<_libc/cdefs.h>)
 #include <stddef.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #else
@@ -112,7 +113,8 @@ long lseek(int fd, long offset, int whence);
 int readdir(int fd, struct dirent *out);   /* 1 = entry, 0 = end, <0 = error */
 int stat(const char *path, struct stat *out);
 /* Mutations and durable sync return 0 or -1. Rename never overwrites another
- * entry and rejects cross-volume moves. */
+ * entry and rejects cross-volume moves; it is the libc's ISO rename()
+ * (<stdio.h>), which also sets errno. */
 int sync(void);
 int unlink(const char *path);
 int mkdir(const char *path);

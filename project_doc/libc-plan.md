@@ -50,11 +50,11 @@ from step 4, on-target checks in the QEMU smoke tests. CI runs both.
 | 1 | Cross-build libc in CI with an undefined-symbol link check; FP allowed in libc; `strtold` without binary128 arithmetic | done (#79) |
 | 2 | `errno.h`; freestanding headers (`stddef.h` completed, `stdint.h`, `limits.h`, `stdbool.h`, `stdarg.h`, `float.h`, ...); `strto*` overflow with `ERANGE`; `strerror` | done (#80) |
 | 3 | Rest of `stdlib.h`: `abs`/`div` families, `qsort`, `bsearch`, `rand`/`srand`, `atexit`/`at_quick_exit`, `getenv` | done (#81) |
-| 4 | libc/libk reconciliation: libc owns `crt0`, malloc and `mem*`; libk keeps the OS API and links libc; user programs build against libc and may use FP; on-target `libcprobe` smoke step | in progress |
-| 5 | `snprintf`/`vsnprintf` family: integers, strings, pointers, all flags and lengths | done |
-| 6 | Float conversions: `%f`/`%e`/`%g`/`%a` and a correctly rounded `strtod` family (exponents, hex, inf/nan) | done |
-| 7 | `FILE` with buffered `stdout`/`stderr`, `printf`/`puts`/`putchar`/`fputs`/`fflush`, flush at exit; the rest of `<string.h>` | in progress |
-| 8 | File streams: `fopen`/`fclose`/`fread`/`fwrite`/`fseek`/`ftell`/`fgets`/`fgetc`/`ungetc`, `remove`, `rename` | planned |
+| 4 | libc/libk reconciliation: libc owns `crt0`, malloc and `mem*`; libk keeps the OS API and links libc; user programs build against libc and may use FP; on-target `libcprobe` smoke step | done (#82) |
+| 5 | `snprintf`/`vsnprintf` family: integers, strings, pointers, all flags and lengths | done (#83) |
+| 6 | Float conversions: `%f`/`%e`/`%g`/`%a` and a correctly rounded `strtod` family (exponents, hex, inf/nan) | done (#84) |
+| 7 | `FILE` with buffered `stdout`/`stderr`, `printf`/`puts`/`putchar`/`fputs`/`fflush`, flush at exit; the rest of `<string.h>` | done (#85) |
+| 8 | File streams: `fopen`/`fclose`/`fread`/`fwrite`/`fseek`/`ftell`/`fgets`/`fgetc`/`ungetc`, `remove`, `rename`; libk's `rename` moves to libc | done (#86) |
 
 After step 8: koracli on libc (separate design discussion), then MicroPython.
 
@@ -65,6 +65,12 @@ After step 8: koracli on libc (separate design discussion), then MicroPython.
 - No per-thread `TPIDR_EL0`: `errno` is shared by a program's threads.
 - No wall clock (`time()`), no `fstat`/`isatty` on an fd, no environment
   passed at spawn (`getenv` returns `NULL`).
+- The console is raw: `stdin` gets no echo and Enter arrives as `'\r'`, so
+  line input needs the program's own editing (libk's `kgetline`); the
+  terminal design belongs to koracli.
+- `lseek` cannot go past the end of a file, so neither can `fseek`.
+- Not provided yet: the `scanf` family, `tmpfile`/`tmpnam`, `<time.h>`,
+  `<math.h>`, `<setjmp.h>`, `<signal.h>`, `<locale.h>`, `<wchar.h>`.
 - The main thread has a single 4 KB stack page: libc keeps large buffers off
   the stack, but exactness costs some: printing a float takes about 1.5 KB
   (its exact decimal digits), `strtod` about 750 bytes.

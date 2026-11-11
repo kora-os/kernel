@@ -13,6 +13,10 @@
 //   SYS_WRITE to fd 1 and 2           captured per fd (fake_output), with
 //                                     optional short or failing writes
 //   SYS_READ from fd 0                scripted input (fake_set_input)
+//   SYS_OPEN, CLOSE, READ, WRITE,     an in-memory filesystem of flat paths
+//   LSEEK, STAT, UNLINK, RMDIR,       with the kernel's rules: open flag
+//   RENAME (fds 3 and up)             checks, no seeking past the end, 16
+//                                     fds, read-only files
 //
 // Everything else fails the way the kernel does for an unknown call (-1).
 // Allocation is thread safe so the same stand-in serves the pthread tests.
@@ -60,5 +64,17 @@ void fake_fail_writes(int fail);
 // fd 0 returns these bytes, at most `chunk` per read (0: all asked for),
 // then 0 (end of input).
 void fake_set_input(const char *data, size_t len, size_t chunk);
+
+// The filesystem. fake_put_file creates or replaces a file; fake_file_data
+// returns its contents (NULL if it does not exist; length in *len).
+// fake_mkdir makes an empty directory entry; fake_set_readonly makes opens
+// for writing, unlink and rename of the path fail. fake_open_fds counts open
+// descriptors; fake_reset_files removes everything and closes all fds.
+void fake_put_file(const char *path, const char *data, size_t len);
+const char *fake_file_data(const char *path, size_t *len);
+void fake_mkdir(const char *path);
+void fake_set_readonly(const char *path, int readonly);
+int fake_open_fds(void);
+void fake_reset_files(void);
 
 #endif // LIBC_FAKE_SYSCALL_H

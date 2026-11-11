@@ -46,9 +46,8 @@ SYSCALL sync,        SYS_SYNC
 SYSCALL unlink,      SYS_UNLINK
 SYSCALL mkdir,       SYS_MKDIR
 SYSCALL rmdir,       SYS_RMDIR
-SYSCALL rename,      SYS_RENAME
 
-// exit() and the program entry point come from the libc (user/libc).
+// exit(), rename() and the program entry point come from the libc (user/libc).
 
 // Every thread_create() thread starts here, with x0 = fn and x1 = arg (see
 // thread_create in koraos.h): it runs fn(arg) and passes its result to
