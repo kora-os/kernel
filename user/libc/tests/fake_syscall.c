@@ -285,6 +285,9 @@ static long fs_read(int i, char *buf, size_t len) {
     }
     size_t left = f->len - fds[i].pos;
     size_t n = len < left ? len : left;
+    if (n == 0) {
+        return 0;  // an empty file may have no data at all (NULL + 0 is UB)
+    }
     __builtin_memcpy(buf, f->data + fds[i].pos, n);
     fds[i].pos += n;
     return (long)n;
@@ -297,6 +300,9 @@ static long fs_write(int i, const char *buf, size_t len) {
     }
     if (fds[i].flags & K_APPEND) {
         fds[i].pos = f->len;
+    }
+    if (len == 0) {
+        return 0;
     }
     size_t end = fds[i].pos + len;
     if (end > f->cap) {
