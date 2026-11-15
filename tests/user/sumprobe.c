@@ -5,35 +5,6 @@
 // The smoke test compares against the host's copy of the same bytes.
 #include "../../user/libk/koraos.h"
 
-static char line[160];
-static unsigned line_len;
-
-static void add(const char *s) {
-    while (*s && line_len < sizeof(line) - 1) {
-        line[line_len++] = *s++;
-    }
-}
-
-static void add_num(unsigned long v) {
-    char digits[24];
-    unsigned n = 0;
-    do {
-        digits[n++] = (char)('0' + v % 10);
-        v /= 10;
-    } while (v != 0);
-    while (n > 0 && line_len < sizeof(line) - 1) {
-        line[line_len++] = digits[--n];
-    }
-}
-
-static void add_hex(unsigned long v) {
-    for (int shift = 60; shift >= 0; shift -= 4) {
-        if (line_len < sizeof(line) - 1) {
-            line[line_len++] = "0123456789abcdef"[(v >> shift) & 0xf];
-        }
-    }
-}
-
 int main(int argc, char **argv) {
     static unsigned char buf[8192];
     int failed = 0;
@@ -51,20 +22,13 @@ int main(int argc, char **argv) {
         if (fd >= 0) {
             close(fd);
         }
-        add("sumprobe: ");
-        add(argv[a]);
+        // One line per file: stdout writes it whole at the newline.
         if (n < 0) {
-            add(" unreadable\n");
+            printf("sumprobe: %s unreadable\n", argv[a]);
             failed = 1;
         } else {
-            add(" ");
-            add_num(size);
-            add(" ");
-            add_hex(hash);
-            add("\n");
+            printf("sumprobe: %s %lu %016lx\n", argv[a], size, hash);
         }
-        write(1, line, line_len);
-        line_len = 0;
     }
     return failed;
 }

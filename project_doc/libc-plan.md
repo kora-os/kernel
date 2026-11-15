@@ -75,7 +75,7 @@ the QEMU smoke tests are the regression check, next to the host tests.
 | 10 | File tools on stdio: `cat`, `cp`, `ls`, `mkdir`, `mv`, `rm`, `rmdir`, `echo`, `hello`, `init`, `ps`, and `filetools.h`; errors go to `stderr` | done (#89) |
 | 11 | Demos: `gfxdemo`, `termdemo`, `jobdemo`, `pindemo` | done (#90) |
 | 12 | The shell: a mechanical migration, no redesign (koracli replaces it) | done (#91) |
-| 13 | Test probes in `tests/user`, except `fpprobe` | planned |
+| 13 | Test probes in `tests/user`, except `fpprobe`; a formatted message to an unbuffered stream is one write | done (#92) |
 | 14 | libk cleanup: remove the helpers the libc duplicates, shrink the host-test fallback in `koraos.h`, update the userland guide | planned |
 
 Rules for the migration, which come from the console plan
@@ -86,11 +86,15 @@ Rules for the migration, which come from the console plan
   `write(1, ...)` or `read(0, ...)`. `tests/check-console-fds.py` enforces it
   with a short allow-list: `kgetline` in libk, `fpprobe` (no libc call may
   run between filling and checking its FP registers, so it also starts its
-  child with the raw `libk_spawn_flags`) and the blocking console read in
-  `threadprobe`. Programs not migrated yet are listed there too, and the list
-  can only shrink.
+  child with the raw `libk_spawn_flags`) and `threadprobe`, which tests the
+  kernel itself: a thread blocked in a console read, and lines written with
+  `write()` from every core at once (the stream's lock would serialize
+  them). Programs not migrated yet are listed there too, and the list can
+  only shrink.
 - **Errors go to `stderr`.** Both streams reach the same console today; the
   split is what lets the console plan decide later where `stderr` goes.
+  `stderr` is unbuffered, but one `fprintf` to it is one write, so a message
+  stays whole while programs on other cores print.
 - **No investment in line input.** Line editing, history and the raw/cooked
   switch move to the screen manager, which deletes `kgetline`. Until then it
   only gains a flush of `stdout`, and the libc's `stdin` stays as it is.
@@ -137,6 +141,10 @@ on top of it (separate design discussion), then MicroPython.
   line input needs the program's own editing (libk's `kgetline`). The
   terminal design is in `console-plan.md`.
 - `lseek` cannot go past the end of a file, so neither can `fseek`.
+- A program whose main thread calls `thread_exit()` ends when its last thread
+  returns, without going through `exit()`: no `atexit` handler runs and no
+  stream is flushed. Complete lines on `stdout` are already out; anything
+  else needs an `fflush` or an `exit()`.
 - Not provided yet: the `scanf` family, `tmpfile`/`tmpnam`, `<time.h>`,
   `<math.h>`, `<setjmp.h>`, `<signal.h>`, `<locale.h>`, `<wchar.h>`.
 - The main thread has a single 4 KB stack page: libc keeps large buffers off

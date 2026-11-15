@@ -8,34 +8,6 @@
 //   forbidprobe hold <ms>  stay forbidden, spinning, for ms (for `tasks`).
 #include "../../user/libk/koraos.h"
 
-// Result lines are assembled first and written with one write(): tasks on
-// other cores print at the same time, and only a single write is atomic.
-static char line[96];
-static unsigned line_len;
-
-static void add(const char *s) {
-    while (*s && line_len < sizeof(line) - 1) {
-        line[line_len++] = *s++;
-    }
-}
-
-static void add_num(unsigned long v) {
-    char digits[24];
-    unsigned n = 0;
-    do {
-        digits[n++] = (char)('0' + v % 10);
-        v /= 10;
-    } while (v != 0);
-    while (n > 0 && line_len < sizeof(line) - 1) {
-        line[line_len++] = digits[--n];
-    }
-}
-
-static void put_line(void) {
-    write(1, line, line_len);
-    line_len = 0;
-}
-
 // Longest gap between consecutive clock reads over `ms`: the time slices
 // another task got, if this one was preempted.
 static unsigned long longest_gap_us(unsigned long ms) {
@@ -53,23 +25,21 @@ static unsigned long longest_gap_us(unsigned long ms) {
 }
 
 static int fail(const char *what, int code) {
-    kputs("forbidprobe: ");
-    kputs(what);
-    kputs("\n");
+    fprintf(stderr, "forbidprobe: %s\n", what);
     return code;
 }
 
 int main(int argc, char **argv) {
-    if (argc == 3 && kstreq(argv[1], "hold")) {
+    if (argc == 3 && strcmp(argv[1], "hold") == 0) {
         unsigned long ms = 0;
         for (const char *p = argv[2]; *p >= '0' && *p <= '9'; p++) {
             ms = ms * 10 + (unsigned long)(*p - '0');
         }
         forbid();
-        kputs("forbidprobe: holding\n");
+        puts("forbidprobe: holding");
         longest_gap_us(ms);
         permit();
-        kputs("forbidprobe: released\n");
+        puts("forbidprobe: released");
         return 0;
     }
 
@@ -89,11 +59,8 @@ int main(int argc, char **argv) {
     forbid();
     unsigned long forbidden_gap = longest_gap_us(300);
     permit();
-    add("forbidprobe: longest gap free ");
-    add_num(free_gap);
-    add(" us, forbidden ");
-    add_num(forbidden_gap);
-    add(" us\n");
-    put_line();
+    // One line: stdout writes it whole at the newline, and tasks on other
+    // cores print at the same time.
+    printf("forbidprobe: longest gap free %lu us, forbidden %lu us\n", free_gap, forbidden_gap);
     return 0;
 }

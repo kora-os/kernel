@@ -16,47 +16,11 @@
 //                               keep each one whole)
 #include "../../user/libk/koraos.h"
 
-// Result lines are assembled first and written with one write(): tasks on
-// other cores print at the same time, and only a single write is atomic.
-static char line[128];
-static unsigned line_len;
-
-static void add(const char *s) {
-    while (*s && line_len < sizeof(line) - 1) {
-        line[line_len++] = *s++;
-    }
-}
-
-static void add_num(long v) {
-    char digits[24];
-    unsigned n = 0;
-    unsigned long u = v < 0 ? (unsigned long)-v : (unsigned long)v;
-    do {
-        digits[n++] = (char)('0' + u % 10);
-        u /= 10;
-    } while (u != 0);
-    if (v < 0) {
-        digits[n++] = '-';
-    }
-    while (n > 0 && line_len < sizeof(line) - 1) {
-        line[line_len++] = digits[--n];
-    }
-}
-
-static void put_line(void) {
-    write(1, line, line_len);
-    line_len = 0;
-}
-
+// Each result is one line: stdout writes it whole at the newline, and a
+// message to stderr is one write too, so the lines of tasks printing on other
+// cores at the same time cannot land inside it.
 static int fail(const char *what, long a, long b) {
-    add("threadprobe: FAILED ");
-    add(what);
-    add(" (");
-    add_num(a);
-    add(", ");
-    add_num(b);
-    add(")\n");
-    put_line();
+    fprintf(stderr, "threadprobe: FAILED %s (%ld, %ld)\n", what, a, b);
     return 1;
 }
 
@@ -141,12 +105,7 @@ static int join_test(int cores) {
         thread_join(1, NULL) != -1 || thread_create(sum_to, NULL, 9) != -1) {
         return fail("join/create error cases", 0, 0);
     }
-    add("threadprobe: joined ");
-    add_num(2 * cores);
-    add(" threads on ");
-    add_num(cores);
-    add(" cores, results ok\n");
-    put_line();
+    printf("threadprobe: joined %d threads on %d cores, results ok\n", 2 * cores, cores);
     return 0;
 }
 
@@ -169,12 +128,7 @@ static int jobs_test(int cores) {
     if (job_queue(sum_to, NULL, 9) != NULL) {
         return fail("job on a missing core", 9, 0);
     }
-    add("threadprobe: ");
-    add_num(JOBS);
-    add(" jobs on ");
-    add_num(cores);
-    add(" cores, results ok\n");
-    put_line();
+    printf("threadprobe: %d jobs on %d cores, results ok\n", JOBS, cores);
     return 0;
 }
 
@@ -235,10 +189,7 @@ static int malloc_test(int cores) {
         after.used_blocks != before.used_blocks || after.direct_allocs != before.direct_allocs) {
         return fail("shared heap", bad, (long)after.corrupt + (long)after.bad_frees);
     }
-    add("threadprobe: malloc from ");
-    add_num(cores);
-    add(" threads ok\n");
-    put_line();
+    printf("threadprobe: malloc from %d threads ok\n", cores);
     return 0;
 }
 
@@ -281,16 +232,14 @@ static int exit_test(int cores) {
         return fail("thread_create", -1, 0);
     }
     msleep(100);  // let them all get going (or blocked)
-    add("threadprobe: exiting with 7\n");
-    put_line();
+    puts("threadprobe: exiting with 7");
     exit(7);
 }
 
 static long outlive_main(void *unused) {
     (void)unused;
     msleep(300);
-    add("threadprobe: last thread done\n");
-    put_line();
+    puts("threadprobe: last thread done");
     return 0;
 }
 
@@ -298,8 +247,7 @@ static int last_test(void) {
     if (thread_create(outlive_main, NULL, -1) <= 0) {
         return fail("thread_create", -1, 0);
     }
-    add("threadprobe: main thread exits\n");
-    put_line();
+    puts("threadprobe: main thread exits");
     thread_exit(5);  // a thread's value, not the program's exit code
 }
 
@@ -309,8 +257,7 @@ static int hang_test(int cores) {
             return fail("thread_create", c, 0);
         }
     }
-    add("threadprobe: hanging\n");
-    put_line();
+    puts("threadprobe: hanging");
     for (;;) {
         msleep(1000);
     }
@@ -318,36 +265,17 @@ static int hang_test(int cores) {
 
 static unsigned long chatter_ms;
 
-// Append the decimal digits of v to buf at *len (a thread's own buffer).
-static void append_num(char *buf, unsigned *len, unsigned long v) {
-    char digits[24];
-    unsigned n = 0;
-    do {
-        digits[n++] = (char)('0' + v % 10);
-        v /= 10;
-    } while (v != 0);
-    while (n > 0) {
-        buf[(*len)++] = digits[--n];
-    }
-}
-
+// Every thread writes its lines with write(), not through stdout: the
+// stream's lock would hand the kernel one line at a time, and the point is
+// that the kernel keeps each write whole when they arrive from every core at
+// once.
 static long chatter(void *id) {
     unsigned long start = uptime_us();
     for (unsigned long n = 0; uptime_us() - start < chatter_ms * 1000; n++) {
         char buf[64];
-        unsigned len = 0;
-        for (const char *s = "threadprobe: chatter "; *s; s++) {
-            buf[len++] = *s;
-        }
-        append_num(buf, &len, (unsigned long)id);
-        for (const char *s = " line "; *s; s++) {
-            buf[len++] = *s;
-        }
-        append_num(buf, &len, n);
-        for (const char *s = " end\n"; *s; s++) {
-            buf[len++] = *s;
-        }
-        write(1, buf, len);
+        int len = snprintf(buf, sizeof(buf), "threadprobe: chatter %lu line %lu end\n",
+                           (unsigned long)id, n);
+        write(1, buf, (size_t)len);
         msleep(10);
     }
     return 0;
@@ -365,13 +293,12 @@ static int chatter_test(void) {
             thread_join(tids[c], NULL);
         }
     }
-    add("threadprobe: chatter done\n");
-    put_line();
+    puts("threadprobe: chatter done");
     return 0;
 }
 
 int main(int argc, char **argv) {
-    if (argc == 3 && kstreq(argv[1], "chatter")) {
+    if (argc == 3 && strcmp(argv[1], "chatter") == 0) {
         for (const char *p = argv[2]; *p >= '0' && *p <= '9'; p++) {
             chatter_ms = chatter_ms * 10 + (unsigned long)(*p - '0');
         }
@@ -379,27 +306,27 @@ int main(int argc, char **argv) {
     }
     int cores = argc > 2 ? argv[2][0] - '0' : 1;
     if (argc < 2 || cores < 1 || cores > 4) {
-        kputs("usage: threadprobe join|jobs|malloc|exit|hang <cores>, threadprobe last\n");
+        fputs("usage: threadprobe join|jobs|malloc|exit|hang <cores>, threadprobe last\n", stderr);
         return 2;
     }
-    if (kstreq(argv[1], "join")) {
+    if (strcmp(argv[1], "join") == 0) {
         return join_test(cores);
     }
-    if (kstreq(argv[1], "jobs")) {
+    if (strcmp(argv[1], "jobs") == 0) {
         return jobs_test(cores);
     }
-    if (kstreq(argv[1], "malloc")) {
+    if (strcmp(argv[1], "malloc") == 0) {
         return malloc_test(cores);
     }
-    if (kstreq(argv[1], "exit")) {
+    if (strcmp(argv[1], "exit") == 0) {
         return exit_test(cores);
     }
-    if (kstreq(argv[1], "last")) {
+    if (strcmp(argv[1], "last") == 0) {
         return last_test();
     }
-    if (kstreq(argv[1], "hang")) {
+    if (strcmp(argv[1], "hang") == 0) {
         return hang_test(cores);
     }
-    kputs("usage: threadprobe join|jobs|malloc|exit|hang <cores>, threadprobe last\n");
+    fputs("usage: threadprobe join|jobs|malloc|exit|hang <cores>, threadprobe last\n", stderr);
     return 2;
 }

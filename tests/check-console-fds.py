@@ -31,17 +31,14 @@ ALLOWED = {
         {"read(0)", "write(1)"},
         "kgetline edits a line on the raw console, until the screen manager does"),
     "tests/user/threadprobe.c": (
-        {"read(0)"},
-        "a thread blocked in a console read is what the probe tests"),
+        {"read(0)", "write(1)"},
+        "it tests the kernel: a thread blocked in a console read, and whole "
+        "lines from write() on every core at once (stdout would serialize them)"),
 }
 
-# file -> the libc-plan.md step that migrates it.
-NOT_YET_MIGRATED = {
-    "tests/user/forbidprobe.c": 13,
-    "tests/user/schedprobe.c": 13,
-    "tests/user/sumprobe.c": 13,
-    "tests/user/threadprobe.c": 13,
-}
+# file -> the libc-plan.md step that migrates it. Empty: every program is on
+# the libc. Kept so that a program can be brought in before it is migrated.
+NOT_YET_MIGRATED = {}
 
 
 def strip_comments(text):
