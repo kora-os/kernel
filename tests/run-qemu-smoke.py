@@ -728,9 +728,14 @@ def run(q, graphics=True, keyboard=False, repeat=0, multi_volume=False, write_te
             log.seek(start)
             text = log.read()
         # A prompt prints no newline, so a whole line may follow one; so may
-        # the start of the `tasks` command being typed, which the console
-        # echoes keystroke by keystroke as it arrives.
-        prompts = rb"^(?:\$ |koraos> (?:t(?:a(?:s(?:ks?)?)?)?)?)*"
+        # the `tasks` command being typed, which the console echoes keystroke
+        # by keystroke as it arrives. A line from another core can land
+        # anywhere in that echo, also after one that already took the
+        # prompt's line, so a whole line may follow any piece of "tasks".
+        typed = b"tasks"
+        pieces = sorted({typed[i:j] for i in range(len(typed)) for j in range(i + 1, len(typed) + 1)},
+                        key=len, reverse=True)
+        prompts = rb"^(?:\$ |koraos> |" + b"|".join(pieces) + rb")*"
         chatter = re.compile(prompts + rb"threadprobe: chatter (?:\d+ line \d+ end|done)\r?$")
         console = re.compile(prompts + rb"(?:big kernel lock: (?:free|pid \d+)|"
                              rb"kernel stack peak: \d+ of \d+ bytes)\r?$")
