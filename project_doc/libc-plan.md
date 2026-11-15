@@ -58,16 +58,16 @@ from step 4, on-target checks in the QEMU smoke tests. CI runs both.
 
 ## Userland migration (one PR each)
 
-With stdio in place, the existing user programs move from libk's helpers
-(`kputs`, `kput_int`, `kstrlen`, `kstreq`, raw `write(1, ...)`) to the libc.
-libk keeps what is KoraOS specific: the syscall stubs, threads, jobs, `spawn`
+With stdio in place, the existing user programs moved from libk's helpers
+(`kputs`, `kput_int`, `kstrlen`, `kstreq`, raw `write(1, ...)`) to the libc,
+and the helpers are gone. libk keeps what is KoraOS specific: the syscall stubs, threads, jobs, `spawn`
 and `wait`, the mutex and atomics, `uptime_us`, volumes and assigns, the
 framebuffer, `kgetline` and `kheap_info`. The POSIX-shaped calls (`open`,
 `read`, `write`, `stat`, `readdir`, ...) stay in libk as KoraOS calls; a POSIX
 layer (`<unistd.h>`, `<dirent.h>`) is a later decision, with MicroPython.
 
-No step touches the kernel. Program output stays byte for byte the same, so
-the QEMU smoke tests are the regression check, next to the host tests.
+No step touched the kernel. Program output stayed byte for byte the same,
+so the QEMU smoke tests were the regression check, next to the host tests.
 
 | # | Theme | Status |
 |---|-------|--------|
@@ -76,7 +76,7 @@ the QEMU smoke tests are the regression check, next to the host tests.
 | 11 | Demos: `gfxdemo`, `termdemo`, `jobdemo`, `pindemo` | done (#90) |
 | 12 | The shell: a mechanical migration, no redesign (koracli replaces it) | done (#91) |
 | 13 | Test probes in `tests/user`, except `fpprobe`; a formatted message to an unbuffered stream is one write | done (#92) |
-| 14 | libk cleanup: remove the helpers the libc duplicates, shrink the host-test fallback in `koraos.h`, update the userland guide | planned |
+| 14 | libk cleanup: remove the helpers the libc duplicates, remove the host-test fallback from `koraos.h`, update the userland guide | done (#93) |
 
 Rules for the migration, which come from the console plan
 (`console-plan.md`):

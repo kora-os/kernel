@@ -27,7 +27,8 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
   is `qemu_raspi4b`. User programs/FS generation
   live in `cmake/userfs.cmake` and `cmake/userfs`; kernels consume shared userfs.
 - User programs link the libc (`user/libc`, ISO C headers, entry point,
-  malloc) and libk (`user/libk`, the KoraOS API). `tests/run-libc-tests.sh`
+  malloc, stdio) and libk (`user/libk`, the KoraOS API only: what the libc
+  provides is not duplicated there). `tests/run-libc-tests.sh`
   cross-builds the libc, checks its link and headers and runs its host tests;
   the plan is `project_doc/libc-plan.md`. `tests/run-user-tests.sh` runs the
   host tests of the user programs (`user/tests`) on that libc and its fake

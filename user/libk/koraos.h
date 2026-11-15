@@ -11,40 +11,10 @@
 
 #include "abi.h"
 
-#if __has_include(<_libc/cdefs.h>)
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-/* The console is shared: a program flushes its buffered stdout before it
- * hands the console over, to a child (spawn_flags) or to a raw read
- * (kgetline), so the text comes out in the order it was written. */
-#define LIBK_FLUSH_STDOUT() ((void)fflush(stdout))
-#else
-/* Host unit tests build libk and user tools without the KoraOS libc on the
- * include path, next to the host's libc: declare what libk itself uses. With
- * LIBK_HOST_TEST, libk's allocator calls are renamed so a test can supply
- * (counting) versions of them. */
-typedef unsigned long size_t;
-#ifndef NULL
-#define NULL ((void *)0)
-#endif
-#ifdef LIBK_HOST_TEST
-#define malloc libk_malloc
-#define free libk_free
-#define calloc libk_calloc
-#define realloc libk_realloc
-#endif
-void *malloc(size_t size);
-void free(void *ptr);
-void *calloc(size_t count, size_t size);
-void *realloc(void *ptr, size_t size);
-void *memset(void *dest, int c, size_t n);
-void *memcpy(void *dest, const void *src, size_t n);
-void *memmove(void *dest, const void *src, size_t n);
-void exit(int status) __attribute__((__noreturn__));
-#define LIBK_FLUSH_STDOUT() ((void)0) /* no libc stdout to flush here */
-#endif
 
 typedef long ssize_t;
 
@@ -183,10 +153,11 @@ void kheap_info(struct kheap_info *out);
  * (returning from main calls it): its other threads die too. */
 int libk_spawn_flags(const char *name, int argc, char *const argv[], int flags); /* raw */
 
-/* The child writes straight to the console, so what this program still holds
- * in stdout's buffer goes out first. */
+/* The console is shared, and the child writes straight to it: what this
+ * program still holds in stdout's buffer goes out first, so the text comes
+ * out in the order it was written. */
 static inline int spawn_flags(const char *name, int argc, char *const argv[], int flags) {
-    LIBK_FLUSH_STDOUT();
+    fflush(stdout);
     return libk_spawn_flags(name, argc, argv, flags);
 }
 
@@ -340,51 +311,6 @@ static inline unsigned long uptime_us(void) {
 /* Graphics */
 int fb_info(struct fb_info *out);
 
-/* Small freestanding conveniences shared by the demo programs. */
-static inline size_t kstrlen(const char *s) {
-    size_t n = 0;
-    while (s[n]) {
-        n++;
-    }
-    return n;
-}
-
-static inline int kstreq(const char *a, const char *b) {
-    while (*a && *a == *b) {
-        a++;
-        b++;
-    }
-    return *a == *b;
-}
-
-static inline void kputs(const char *s) {
-    write(1, s, kstrlen(s));
-}
-
-static inline void kput_int(long v) {
-    if (v < 0) {
-        write(1, "-", 1);
-        v = -v;
-    }
-    unsigned long u = (unsigned long)v;
-    if (u == 0) {
-        write(1, "0", 1);
-        return;
-    }
-    char buf[24];
-    int i = 0;
-    while (u > 0) {
-        buf[i++] = (char)('0' + (u % 10));
-        u /= 10;
-    }
-    char out[24];
-    int j = 0;
-    while (i > 0) {
-        out[j++] = buf[--i];
-    }
-    write(1, out, (size_t)j);
-}
-
 /* Read a line from the console: read(0) hands over raw bytes, so this does the
  * editing. It echoes as it goes, honours backspace and turns CR into '\n';
  * other control bytes are dropped and escape sequences (cursor keys, the
@@ -396,7 +322,7 @@ static inline void kput_int(long v) {
  * newline is on screen before the line is read. */
 static inline ssize_t kgetline(char *buf, size_t len) {
     size_t i = 0;
-    LIBK_FLUSH_STDOUT();
+    fflush(stdout);
     enum { ESC_NONE, ESC_START, ESC_BODY } esc = ESC_NONE;
     while (i < len) {
         char c;

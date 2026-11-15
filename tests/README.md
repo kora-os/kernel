@@ -19,7 +19,7 @@ it rejects the kernel's own `strlen` declaration under `-Werror`.
 
 - Add `tests/host/<name>_test.c` and a `run_test <name> <kernel sources...>` line
   in `tests/run-host-tests.sh`. Set `TEST_FLAGS` around the line for extra
-  compiler flags (the libk threads test uses it).
+  compiler flags (the spinlock and kmalloc tests use it).
 - Include `test.h` and the kernel header under test. Do **not** include system
   headers: the kernel's `common.h` defines its own fixed-width types, which
   clash with `<stdint.h>`. `test.h` declares the few libc functions tests need.
@@ -152,6 +152,7 @@ header in step with `user/libk/syscall.S`.
 | Test | Covers |
 |------|--------|
 | `libk_console_test.c` | `kgetline`: backspace, CR as newline, escape sequences and control bytes dropped, echo, typed-ahead input left queued, a full buffer, EOF. The flush rules: a prompt printed without a newline is on the console before `kgetline` reads and echoes, and a program's buffered text comes out before its child's (`spawn`, `spawn_flags`) |
+| `libk_threads_test.c` | libk under threads, with pthreads standing in for KoraOS threads behind the fake kernel's handler: every atomic operation hammered by 8 threads with no lost update, the mutex excluding and `mutex_trylock`, 16 jobs across cores with their results, a job on a core that does not exist, and no heap block left behind (`kheap_info`) |
 | `tools_test.c` | The small tools, each run with an argv and checked for its exit status, stdout, stderr (messages go there) and effect on the filesystem. `echo` and `hello`; `cat` (several files, a missing one reported in order with the output around it, a directory, binary data through short reads and writes); `ls` (directories with a slash, UTF-8 names, missing directory, failing `readdir`); `mkdir`, `rmdir`, `rm` (never a directory) and `mv` (never over an existing file), each carrying on after a failure, syncing once and reporting a failed sync; `ps` (aligned columns, unknown state); `init` (banner before the shell, the shell's exit code, a shell that cannot start) |
 | `demos_test.c` | The demos, with the test standing in for a framebuffer (host memory), the clock (`uptime_us`, which `koraos.h` leaves to the test under `LIBK_HOST_TEST`), threads (run to completion when created) and child programs (recorded). `gfxdemo`: gradient and colour fills inside the picture's width, no framebuffer. `termdemo`: its escape sequence stream is byte for byte the one of the original `write()`-per-piece version, in a few dozen writes. `jobdemo`: the result line (cores, times, two decimals of speedup, "1 core"), one job then one per core, bands adding up, the picture and the wait for Enter, a job that cannot start, usage. `pindemo`: rounds and flags of each worker, one line per worker in one write, a worker on the wrong core or killed, a worker that cannot start, the defaults on four and two cores, bad specs, worker mode |
 | `cp_test.c` | The actual `cp`, on file streams: short reads and writes, an existing destination refused and left untouched, a refused write leaving a partial destination, a failing sync, missing and directory sources, usage; both files closed and one sync on every path |
