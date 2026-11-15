@@ -2,15 +2,13 @@
 
 #include "koraos.h"
 
+// "tool: message path" (or "tool: message") on stderr.
 static inline void filetool_error(const char *tool, const char *message, const char *path) {
-    kputs(tool);
-    kputs(": ");
-    kputs(message);
     if (path) {
-        kputs(" ");
-        kputs(path);
+        fprintf(stderr, "%s: %s %s\n", tool, message, path);
+    } else {
+        fprintf(stderr, "%s: %s\n", tool, message);
     }
-    kputs("\n");
 }
 
 // Report durable completion, including mutations made before an earlier error.

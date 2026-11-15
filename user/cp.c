@@ -5,7 +5,7 @@ static unsigned char buffer[4096];
 
 int main(int argc, char **argv) {
     if (argc != 3) {
-        kputs("usage: cp source new-destination\n");
+        fputs("usage: cp source new-destination\n", stderr);
         return 1;
     }
     struct stat info;
@@ -13,34 +13,30 @@ int main(int argc, char **argv) {
         filetool_error("cp", "cannot read file", argv[1]);
         return filetool_finish("cp", 1);
     }
-    int source = open(argv[1], O_RDONLY);
-    if (source < 0) {
+    FILE *source = fopen(argv[1], "rb");
+    if (source == NULL) {
         filetool_error("cp", "cannot open", argv[1]);
         return filetool_finish("cp", 1);
     }
-    int destination = open(argv[2], O_WRONLY | O_CREAT | O_EXCL);
-    if (destination < 0) {
-        close(source);
+    // "x": create the destination, or fail if it exists.
+    FILE *destination = fopen(argv[2], "wbx");
+    if (destination == NULL) {
+        fclose(source);
         filetool_error("cp", "cannot create new file", argv[2]);
         return filetool_finish("cp", 1);
     }
     int failed = 0;
-    ssize_t count;
-    while ((count = read(source, buffer, sizeof(buffer))) > 0) {
-        ssize_t position = 0;
-        while (position < count) {
-            ssize_t written = write(destination, buffer + position, (size_t)(count - position));
-            if (written <= 0) {
-                failed = 1;
-                break;
-            }
-            position += written;
+    size_t count;
+    while ((count = fread(buffer, 1, sizeof(buffer), source)) > 0) {
+        if (fwrite(buffer, 1, count, destination) != count) {
+            failed = 1;
+            break;
         }
-        if (failed) break;
     }
-    if (count < 0) failed = 1;
-    if (close(source) < 0) failed = 1;
-    if (close(destination) < 0) failed = 1;
+    if (ferror(source)) failed = 1;
+    if (fclose(source) == EOF) failed = 1;
+    // The last buffered bytes are written here, so a full disk can show up now.
+    if (fclose(destination) == EOF) failed = 1;
     if (failed) {
         filetool_error("cp", "copy failed; destination may be incomplete:", argv[2]);
     }

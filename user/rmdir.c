@@ -2,7 +2,7 @@
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        kputs("usage: rmdir empty-directory...\n");
+        fputs("usage: rmdir empty-directory...\n", stderr);
         return 1;
     }
     int failed = 0;
