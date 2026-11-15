@@ -1,34 +1,26 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Host tests for libk under threads: the atomics (koraos.h), the mutex
-// (user/libk/mutex.c) and the job API (user/libk/job.c). Built with
-// LIBK_HOST_TEST and -pthread: host threads stand in for KoraOS threads
-// (thread_new/thread_join are stubbed with pthreads), and libk's allocator
-// calls land in counting wrappers over the host's malloc, so every job block
-// is shown to be freed. The heap itself is the libc's, tested under threads
-// by user/libc/tests/malloc_threads_test.c.
+// (user/libk/mutex.c) and the job API (user/libk/job.c). Host threads stand
+// in for KoraOS threads: the fake kernel hands thread_new and thread_join to
+// the handler below, which uses pthreads. Jobs allocate from the libc's heap,
+// and kheap_info shows that every job block is freed. The heap itself is
+// tested under threads by user/libc/tests/malloc_threads_test.c.
 
 #include "test.h"
 
+#include <stdbool.h>
+
+#include "fake_syscall.h"
+#include "libk/koraos.h"
+
+// The libc's headers shadow the host's, so pthreads are declared by hand.
 typedef unsigned long host_thread_t;
 int pthread_create(host_thread_t *thread, const void *attr, void *(*start)(void *), void *arg);
 int pthread_join(host_thread_t thread, void **result);
 int sched_yield(void);
-void *malloc(unsigned long size);
-void free(void *ptr);
 
-// The host's allocator, reached before koraos.h renames malloc and free.
-static void *host_malloc(unsigned long size) {
-    return malloc(size);
-}
-
-static void host_free(void *ptr) {
-    free(ptr);
-}
-
-#include "koraos.h"
-
-// A tiny lock for the stubs themselves (not the code under test).
+// A tiny lock for the kernel side itself (not the code under test).
 static int stub_lock;
 
 static void stub_acquire(void) {
@@ -41,30 +33,7 @@ static void stub_release(void) {
     __atomic_store_n(&stub_lock, 0, __ATOMIC_RELEASE);
 }
 
-// libk's allocator calls: the host's, counted -----------------------------
-
-static long blocks_live;
-
-void *libk_malloc(size_t size) {
-    void *p = host_malloc(size);
-    if (p != NULL) {
-        __atomic_fetch_add(&blocks_live, 1, __ATOMIC_RELAXED);
-    }
-    return p;
-}
-
-void libk_free(void *ptr) {
-    if (ptr != NULL) {
-        __atomic_fetch_sub(&blocks_live, 1, __ATOMIC_RELAXED);
-    }
-    host_free(ptr);
-}
-
-void yield(void) {
-    sched_yield();
-}
-
-// Thread stubs: a KoraOS thread becomes a host thread ------------------
+// The kernel side: a KoraOS thread becomes a host thread -----------------
 
 #define MAX_THREADS 64
 #define BAD_CORE 99  // thread_new fails for it, as for a core that does not exist
@@ -83,7 +52,11 @@ static void *thread_body(void *slot) {
     return NULL;
 }
 
-int thread_new(void (*start)(void), thread_fn fn, void *arg, int core) {
+// Threads start in libk's assembly stub on the target.
+void libk_thread_start(void) {
+}
+
+static int kernel_thread_new(void (*start)(void), thread_fn fn, void *arg, int core) {
     if (start != libk_thread_start || core == BAD_CORE) {
         return -1;
     }
@@ -106,7 +79,7 @@ int thread_new(void (*start)(void), thread_fn fn, void *arg, int core) {
     return -1;
 }
 
-int thread_join(int tid, long *value) {
+static int kernel_thread_join(int tid, long *value) {
     if (tid < 1 || tid > MAX_THREADS || !threads[tid - 1].used) {
         return -1;
     }
@@ -118,7 +91,16 @@ int thread_join(int tid, long *value) {
     return 0;
 }
 
-void libk_thread_start(void) {}
+static long kernel(long number, long a0, long a1, long a2, long a3) {
+    switch (number) {
+    case SYS_THREAD_NEW:
+        return kernel_thread_new((void (*)(void))a0, (thread_fn)a1, (void *)a2, (int)a3);
+    case SYS_THREAD_JOIN:
+        return kernel_thread_join((int)a0, (long *)a1);
+    default:
+        return -1;
+    }
+}
 
 // Helpers --------------------------------------------------------------
 
@@ -217,6 +199,9 @@ static long sum_to(void *arg) {
 
 static void test_jobs(void) {
     enum { JOBS = 16 };
+    fake_set_handler(kernel);
+    struct kheap_info before, after;
+    kheap_info(&before);
     job_t *jobs[JOBS];
     for (long i = 0; i < JOBS; i++) {
         jobs[i] = job_queue(sum_to, (void *)(1000 * (i + 1)), (int)(i % 4));
@@ -228,7 +213,10 @@ static void test_jobs(void) {
         CHECK(got == n * (n + 1) / 2, "job %ld returned %ld", i, got);
     }
     CHECK(job_queue(sum_to, (void *)1, BAD_CORE) == NULL, "a job on a bad core was queued");
-    CHECK(blocks_live == 0, "jobs left %ld blocks", blocks_live);
+    CHECK(thread_join(JOBS + 1, NULL) == -1, "joining a thread that does not exist");
+    kheap_info(&after);
+    CHECK(after.used_blocks == before.used_blocks && after.corrupt == 0,
+          "jobs left %zu blocks", after.used_blocks - before.used_blocks);
 }
 
 TEST_MAIN(test_atomics, test_mutex_excludes, test_jobs)
