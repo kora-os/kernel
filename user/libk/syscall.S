@@ -16,7 +16,7 @@
 
 SYSCALL write,   SYS_WRITE
 SYSCALL read,    SYS_READ
-SYSCALL spawn_flags, SYS_SPAWN_FLAGS
+SYSCALL libk_spawn_flags, SYS_SPAWN_FLAGS  // spawn_flags() in koraos.h flushes stdout first
 SYSCALL waitpid, SYS_WAITPID
 SYSCALL getpid,  SYS_GETPID
 SYSCALL yield,   SYS_YIELD

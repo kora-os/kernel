@@ -34,6 +34,8 @@ def main():
     stubs = (ROOT / "user/libk/syscall.S").read_text()
     seen = set()
     for name, macro in re.findall(r"^SYSCALL\s+(\w+),\s*(SYS_\w+)", stubs, re.M):
+        # A raw stub behind a C wrapper in koraos.h carries a libk_ prefix.
+        name = name.removeprefix("libk_")
         if macro != "SYS_" + name.upper() or macro not in user:
             errors.append(f"{name}: wrong or missing syscall macro {macro}")
         seen.add(macro)

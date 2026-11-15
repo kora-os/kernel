@@ -11,7 +11,6 @@
 
 #define write libk_write
 #define read libk_read
-#define spawn_flags libk_spawn_flags
 #define waitpid libk_waitpid
 #define getpid libk_getpid
 #define yield libk_yield

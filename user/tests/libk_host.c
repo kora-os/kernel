@@ -24,7 +24,7 @@ ssize_t read(int fd, void *buf, size_t len) {
     return CALL(SYS_READ, fd, buf, len, 0);
 }
 
-int spawn_flags(const char *name, int argc, char *const argv[], int flags) {
+int libk_spawn_flags(const char *name, int argc, char *const argv[], int flags) {
     return (int)CALL(SYS_SPAWN_FLAGS, name, argc, argv, flags);
 }
 

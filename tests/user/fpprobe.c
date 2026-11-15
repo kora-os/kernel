@@ -31,7 +31,9 @@ int main(int argc, char **argv) {
     for (unsigned round = 0; round < 3; round++) {
         unsigned long seed = 0x1000 + round * 0x100;
         fp_fill(seed);
-        int pid = spawn("fpprobe", 2, args);
+        // The raw stub: spawn() flushes stdout first, and no libc code may
+        // run between fp_fill and fp_check (it is free to use the registers).
+        int pid = libk_spawn_flags("fpprobe", 2, args, 0);
         int code = pid < 0 ? -1 : wait(pid);
         if (code != 0) {
             kputs("fpprobe: child failed\n");

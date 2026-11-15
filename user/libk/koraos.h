@@ -16,6 +16,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+/* The console is shared: a program flushes its buffered stdout before it
+ * hands the console over, to a child (spawn_flags) or to a raw read
+ * (kgetline), so the text comes out in the order it was written. */
+#define LIBK_FLUSH_STDOUT() ((void)fflush(stdout))
 #else
 /* Host unit tests build libk and user tools without the KoraOS libc on the
  * include path, next to the host's libc: declare what libk itself uses. With
@@ -39,6 +43,7 @@ void *memset(void *dest, int c, size_t n);
 void *memcpy(void *dest, const void *src, size_t n);
 void *memmove(void *dest, const void *src, size_t n);
 void exit(int status) __attribute__((__noreturn__));
+#define LIBK_FLUSH_STDOUT() ((void)0) /* no libc stdout to flush here */
 #endif
 
 typedef long ssize_t;
@@ -176,7 +181,15 @@ void kheap_info(struct kheap_info *out);
 
 /* exit() (<stdlib.h>) ends the whole program, from any of its threads
  * (returning from main calls it): its other threads die too. */
-int spawn_flags(const char *name, int argc, char *const argv[], int flags);
+int libk_spawn_flags(const char *name, int argc, char *const argv[], int flags); /* raw */
+
+/* The child writes straight to the console, so what this program still holds
+ * in stdout's buffer goes out first. */
+static inline int spawn_flags(const char *name, int argc, char *const argv[], int flags) {
+    LIBK_FLUSH_STDOUT();
+    return libk_spawn_flags(name, argc, argv, flags);
+}
+
 int waitpid(int pid, int *code, int flags);
 int getpid(void);  /* the program's pid, the same in all its threads */
 void yield(void);
@@ -374,9 +387,12 @@ static inline void kput_int(long v) {
  * terminal's status replies) are swallowed whole. Returns at a newline or when
  * the buffer fills, with no NUL added: the byte count, or what read returned
  * (0 or -1) if nothing was read. One byte per read, so typed-ahead lines stay
- * queued for the next call. */
+ * queued for the next call. It reads and echoes on the console directly, past
+ * stdin and stdout, so it flushes stdout first: a prompt printed without a
+ * newline is on screen before the line is read. */
 static inline ssize_t kgetline(char *buf, size_t len) {
     size_t i = 0;
+    LIBK_FLUSH_STDOUT();
     enum { ESC_NONE, ESC_START, ESC_BODY } esc = ESC_NONE;
     while (i < len) {
         char c;
