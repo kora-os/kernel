@@ -51,32 +51,6 @@ static int my_core(void) {
     return -1;
 }
 
-static char line[128];
-static unsigned line_len;
-
-static void add(const char *s) {
-    while (*s && line_len < sizeof(line) - 1) {
-        line[line_len++] = *s++;
-    }
-}
-
-static void add_num(unsigned long v) {
-    char digits[24];
-    unsigned n = 0;
-    do {
-        digits[n++] = (char)('0' + v % 10);
-        v /= 10;
-    } while (v != 0);
-    while (n > 0 && line_len < sizeof(line) - 1) {
-        line[line_len++] = digits[--n];
-    }
-}
-
-static void put_line(void) {
-    write(1, line, line_len);
-    line_len = 0;
-}
-
 struct worker {
     unsigned long units;
     int core;      // -1: least loaded
@@ -85,7 +59,7 @@ struct worker {
 
 int main(int argc, char **argv) {
     // Worker mode: pindemo -w <rounds>; exits with the core it ran on.
-    if (argc == 3 && kstreq(argv[1], "-w")) {
+    if (argc == 3 && strcmp(argv[1], "-w") == 0) {
         const char *s = argv[2];
         volatile unsigned long sink = churn(parse(&s, ~0ul / 2));
         (void)sink;
@@ -103,7 +77,7 @@ int main(int argc, char **argv) {
         count = 4;
     }
     if (count > MAX_WORKERS) {
-        kputs("pindemo: at most 8 workers\n");
+        fputs("pindemo: at most 8 workers\n", stderr);
         return 2;
     }
     struct worker workers[MAX_WORKERS];
@@ -116,7 +90,7 @@ int main(int argc, char **argv) {
             workers[i].core = (int)parse(&s, 1000);
         }
         if (*s != '\0' || workers[i].units == 0 || workers[i].units > 100) {
-            kputs("usage: pindemo [units[@core] ...]   (1 to 100 units of ~100 ms)\n");
+            fputs("usage: pindemo [units[@core] ...]   (1 to 100 units of ~100 ms)\n", stderr);
             return 2;
         }
     }
@@ -139,26 +113,13 @@ int main(int argc, char **argv) {
     unsigned long start = uptime_us();
     for (int i = 0; i < count; i++) {
         char arg[24];
-        unsigned long v = workers[i].units * unit_rounds;
-        unsigned n = 0;
-        char digits[24];
-        do {
-            digits[n++] = (char)('0' + v % 10);
-            v /= 10;
-        } while (v != 0);
-        unsigned len = 0;
-        while (n > 0) {
-            arg[len++] = digits[--n];
-        }
-        arg[len] = '\0';
+        snprintf(arg, sizeof(arg), "%lu", workers[i].units * unit_rounds);
         char *child_argv[] = {"pindemo", "-w", arg};
         int flags = SPAWN_NOWAIT | (workers[i].core >= 0 ? SPAWN_CORE(workers[i].core) : 0);
         workers[i].pid = spawn_flags("pindemo", 3, child_argv, flags);
         if (workers[i].pid < 0) {
-            add("pindemo: cannot start worker ");
-            add_num((unsigned long)i + 1);
-            add(workers[i].core >= 0 ? " (no such core?)\n" : "\n");
-            put_line();
+            fprintf(stderr, "pindemo: cannot start worker %d%s\n", i + 1,
+                    workers[i].core >= 0 ? " (no such core?)" : "");
             while (i-- > 0) {
                 kill(workers[i].pid);
                 wait(workers[i].pid);
@@ -176,35 +137,25 @@ int main(int argc, char **argv) {
             i++;
         }
         if (i == count) {
-            kputs("pindemo: FAILED, lost a worker\n");
+            fputs("pindemo: FAILED, lost a worker\n", stderr);
             return 1;
         }
-        add("pindemo: worker ");
-        add_num((unsigned long)i + 1);
-        add(" (");
-        add_num(workers[i].units);
-        add(workers[i].units == 1 ? " unit, cpu " : " units, cpu ");
+        // Each report is one line, so one write() at its newline.
+        char cpu[24] = "?";
         if (code >= 0) {
-            add_num((unsigned long)code);
-        } else {
-            add("?");
+            snprintf(cpu, sizeof(cpu), "%d", code);
         }
-        add(workers[i].core >= 0 ? " pinned" : "");
-        add(") done after ");
-        add_num((uptime_us() - start) / 1000);
-        add(" ms\n");
-        put_line();
+        printf("pindemo: worker %d (%lu %s, cpu %s%s) done after %lu ms\n", i + 1,
+               workers[i].units, workers[i].units == 1 ? "unit" : "units", cpu,
+               workers[i].core >= 0 ? " pinned" : "", (uptime_us() - start) / 1000);
         if (code < 0 || (workers[i].core >= 0 && code != workers[i].core)) {
             failed = 1;
         }
     }
-    add(failed ? "pindemo: FAILED, a worker ran on the wrong core\n" : "pindemo: ");
-    if (!failed) {
-        add_num((unsigned long)count);
-        add(" workers done in ");
-        add_num((uptime_us() - start) / 1000);
-        add(" ms\n");
+    if (failed) {
+        fputs("pindemo: FAILED, a worker ran on the wrong core\n", stderr);
+    } else {
+        printf("pindemo: %d workers done in %lu ms\n", count, (uptime_us() - start) / 1000);
     }
-    put_line();
     return failed;
 }
