@@ -100,8 +100,9 @@ entry; tests link `fake_syscall.c`, a fake kernel serving page runs (with a
 page budget to simulate exhaustion), `yield`, `exit`, a console (captured
 fd 1 and 2 with optional short or failing writes, scripted fd 0), a small
 in-memory filesystem with the kernel's rules (with optional short reads and
-writes and writes that start failing) and a counted `sync`, in place of
-`src/sys/syscall.S`. A test can install a handler for the calls the fake
+writes and writes that start failing, `mkdir`) and a counted `sync`, in
+place of `src/sys/syscall.S`. `fake_screen` is fd 1 and 2 together in the
+order written, for checks on what comes out first. A test can install a handler for the calls the fake
 kernel does not serve (`fake_set_handler`). `test.h` reaches the host's own `printf` and `fflush` by
 symbol name (`test_printf`), since the libc's are renamed for the code under
 test.
@@ -151,7 +152,8 @@ header in step with `user/libk/syscall.S`.
 | Test | Covers |
 |------|--------|
 | `libk_console_test.c` | `kgetline`: backspace, CR as newline, escape sequences and control bytes dropped, echo, typed-ahead input left queued, a full buffer, EOF. The flush rules: a prompt printed without a newline is on the console before `kgetline` reads and echoes, and a program's buffered text comes out before its child's (`spawn`, `spawn_flags`) |
-| `cp_test.c` | The actual `cp`: short reads and writes, an existing destination refused and left untouched, a refused write leaving a partial destination, a failing sync, missing and directory sources, usage; both files closed and one sync on every path |
+| `tools_test.c` | The small tools, each run with an argv and checked for its exit status, stdout, stderr (messages go there) and effect on the filesystem. `echo` and `hello`; `cat` (several files, a missing one reported in order with the output around it, a directory, binary data through short reads and writes); `ls` (directories with a slash, UTF-8 names, missing directory, failing `readdir`); `mkdir`, `rmdir`, `rm` (never a directory) and `mv` (never over an existing file), each carrying on after a failure, syncing once and reporting a failed sync; `ps` (aligned columns, unknown state); `init` (banner before the shell, the shell's exit code, a shell that cannot start) |
+| `cp_test.c` | The actual `cp`, on file streams: short reads and writes, an existing destination refused and left untouched, a refused write leaving a partial destination, a failing sync, missing and directory sources, usage; both files closed and one sync on every path |
 | `shell_input_test.c` | The actual shell, parser and main loop: fragmented reads, maximal complete lines, oversized-line draining, next-command preservation, 16/17-token boundary, terminated arguments, maximal assign target, quoted/escaped/empty tokens, literal operator provenance, malformed quoting, background jobs and their reaping, `@N` core pinning |
 
 ## Console fd check
