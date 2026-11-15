@@ -73,7 +73,7 @@ the QEMU smoke tests are the regression check, next to the host tests.
 |---|-------|--------|
 | 9 | Harness and flush rules: the host tests that compile `user/cp.c` and `user/shell.c` build against the libc and its fake kernel; `kgetline` and `spawn` flush `stdout` first; a CI check for literal console fds | done (#88) |
 | 10 | File tools on stdio: `cat`, `cp`, `ls`, `mkdir`, `mv`, `rm`, `rmdir`, `echo`, `hello`, `init`, `ps`, and `filetools.h`; errors go to `stderr` | done (#89) |
-| 11 | Demos: `gfxdemo`, `termdemo`, `jobdemo`, `pindemo` | planned |
+| 11 | Demos: `gfxdemo`, `termdemo`, `jobdemo`, `pindemo` | done (#90) |
 | 12 | The shell: a mechanical migration, no redesign (koracli replaces it) | planned |
 | 13 | Test probes in `tests/user`, except `fpprobe` | planned |
 | 14 | libk cleanup: remove the helpers the libc duplicates, shrink the host-test fallback in `koraos.h`, update the userland guide | planned |
