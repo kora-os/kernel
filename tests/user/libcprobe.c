@@ -25,9 +25,7 @@ static int failed;
 
 static void check(int ok, const char *what) {
     if (!ok) {
-        kputs("libcprobe: FAILED ");
-        kputs(what);
-        kputs("\n");
+        fprintf(stderr, "libcprobe: FAILED %s\n", what);
         failed = 1;
     }
 }

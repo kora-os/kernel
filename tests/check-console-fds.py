@@ -30,6 +30,9 @@ ALLOWED = {
     "user/libk/koraos.h": (
         {"read(0)", "write(1)"},
         "kgetline edits a line on the raw console, until the screen manager does"),
+    "tests/user/fpprobe.c": (
+        {"write(1)"},
+        "no libc code may run while it checks the FP registers, stdio included"),
     "tests/user/threadprobe.c": (
         {"read(0)", "write(1)"},
         "it tests the kernel: a thread blocked in a console read, and whole "
