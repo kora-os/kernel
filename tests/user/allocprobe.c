@@ -20,9 +20,7 @@ static unsigned char pattern(unsigned slot, size_t i) {
 }
 
 static int fail(const char *what, int code) {
-    kputs("allocprobe: ");
-    kputs(what);
-    kputs("\n");
+    fprintf(stderr, "allocprobe: %s\n", what);
     return code;
 }
 
@@ -160,6 +158,6 @@ int main(void) {
     if (alloc_pages(3) == NULL || malloc(5000) == NULL) {
         return fail("final allocations failed", 40);
     }
-    kputs("allocprobe: heap checked\n");
+    puts("allocprobe: heap checked");
     return 0;
 }

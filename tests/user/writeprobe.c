@@ -11,9 +11,7 @@ static const char *initial = "/write tests/initial data.bin";
 static const char *final = "/write tests/final data.bin";
 
 static int failure(unsigned step) {
-    kputs("writeprobe: FAILED step ");
-    kput_int(step);
-    kputs("\n");
+    fprintf(stderr, "writeprobe: FAILED step %u\n", step);
     return 1;
 }
 static int write_all(int fd, const void *data, size_t size) {
@@ -29,7 +27,7 @@ static int write_all(int fd, const void *data, size_t size) {
 static int write_text(const char *path, const char *text) {
     int fd = open(path, O_WRONLY | O_CREAT | O_EXCL);
     if (fd < 0) return -1;
-    int result = write_all(fd, text, kstrlen(text));
+    int result = write_all(fd, text, strlen(text));
     if (close(fd) < 0) result = -1;
     return result;
 }
@@ -128,6 +126,6 @@ int main(int argc, char **argv) {
          open(on_volume(read_only, "no writable create.txt"), O_RDONLY | O_CREAT | O_EXCL) != -1))
         return failure(23);
     if (sync() != 0) return failure(24);
-    kputs("writeprobe: data, namespace, UTF-8 and sync checked\n");
+    puts("writeprobe: data, namespace, UTF-8 and sync checked");
     return 0;
 }
