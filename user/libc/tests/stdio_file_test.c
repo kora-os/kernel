@@ -183,6 +183,38 @@ static void test_blocks(void) {
     fclose(f);
 }
 
+// Short reads and writes from the kernel are completed by the stream; a
+// write the kernel refuses is an error on fwrite or, at the latest, fclose.
+static void test_short_and_failing_io(void) {
+    reset();
+    static char data[10000], back[10000];
+    for (size_t i = 0; i < sizeof data; i++) {
+        data[i] = (char)(i * 31 + 7);
+    }
+    fake_set_file_chunks(733, 37);
+    FILE *f = fopen("big", "w");
+    CHECK(fwrite(data, 1, sizeof data, f) == sizeof data && fclose(f) == 0, "short writes");
+    size_t len;
+    const char *stored = fake_file_data("big", &len);
+    CHECK(len == sizeof data && memcmp(stored, data, len) == 0, "every byte arrived");
+    f = fopen("big", "r");
+    CHECK(fread(back, 1, sizeof back, f) == sizeof back && memcmp(back, data, sizeof data) == 0,
+          "short reads");
+    CHECK(fgetc(f) == EOF && feof(f) && !ferror(f), "then end of file, not an error");
+    fclose(f);
+
+    f = fopen("partial", "w");
+    fake_fail_file_writes_after(200);
+    errno = 0;
+    size_t wrote = fwrite(data, 1, sizeof data, f);
+    int closed = fclose(f);
+    CHECK(wrote < sizeof data || closed == EOF, "a refused write is reported");
+    CHECK(errno == EIO, "as an I/O error");
+    fake_file_data("partial", &len);
+    CHECK(len > 0 && len < sizeof data && fake_open_fds() == 0,
+          "the file keeps what was written and the fd is closed");
+}
+
 static void test_open_errors(void) {
     reset();
     errno = 0;
@@ -287,5 +319,5 @@ static void test_freopen(void) {
 }
 
 TEST_MAIN(test_write_and_read_back, test_modes, test_update_streams, test_positioning, test_ungetc,
-          test_blocks, test_open_errors, test_remove_rename, test_exit_closes_files, test_stdin,
+          test_blocks, test_short_and_failing_io, test_open_errors, test_remove_rename, test_exit_closes_files, test_stdin,
           test_freopen)

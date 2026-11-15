@@ -126,8 +126,10 @@ static long fake_read(int fd, char *buf, size_t len) {
     if (input_chunk != 0 && n > input_chunk) {
         n = input_chunk;
     }
-    __builtin_memcpy(buf, input + input_pos, n);
-    input_pos += n;
+    if (n > 0) {  // with no input at all, input is NULL (NULL + 0 is UB)
+        __builtin_memcpy(buf, input + input_pos, n);
+        input_pos += n;
+    }
     unlock_state();
     return (long)n;
 }
@@ -174,6 +176,10 @@ void fake_set_input(const char *data, size_t len, size_t chunk) {
     unlock_state();
 }
 
+size_t fake_input_position(void) {
+    return input_pos;
+}
+
 // The filesystem: a few flat entries, contents in host memory.
 #define MAX_FILES 32
 #define MAX_FDS 16
@@ -191,6 +197,12 @@ static struct {
     size_t pos;
     int flags;
 } fds[MAX_FDS] = {[0 ... MAX_FDS - 1] = {-1, 0, 0}};
+
+static size_t file_read_chunk, file_write_chunk;
+static size_t file_write_budget = (size_t)-1;  // bytes left before writes fail
+static unsigned sync_count;
+static int sync_fails;
+static fake_handler handler;
 
 static int find_file(const char *path) {
     for (int i = 0; i < MAX_FILES; i++) {
@@ -285,6 +297,9 @@ static long fs_read(int i, char *buf, size_t len) {
     }
     size_t left = f->len - fds[i].pos;
     size_t n = len < left ? len : left;
+    if (file_read_chunk != 0 && n > file_read_chunk) {
+        n = file_read_chunk;
+    }
     if (n == 0) {
         return 0;  // an empty file may have no data at all (NULL + 0 is UB)
     }
@@ -303,6 +318,15 @@ static long fs_write(int i, const char *buf, size_t len) {
     }
     if (len == 0) {
         return 0;
+    }
+    if (file_write_budget == 0) {
+        return -1;
+    }
+    if (file_write_chunk != 0 && len > file_write_chunk) {
+        len = file_write_chunk;
+    }
+    if (file_write_budget != (size_t)-1) {
+        file_write_budget -= len < file_write_budget ? len : file_write_budget;
     }
     size_t end = fds[i].pos + len;
     if (end > f->cap) {
@@ -441,8 +465,33 @@ int fake_open_fds(void) {
     return n;
 }
 
+void fake_set_file_chunks(size_t read_chunk, size_t write_chunk) {
+    file_read_chunk = read_chunk;
+    file_write_chunk = write_chunk;
+}
+
+void fake_fail_file_writes_after(size_t bytes) {
+    file_write_budget = bytes;
+}
+
+unsigned fake_syncs(void) {
+    return sync_count;
+}
+
+void fake_fail_sync(int fail) {
+    sync_fails = fail;
+}
+
+void fake_set_handler(fake_handler new_handler) {
+    handler = new_handler;
+}
+
 void fake_reset_files(void) {
     lock_state();
+    file_read_chunk = file_write_chunk = 0;
+    file_write_budget = (size_t)-1;
+    sync_count = 0;
+    sync_fails = 0;
     for (int i = 0; i < MAX_FDS; i++) {
         fds[i].file = -1;
     }
@@ -456,7 +505,6 @@ void fake_reset_files(void) {
 }
 
 long __syscall(long number, long a0, long a1, long a2, long a3) {
-    (void)a3;
     if (a0 >= FD_BASE && (number == SYS_READ || number == SYS_WRITE)) {
         lock_state();
         long r = fs_syscall(number, a0, a1, a2);
@@ -495,6 +543,11 @@ long __syscall(long number, long a0, long a1, long a2, long a3) {
     case SYS_YIELD:
         sched_yield();
         return 0;
+    case SYS_SYNC:
+        lock_state();
+        sync_count++;
+        unlock_state();
+        return sync_fails ? -1 : 0;
     case SYS_EXIT:
         if (!exit_armed) {
             __builtin_trap();
@@ -503,7 +556,7 @@ long __syscall(long number, long a0, long a1, long a2, long a3) {
         last_exit_status = (int)a0;
         longjmp(armed_exit_env, 1);
     default:
-        return -1;
+        return handler != NULL ? handler(number, a0, a1, a2, a3) : -1;
     }
 }
 

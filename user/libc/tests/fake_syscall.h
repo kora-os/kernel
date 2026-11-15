@@ -16,9 +16,12 @@
 //   SYS_OPEN, CLOSE, READ, WRITE,     an in-memory filesystem of flat paths
 //   LSEEK, STAT, UNLINK, RMDIR,       with the kernel's rules: open flag
 //   RENAME (fds 3 and up)             checks, no seeking past the end, 16
-//                                     fds, read-only files
+//                                     fds, read-only files; optional short
+//                                     reads and writes and failing writes
+//   SYS_SYNC                          counted, with an optional failure
 //
-// Everything else fails the way the kernel does for an unknown call (-1).
+// Everything else goes to the handler a test installed (fake_set_handler),
+// or fails the way the kernel does for an unknown call (-1).
 // Allocation is thread safe so the same stand-in serves the pthread tests.
 #ifndef LIBC_FAKE_SYSCALL_H
 #define LIBC_FAKE_SYSCALL_H
@@ -64,17 +67,36 @@ void fake_fail_writes(int fail);
 // fd 0 returns these bytes, at most `chunk` per read (0: all asked for),
 // then 0 (end of input).
 void fake_set_input(const char *data, size_t len, size_t chunk);
+// How many of those bytes fd 0 has handed out so far.
+size_t fake_input_position(void);
 
 // The filesystem. fake_put_file creates or replaces a file; fake_file_data
 // returns its contents (NULL if it does not exist; length in *len).
 // fake_mkdir makes an empty directory entry; fake_set_readonly makes opens
 // for writing, unlink and rename of the path fail. fake_open_fds counts open
-// descriptors; fake_reset_files removes everything and closes all fds.
+// descriptors; fake_reset_files removes everything, closes all fds and
+// clears the limits and the sync state below.
 void fake_put_file(const char *path, const char *data, size_t len);
 const char *fake_file_data(const char *path, size_t *len);
 void fake_mkdir(const char *path);
 void fake_set_readonly(const char *path, int readonly);
 int fake_open_fds(void);
 void fake_reset_files(void);
+// A read or write on a file moves at most this many bytes (0: no limit), as
+// a short read or write does.
+void fake_set_file_chunks(size_t read_chunk, size_t write_chunk);
+// File writes fail (-1) once `bytes` bytes have been written from now on;
+// (size_t)-1 removes the limit.
+void fake_fail_file_writes_after(size_t bytes);
+// SYS_SYNC: fake_syncs counts the calls, which fail while `fail` is set.
+unsigned fake_syncs(void);
+void fake_fail_sync(int fail);
+
+// Calls the fake kernel does not implement (spawn, waitpid, chdir, ...) go
+// to `handler`, with the raw syscall number and arguments; its result is the
+// call's. NULL removes it. It runs outside the fake's lock, so it may make
+// syscalls of its own (a "child" writing to the console, say).
+typedef long (*fake_handler)(long number, long a0, long a1, long a2, long a3);
+void fake_set_handler(fake_handler handler);
 
 #endif // LIBC_FAKE_SYSCALL_H

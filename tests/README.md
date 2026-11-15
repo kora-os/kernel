@@ -2,7 +2,7 @@
 
 ## Host unit tests (`tests/host/`)
 
-Pure-logic kernel and shell parser code (code that does not touch hardware registers) is compiled
+Pure-logic kernel code (code that does not touch hardware registers) is compiled
 with the **host** compiler and run directly on your machine, under
 AddressSanitizer and UndefinedBehaviorSanitizer. No cross toolchain, QEMU or
 Raspberry Pi is needed, and a run takes a few seconds.
@@ -35,8 +35,6 @@ Current suites:
 | `fat_namespace_test.c` | Create/exclusive-create, Greek/astral/maximal LFNs, strict UTF-8 and FAT names, short-alias collisions and lookup, directory growth/slot reuse, unlink/mkdir/rmdir/rename, object/cwd/assign guards, relative and qualified paths, cross-volume rejection, observed-allocation OOM sweeps, transient/persistent I/O recovery, raw VFAT/dot-link validation and fsck/mtools checks |
 | `fat_write_test.c` | Existing-file writes on disposable 64 MiB mtools media: sector preservation, append, fragmented chains, first allocation, shared handle metadata, truncate and freed-cluster reuse, disk full, partition-view write/flush capabilities, FAT mirroring/active FAT/high bits, stale FSInfo, dirty eviction, retry after injected read/write/flush errors, cold remount, fsck and host readback |
 | `user_mem_test.c` | `src/proc/user_mem.c`: per-task page-run records behind `alloc_pages`/`free_pages`, foreign and double frees, reclaim on teardown, no leaks on failure |
-| `cp_test.c` | Actual file-copy utility: partial reads/writes, exclusive destination preservation, partial-error output and durable-sync failure |
-| `shell_input_test.c` | Real EL0 shell parser with renamed syscall stubs: fragmented reads, maximal complete lines, oversized-line draining, next-command preservation, 16/17-token boundary, terminated arguments, maximal assign target, quoted/escaped/empty tokens, literal operator provenance and malformed quoting |
 | `filesystem_test.c` | `src/fs/fat32.c` and `src/fs/namespace.c` on mtools-made volumes: independent geometry/caches, root/BPB labels, duplicate labels/device collisions, relative paths, cwd isolation, retained handles, malformed geometry/chains/LFN, allocation and I/O errors, assign snapshots/replacement/removal/capacity, c-only command lookup and shadowed-label cwd, owned cwd/assign ancestor pins, busy reset and flush-failed reset preservation/retry |
 | `blkdev_test.c` | `src/fs/blkdev.c`: bare FAT32 and mixed MBR discovery, hidden FAT32 types, invalid/range/overlap tables, partition-relative bounded read/write/flush, read-only and unsupported I/O, registry capacity |
 | `placement_test.c` | `src/proc/placement.c`: least-loaded core with ties to the lowest, offline cores skipped, even spreading, pinned requests honoured or refused (offline or nonexistent core) |
@@ -100,9 +98,11 @@ collides with, or is silently replaced by, the host libc or the sanitizer's
 interceptors. Code that makes syscalls goes through the single `__syscall()`
 entry; tests link `fake_syscall.c`, a fake kernel serving page runs (with a
 page budget to simulate exhaustion), `yield`, `exit`, a console (captured
-fd 1 and 2 with optional short or failing writes, scripted fd 0) and a small
-in-memory filesystem with the kernel's rules, in place of
-`src/sys/syscall.S`. `test.h` reaches the host's own `printf` and `fflush` by
+fd 1 and 2 with optional short or failing writes, scripted fd 0), a small
+in-memory filesystem with the kernel's rules (with optional short reads and
+writes and writes that start failing) and a counted `sync`, in place of
+`src/sys/syscall.S`. A test can install a handler for the calls the fake
+kernel does not serve (`fake_set_handler`). `test.h` reaches the host's own `printf` and `fflush` by
 symbol name (`test_printf`), since the libc's are renamed for the code under
 test.
 
@@ -120,9 +120,55 @@ test.
 | `stdio_snprintf_test.c` | The `snprintf` family, mostly differential: about 490 000 combinations of flags, width and precision (literal and `*`), length modifier and edge values for `d i o u x X c s`, and about 250 000 for `f e E g G a A` (halfway cases, carries, extremes, random doubles, `%.40f` expansions), must match the host libc's `snprintf` byte for byte. By hand: inf/nan, `%a` subnormals and ties (the host libcs disagree there), `(null)`, `%p`, unknown conversions, truncation and return values, every `%n` length, UTF-8 for `%lc`/`%ls` (precision never splits a character, `EILSEQ`), `EOVERFLOW`. libcprobe repeats a many-argument `snprintf` on the target, whose AAPCS64 `va_list` the hosts do not use |
 | `stdlib_strtod_test.c` | `strtod`/`strtof` against the host's (correctly rounded) ones, bits and end pointer: hand-picked hard cases, 40 000 random decimal strings, round trips of random doubles in six formats, and exact midpoints between neighbouring doubles (up to 767 digits, also just above and below them). By hand: inf/nan forms, hex edge cases, errno, inputs past the 800 kept digits |
 | `stdio_write_test.c` | Stream output over the fake console: when line, full and no buffering write (including the caller's `setvbuf` buffer and writes larger than it), short writes retried, failing writes (`EIO`, error indicators, per-call return values), `fflush(NULL)`, `perror`, `exit` flushing after the `atexit` handlers and `_Exit` not flushing, and 4 threads printing 1 200 lines with none torn |
-| `stdio_file_test.c` | File streams over the fake kernel's in-memory filesystem (the kernel's open-flag rules, no seeking past the end, 16 fds): every `fopen` mode, `fgets`/`fgetc`/`fread` (block reads past the buffer, binary data), update streams switching between reading and writing without `fseek`, `fseek`/`ftell`/`fgetpos`/`fsetpos`, `ungetc`, errno for failed opens (`ENOENT`, `EEXIST`, `EISDIR`, `EACCES`, `EINVAL`), the 16-file limit, `remove`/`rename`, `exit` flushing and closing open files, `stdin` (prompt flushed first, raw bytes), `freopen` of `stdin` and `stdout` |
+| `stdio_file_test.c` | File streams over the fake kernel's in-memory filesystem (the kernel's open-flag rules, no seeking past the end, 16 fds): every `fopen` mode, `fgets`/`fgetc`/`fread` (block reads past the buffer, binary data), update streams switching between reading and writing without `fseek`, `fseek`/`ftell`/`fgetpos`/`fsetpos`, `ungetc`, errno for failed opens (`ENOENT`, `EEXIST`, `EISDIR`, `EACCES`, `EINVAL`), the 16-file limit, `remove`/`rename`, short kernel reads and writes completed, a refused write reported as `EIO`, `exit` flushing and closing open files, `stdin` (prompt flushed first, raw bytes), `freopen` of `stdin` and `stdout` |
 | `malloc_test.c` | `src/stdlib/malloc.c`: alignment, neighbour separation, coalescing, pool growth and release, direct page-run blocks, bad and double frees, `realloc`/`calloc`, exhaustion and failed `realloc`, a 200 000-round stress with `__malloc_info` consistency checks |
 | `malloc_threads_test.c` | The same heap under four concurrent pthreads (malloc/realloc/free, direct blocks), then a pool consistency check |
+
+## User program tests (`user/tests/`)
+
+The user programs themselves, and libk's console code, are tested on the host
+on top of the KoraOS libc, not the host's: the libc is compiled for the host
+as in its own tests (headers first on the include path, symbols renamed) and
+the kernel is the same fake one. libk's syscall stubs get a C twin,
+`libk_host.c`, which passes each call to the fake kernel; `libk_host_rename.h`
+renames them (`read` becomes `libk_read`) so they never meet a host function
+of the same name. A program's `printf`, its file streams and its raw `read`
+then all end in one fake console and one in-memory filesystem, which the test
+scripts and inspects. `tests/run-host-tests.sh` runs them; on their own:
+
+```bash
+tests/run-user-tests.sh
+```
+
+A test includes the program's source with `main` renamed (`#define main
+cp_main`), calls it, and flushes `stdout` before looking at the console,
+since `main` returns to the test instead of going through `exit`. Calls the
+fake kernel does not serve (spawn, waitpid, cwd, volumes) come to a handler
+in the test. Add `user/tests/<name>_test.c` and a `run_test <name>` line in
+the script. `tests/check-syscall-abi.py` keeps `libk_host.c` and the rename
+header in step with `user/libk/syscall.S`.
+
+| Test | Covers |
+|------|--------|
+| `libk_console_test.c` | `kgetline`: backspace, CR as newline, escape sequences and control bytes dropped, echo, typed-ahead input left queued, a full buffer, EOF. The flush rules: a prompt printed without a newline is on the console before `kgetline` reads and echoes, and a program's buffered text comes out before its child's (`spawn`, `spawn_flags`) |
+| `cp_test.c` | The actual `cp`: short reads and writes, an existing destination refused and left untouched, a refused write leaving a partial destination, a failing sync, missing and directory sources, usage; both files closed and one sync on every path |
+| `shell_input_test.c` | The actual shell, parser and main loop: fragmented reads, maximal complete lines, oversized-line draining, next-command preservation, 16/17-token boundary, terminated arguments, maximal assign target, quoted/escaped/empty tokens, literal operator provenance, malformed quoting, background jobs and their reaping, `@N` core pinning |
+
+## Console fd check
+
+```bash
+tests/check-console-fds.py
+```
+
+User programs reach the console through `stdin`, `stdout` and `stderr`, never
+through `read(0, ...)` or `write(1, ...)`: the console plan
+(`project_doc/console-plan.md`) turns a program's stdin and stdout into
+handles to a console, and only the streams will follow. The check scans
+`user/*.c`, `user/libk` and `tests/user` for a literal 0, 1 or 2 as the fd.
+It has a short list of lasting exceptions with their reasons, and a list of
+programs the migration to the libc has not reached yet; an entry that is no
+longer needed fails the check until it is removed, so that list only
+shrinks. `tests/run-host-tests.sh` runs it.
 
 ## Integer-only kernel check
 

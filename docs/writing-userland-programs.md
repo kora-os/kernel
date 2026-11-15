@@ -22,7 +22,11 @@ A program runs in EL0 with a deliberately small runtime:
   libk's inline helpers in
   [`user/libk/koraos.h`](../user/libk/koraos.h) (`kputs`, `kput_int`,
   `kstrlen`, `kstreq`) write straight to the console, unbuffered: call
-  `fflush(stdout)` before mixing them with `printf`. `koraos.h` includes
+  `fflush(stdout)` before mixing them with `printf`. libk flushes `stdout`
+  itself where the console changes hands: before `spawn` starts a child
+  (which writes to the console directly) and before `kgetline` reads and
+  echoes a line. A program that draws with escape sequences and no newline
+  ends each frame with `fflush(stdout)`. `koraos.h` includes
   `<stddef.h>`, `<stdio.h>`, `<stdlib.h>` and `<string.h>`. The KoraOS calls
   themselves are in [syscalls.md](syscalls.md).
 - **Floating point.** C code may use `float` and `double`: the kernel keeps
