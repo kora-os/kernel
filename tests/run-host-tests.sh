@@ -48,6 +48,7 @@ run_test() {
 }
 
 python3 "$ROOT/tests/check-syscall-abi.py" || failed=1
+python3 "$ROOT/tests/check-console-fds.py" || failed=1
 python3 "$ROOT/tests/run-write-image-tests.py" || failed=1
 python3 "$ROOT/tests/run-ramdisk-image-tests.py" || failed=1
 run_test blkdev src/fs/blkdev.c
