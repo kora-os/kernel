@@ -71,7 +71,7 @@ the QEMU smoke tests are the regression check, next to the host tests.
 
 | # | Theme | Status |
 |---|-------|--------|
-| 9 | Harness and flush rules: the host tests that compile `user/cp.c` and `user/shell.c` build against the libc and its fake kernel; `kgetline` and `spawn` flush `stdout` first; a CI check for literal console fds | planned |
+| 9 | Harness and flush rules: the host tests that compile `user/cp.c` and `user/shell.c` build against the libc and its fake kernel; `kgetline` and `spawn` flush `stdout` first; a CI check for literal console fds | done (#88) |
 | 10 | File tools on stdio: `cat`, `cp`, `ls`, `mkdir`, `mv`, `rm`, `rmdir`, `echo`, `hello`, `init`, `ps`, and `filetools.h`; errors go to `stderr` | planned |
 | 11 | Demos: `gfxdemo`, `termdemo`, `jobdemo`, `pindemo` | planned |
 | 12 | The shell: a mechanical migration, no redesign (koracli replaces it) | planned |
@@ -85,8 +85,10 @@ Rules for the migration, which come from the console plan
   a console instance, so programs use `stdin`, `stdout` and `stderr`, never
   `write(1, ...)` or `read(0, ...)`. `tests/check-console-fds.py` enforces it
   with a short allow-list: `kgetline` in libk, `fpprobe` (no libc call may
-  run between filling and checking its FP registers) and the blocking console
-  read in `threadprobe`.
+  run between filling and checking its FP registers, so it also starts its
+  child with the raw `libk_spawn_flags`) and the blocking console read in
+  `threadprobe`. Programs not migrated yet are listed there too, and the list
+  can only shrink.
 - **Errors go to `stderr`.** Both streams reach the same console today; the
   split is what lets the console plan decide later where `stderr` goes.
 - **No investment in line input.** Line editing, history and the raw/cooked

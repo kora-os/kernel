@@ -29,7 +29,11 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
 - User programs link the libc (`user/libc`, ISO C headers, entry point,
   malloc) and libk (`user/libk`, the KoraOS API). `tests/run-libc-tests.sh`
   cross-builds the libc, checks its link and headers and runs its host tests;
-  the plan is `project_doc/libc-plan.md`.
+  the plan is `project_doc/libc-plan.md`. `tests/run-user-tests.sh` runs the
+  host tests of the user programs (`user/tests`) on that libc and its fake
+  kernel. Programs use `stdin`, `stdout` and `stderr`, never fds 0, 1 and 2
+  (`tests/check-console-fds.py`), and flush `stdout` before the console
+  changes hands (libk's `spawn` and `kgetline` do).
 - FAT32 writes are developed on disposable QEMU images only: virt disks
   (`tests/run-qemu-write.py`) and raspi3b/raspi4b SD and raspi3b USB scratch
   drives from a `--storage-writable` build (`tests/run-qemu-storage-write.py`),
