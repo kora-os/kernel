@@ -322,6 +322,16 @@ context switching and threads, milestone 8 current directory and milestone 9
 writes. The kernel syscall ABI stays private. The steps, and the end goals
 they serve (the koracli shell and MicroPython), are in `libc-plan.md`.
 
+## Console and screen (proposal, no milestone number yet)
+
+The terminal leaves the kernel, on the AmigaOS model (`console.device` plus
+the `CON:` handler): the kernel keeps the hardware, an input event queue,
+message ports and a boot and panic text fallback; a console library in user
+space holds the escape parser, the cell grid, the renderer and the fonts; a
+screen manager task owns the screen and hosts the console instances programs
+use as stdin and stdout. It is the base for koracli and for an optional GUI.
+The design, its five steps and its open decisions are in `console-plan.md`.
+
 ## QEMU virt development platform
 
 An independent AArch64 virt target supports platform discovery, PL011/GICv2,
