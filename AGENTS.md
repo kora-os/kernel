@@ -13,6 +13,7 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
 - `docs/repository-guidelines.md` – coding style, directory layout, and contribution workflow.
 - `project_doc/virt-plan.md` – virt target milestones and delivery verification.
 - `project_doc/roadmap.md` – milestones 6 to 12: kernel heap, SMP scheduler and threads, volumes, FAT32 write, storage drivers, hotplug, libc.
+- `project_doc/console-plan.md` – proposal for the console and screen: input events, message ports, a user-space console library and a screen manager task; the base for koracli.
 - `project_doc/features.yaml` – feature status list read by the project website; update it in any PR that changes a feature's status, and run `tests/check-features.py`.
 
 ## Working Guidelines

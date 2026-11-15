@@ -107,6 +107,14 @@ categories:
         description: Lets the kernel host C++ code such as the Circle USB stack.
         completed: 2026-09-17
         prs: [13]
+      - id: message-ports
+        name: Message ports
+        status: planned
+        description: Queues that carry a pointer and a wake-up between tasks, so a write to a console reaches the task that draws it.
+      - id: boot-log
+        name: Boot log ring
+        status: planned
+        description: The kernel keeps its boot log in a ring buffer as well as on the serial line, for a log view on screen.
 
   - id: multitasking
     name: Multitasking
@@ -180,6 +188,15 @@ categories:
         description: A small native ISO C library on the KoraOS syscalls, the base for koracli and MicroPython.
         milestone: 12
         prs: [76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86]
+      - id: userland-on-libc
+        name: User programs on the C library
+        status: planned
+        description: The shell, the tools and the demos use stdio and the ISO C functions; libk keeps the KoraOS API only.
+        milestone: 12
+      - id: console-handles
+        name: Console handles
+        status: planned
+        description: A program's stdin and stdout are handles to a console instead of fixed file descriptors.
 
   - id: shell
     name: Shell
@@ -229,9 +246,21 @@ categories:
         status: wish
         description: A built-in BASIC interpreter in the home-computer tradition.
       - id: python
-        name: Python
-        status: wish
-        description: A Python interpreter usable from the shell.
+        name: MicroPython
+        status: planned
+        description: MicroPython as the built-in scripting language, with a kora module over the OS API.
+      - id: koracli
+        name: koracli
+        status: planned
+        description: A full-screen shell with a menu and a status bar.
+      - id: line-editing
+        name: Console line editing
+        status: planned
+        description: Line editing, history and a raw/cooked switch provided by the console to every program.
+      - id: break-key
+        name: Ctrl+C break
+        status: planned
+        description: Ctrl+C stops the program in the foreground of a console.
 
   - id: storage
     name: Storage and filesystems
@@ -341,6 +370,30 @@ categories:
         status: wish
         description: Use the VideoCore GPU for accelerated graphics.
         platforms: [rpi3, rpi4]
+      - id: console-library
+        name: Console library
+        status: planned
+        description: The terminal as a user-space library, with an escape parser, a cell grid and a renderer that draws into any surface.
+      - id: screen-manager
+        name: Screen manager
+        status: planned
+        description: A user task that owns the screen and the input queue and hosts the consoles programs run in.
+      - id: framebuffer-handoff
+        name: Framebuffer hand-off
+        status: planned
+        description: The kernel hands the framebuffer to one task and takes it back when that task exits or crashes.
+      - id: console-fonts
+        name: Console fonts
+        status: planned
+        description: Loadable fonts and Unicode text through a glyph provider, beyond the built-in 8x8 font.
+      - id: console-graphics
+        name: Console graphics layer
+        status: planned
+        description: Pixels and redefinable glyphs composited under the text of a console.
+      - id: gui
+        name: Graphical desktop
+        status: wish
+        description: An optional GUI that runs as an application and hosts consoles in its windows.
 
   - id: input
     name: Input and USB
@@ -385,6 +438,14 @@ categories:
         description: Plug and unplug USB devices while running.
         platforms: [rpi3, rpi4]
         milestone: 11
+      - id: input-events
+        name: Input events
+        status: planned
+        description: Keys and mouse reach user space as structured events instead of bytes.
+      - id: mouse
+        name: Mouse
+        status: planned
+        description: Mouse movement, buttons and wheel, also through xterm mouse reporting.
 
   - id: networking
     name: Networking
