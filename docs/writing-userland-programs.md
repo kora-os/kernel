@@ -16,7 +16,8 @@ A program runs in EL0 with a deliberately small runtime:
   `<errno.h>`, `<stdlib.h>` (conversions, `qsort`/`bsearch`, `rand`,
   `atexit`, the heap) and `<stdio.h>` (`printf` and friends, `fopen`,
   `fgets`, `fread`, `fwrite`, `fseek`, `remove`, `rename`; `stdout` is line
-  buffered, `exit` flushes and closes everything; no `scanf` yet). `stdin`
+  buffered, `stderr` is unbuffered but sends each `fprintf` in one write,
+  `exit` flushes and closes everything; no `scanf` yet). `stdin`
   is the raw console: no echo, and Enter arrives as `'\r'`. See
   [libc-plan.md](../project_doc/libc-plan.md) for what is still missing.
   libk's inline helpers in
