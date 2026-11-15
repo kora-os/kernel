@@ -36,7 +36,7 @@ static int read_command_line(void) {
             break;
         }
     }
-    kputs("shell: line too long\n");
+    fputs("shell: line too long\n", stderr);
     return 0;
 }
 
@@ -94,84 +94,70 @@ static int tokenize(char *text, char **argv) {
 }
 
 static void help(void) {
-    kputs("KoraOS shell commands:\n");
-    kputs("  help            show this text\n");
-    kputs("  exit            leave the shell\n");
-    kputs("  cd [path]       change directory, or print cwd\n");
-    kputs("  pwd             print current directory\n");
-    kputs("  volumes         list devices and volume labels\n");
-    kputs("  name:           change to a device, volume or assign\n");
-    kputs("  assign          list assigns\n");
-    kputs("  assign name target  assign an existing directory\n");
-    kputs("  assign name     remove an assign (sys: is fixed)\n");
-    kputs("  ls [path]       list a directory (default current)\n");
-    kputs("  cat <path>...   print file contents\n");
-    kputs("  cp/rm/mkdir/rmdir/mv  manage files (cp and mv preserve existing targets)\n");
-    kputs("  sync            flush writable volumes\n");
-    kputs("  quote paths containing spaces; backslash escapes the next character\n");
-    kputs("  <program> [args...]  run a program from c:\n");
-    kputs("  <program> [args...] &  run it in the background\n");
-    kputs("  <program> [args...] @N  run it on core N (with & too: ... @N &)\n");
-    kputs("  ps              list tasks and the core each runs on\n");
-    kputs("  kill <pid>      end a program (a background job)\n");
-    kputs("programs in /bin: hello, echo, gfxdemo, termdemo, jobdemo, pindemo, ls, cat\n");
-    kputs("  (try 'ls /bin')\n");
+    fputs("KoraOS shell commands:\n"
+          "  help            show this text\n"
+          "  exit            leave the shell\n"
+          "  cd [path]       change directory, or print cwd\n"
+          "  pwd             print current directory\n"
+          "  volumes         list devices and volume labels\n"
+          "  name:           change to a device, volume or assign\n"
+          "  assign          list assigns\n"
+          "  assign name target  assign an existing directory\n"
+          "  assign name     remove an assign (sys: is fixed)\n"
+          "  ls [path]       list a directory (default current)\n"
+          "  cat <path>...   print file contents\n"
+          "  cp/rm/mkdir/rmdir/mv  manage files (cp and mv preserve existing targets)\n"
+          "  sync            flush writable volumes\n"
+          "  quote paths containing spaces; backslash escapes the next character\n"
+          "  <program> [args...]  run a program from c:\n"
+          "  <program> [args...] &  run it in the background\n"
+          "  <program> [args...] @N  run it on core N (with & too: ... @N &)\n"
+          "  ps              list tasks and the core each runs on\n"
+          "  kill <pid>      end a program (a background job)\n"
+          "programs in /bin: hello, echo, gfxdemo, termdemo, jobdemo, pindemo, ls, cat\n"
+          "  (try 'ls /bin')\n",
+          stdout);
 }
 
 static void print_cwd(void) {
     if (getcwd(cwd_buffer, sizeof(cwd_buffer)) < 0) {
-        kputs("pwd: cannot read current directory\n");
+        fputs("pwd: cannot read current directory\n", stderr);
         return;
     }
-    kputs(cwd_buffer);
-    kputs("\n");
+    puts(cwd_buffer);
 }
 
 static void list_volumes(void) {
     struct volume_info info;
     int rc;
     for (unsigned i = 0; (rc = volume_info(i, &info)) == 1; i++) {
-        kputs(info.device);
-        kputs(": ");
-        kputs(info.label[0] ? info.label : "(unlabelled)");
-        if (info.flags & VOLUME_BOOT) {
-            kputs(" [boot]");
-        }
-        if (info.flags & VOLUME_READ_ONLY) {
-            kputs(" [read-only]");
-        }
-        kputs("\n");
+        printf("%s: %s%s%s\n", info.device, info.label[0] ? info.label : "(unlabelled)",
+               info.flags & VOLUME_BOOT ? " [boot]" : "",
+               info.flags & VOLUME_READ_ONLY ? " [read-only]" : "");
     }
     if (rc < 0) {
-        kputs("volumes: enumeration failed\n");
+        fputs("volumes: enumeration failed\n", stderr);
     }
 }
 
 static void assign_command(int argc, char **argv) {
     if (argc > 3) {
-        kputs("usage: assign [name [target]]\n");
+        fputs("usage: assign [name [target]]\n", stderr);
         return;
     }
     if (argc > 1) {
         if (assign(argv[1], argc == 3 ? argv[2] : (const char *)0) < 0) {
-            kputs("assign: cannot update ");
-            kputs(argv[1]);
-            kputs("\n");
+            fprintf(stderr, "assign: cannot update %s\n", argv[1]);
         }
         return;
     }
     int rc;
     for (unsigned i = 0; (rc = assign_info(i, &assign_buffer)) == 1; i++) {
-        kputs(assign_buffer.name);
-        kputs(": = ");
-        kputs(assign_buffer.target);
-        if (assign_buffer.flags & ASSIGN_IMMUTABLE) {
-            kputs(" [fixed]");
-        }
-        kputs("\n");
+        printf("%s: = %s%s\n", assign_buffer.name, assign_buffer.target,
+               assign_buffer.flags & ASSIGN_IMMUTABLE ? " [fixed]" : "");
     }
     if (rc < 0) {
-        kputs("assign: enumeration failed\n");
+        fputs("assign: enumeration failed\n", stderr);
     }
 }
 
@@ -184,54 +170,18 @@ static void kill_command(int argc, char **argv) {
         pid = pid * 10 + (*p - '0');
     }
     if (argc != 2 || *p != '\0' || pid <= 0) {
-        kputs("usage: kill <pid>\n");
+        fputs("usage: kill <pid>\n", stderr);
     } else if (kill(pid) < 0) {
-        kputs("kill: no such program: ");
-        kputs(argv[1]);
-        kputs("\n");
+        fprintf(stderr, "kill: no such program: %s\n", argv[1]);
     }
 }
 
 // Job lines go out in one write(): a job on another core, or on this one
 // between two writes, prints at the same time, and only a single write is
-// never split.
-static char job_line[64];
-static unsigned job_len;
-
-static void job_add(const char *s) {
-    while (*s && job_len < sizeof(job_line) - 1) {
-        job_line[job_len++] = *s++;
-    }
-}
-
-static void job_add_int(long v) {
-    char digits[24];
-    unsigned n = 0;
-    unsigned long u = v < 0 ? (unsigned long)-v : (unsigned long)v;
-    do {
-        digits[n++] = (char)('0' + u % 10);
-        u /= 10;
-    } while (u != 0);
-    if (v < 0) {
-        digits[n++] = '-';
-    }
-    while (n > 0 && job_len < sizeof(job_line) - 1) {
-        job_line[job_len++] = digits[--n];
-    }
-}
-
-static void job_put(void) {
-    write(1, job_line, job_len);
-    job_len = 0;
-}
-
+// never split. stdout is line buffered and empty when a job line starts, so
+// each printf is one write at its newline.
 static void print_job_end(int pid, const char *what, int code) {
-    job_add("[");
-    job_add_int(pid);
-    job_add(what);
-    job_add_int(code);
-    job_add("\n");
-    job_put();
+    printf("[%d%s%d\n", pid, what, code);
 }
 
 // Report background jobs that finished since the last prompt (reaping them).
@@ -248,7 +198,7 @@ static void reap_jobs(void) {
 // `echo '&'` and `echo a\&` print an ampersand.
 static int take_background(int *argc, char **argv) {
     char *last = argv[*argc - 1];
-    size_t len = kstrlen(last);
+    size_t len = strlen(last);
     if (literal_tokens[*argc - 1] || len == 0 || last[len - 1] != '&') {
         return 0;
     }
@@ -289,87 +239,83 @@ static int take_core(int *argc, char **argv) {
 }
 
 int main(void) {
-    kputs("\nKoraOS shell. Type 'help'.\n");
+    fputs("\nKoraOS shell. Type 'help'.\n", stdout);
 
     char *argv[MAX_ARGV];
 
     for (;;) {
         reap_jobs();
-        kputs("$ ");
+        fputs("$ ", stdout);  // no newline: kgetline flushes it
         if (!read_command_line()) {
             continue;
         }
 
         int argc = tokenize(line, argv);
         if (argc < 0) {
-            kputs(argc == -1 ? "shell: too many arguments\n" : "shell: invalid quoting\n");
+            fputs(argc == -1 ? "shell: too many arguments\n" : "shell: invalid quoting\n", stderr);
             continue;
         }
         if (argc == 0) {
             continue;
         }
 
-        if (kstreq(argv[0], "exit")) {
-            kputs("bye\n");
+        if (strcmp(argv[0], "exit") == 0) {
+            puts("bye");
             return 0;
         }
-        if (kstreq(argv[0], "help")) {
+        if (strcmp(argv[0], "help") == 0) {
             help();
             continue;
         }
 
-        if (kstreq(argv[0], "pwd")) {
+        if (strcmp(argv[0], "pwd") == 0) {
             if (argc == 1) {
                 print_cwd();
             } else {
-                kputs("usage: pwd\n");
+                fputs("usage: pwd\n", stderr);
             }
             continue;
         }
-        if (kstreq(argv[0], "cd")) {
+        if (strcmp(argv[0], "cd") == 0) {
             if (argc == 1) {
                 print_cwd();
             } else if (argc == 2) {
                 if (chdir(argv[1]) < 0) {
-                    kputs("cd: cannot change directory to ");
-                    kputs(argv[1]);
-                    kputs("\n");
+                    fprintf(stderr, "cd: cannot change directory to %s\n", argv[1]);
                 }
             } else {
-                kputs("usage: cd [path]\n");
+                fputs("usage: cd [path]\n", stderr);
             }
             continue;
         }
-        if (kstreq(argv[0], "volumes")) {
+        if (strcmp(argv[0], "volumes") == 0) {
             if (argc == 1) {
                 list_volumes();
             } else {
-                kputs("usage: volumes\n");
+                fputs("usage: volumes\n", stderr);
             }
             continue;
         }
-        if (kstreq(argv[0], "sync")) {
+        if (strcmp(argv[0], "sync") == 0) {
             if (argc != 1) {
-                kputs("usage: sync\n");
+                fputs("usage: sync\n", stderr);
             } else if (sync() < 0) {
-                kputs("sync: failed\n");
+                fputs("sync: failed\n", stderr);
             }
             continue;
         }
-        if (kstreq(argv[0], "assign")) {
+        if (strcmp(argv[0], "assign") == 0) {
             assign_command(argc, argv);
             continue;
         }
-        if (kstreq(argv[0], "kill")) {
+        if (strcmp(argv[0], "kill") == 0) {
             kill_command(argc, argv);
             continue;
         }
-        size_t command_len = kstrlen(argv[0]);
+        size_t command_len = strlen(argv[0]);
         if (argc == 1 && command_len > 1 && argv[0][command_len - 1] == ':') {
             if (chdir(argv[0]) < 0) {
-                kputs("cd: cannot change directory to ");
-                kputs(argv[0]);
-                kputs("\n");
+                fprintf(stderr, "cd: cannot change directory to %s\n", argv[0]);
             }
             continue;
         }
@@ -380,30 +326,22 @@ int main(void) {
         }
         int core = take_core(&argc, argv);
         if (core == -2) {
-            kputs("shell: @N needs a core number, e.g. @1\n");
+            fputs("shell: @N needs a core number, e.g. @1\n", stderr);
             continue;
         }
         int flags = (background ? SPAWN_NOWAIT : 0) | (core >= 0 ? SPAWN_CORE(core) : 0);
         int pid = spawn_flags(argv[0], argc, argv, flags);
         if (pid < 0) {
             if (core >= 0) {
-                kputs("shell: cannot run ");
-                kputs(argv[0]);
-                kputs(" on cpu ");
-                kput_int(core);
-                kputs(" (no such program, or no such core)\n");
+                fprintf(stderr, "shell: cannot run %s on cpu %d (no such program, or no such core)\n",
+                        argv[0], core);
             } else {
-                kputs("shell: no such program: ");
-                kputs(argv[0]);
-                kputs("\n");
+                fprintf(stderr, "shell: no such program: %s\n", argv[0]);
             }
             continue;
         }
         if (background) {
-            job_add("[");
-            job_add_int(pid);
-            job_add("] started\n");
-            job_put();
+            printf("[%d] started\n", pid);
             continue;
         }
         print_job_end(pid, "] exited with ", wait(pid));

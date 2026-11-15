@@ -41,8 +41,8 @@ static int kernel_spawn(const char *name, int argc, char *const argv[], int flag
     last_argc = argc;
     last_spawn_flags = flags;
     last_argument_terminated = argc > 0 && strcmp(argv[argc - 1], "a") == 0;
-    if ((flags & 0xf00) == SPAWN_CORE(9)) {
-        return -1;  // no such core
+    if ((flags & 0xf00) == SPAWN_CORE(9) || strcmp(name, "nosuch") == 0) {
+        return -1;  // no such core, or no such program
     }
     write(1, "<", 1);
     write(1, name, strlen(name));
@@ -78,9 +78,26 @@ static long kernel(long number, long a0, long a1, long a2, long a3) {
     case SYS_ASSIGN:
         return kernel_assign((const char *)a0, (const char *)a1);
     case SYS_CHDIR:
-    case SYS_VOLUME_INFO:  // no volumes
-    case SYS_ASSIGN_INFO:  // no assigns
-        return 0;
+        return strncmp((const char *)a0, "nowhere", 7) == 0 ? -1 : 0;
+    case SYS_VOLUME_INFO: {
+        static const struct volume_info volumes[] = {
+            {"sd0", "KORA", VOLUME_BOOT},
+            {"usb0", "", VOLUME_READ_ONLY},
+        };
+        if (a0 > 1) return 0;
+        *(struct volume_info *)a1 = volumes[a0];
+        return 1;
+    }
+    case SYS_ASSIGN_INFO: {
+        struct assign_info *info = (struct assign_info *)a1;
+        if (a0 > 0) return 0;
+        strcpy(info->name, "sys");
+        strcpy(info->target, "boot:/");
+        info->flags = ASSIGN_IMMUTABLE;
+        return 1;
+    }
+    case SYS_KILL:
+        return a0 == 999 ? -1 : 0;
     default:
         return -1;
     }
@@ -117,6 +134,10 @@ static bool output_contains(const char *needle) {
     fflush(stdout);
     return strstr(fake_output(1, NULL), needle) != NULL;
 }
+// Diagnostics go to stderr, and never to stdout as well.
+static bool error_contains(const char *needle) {
+    return strstr(fake_output(2, NULL), needle) != NULL && !output_contains(needle);
+}
 static void fragmented_reads(void) {
     reset();
     append("echo a\nexit\n");
@@ -140,7 +161,7 @@ static void line_boundaries(void) {
     fill('a', LINE_MAX + 133);
     append("\n");
     append("echo a\nexit\n");
-    CHECK(read_command_line() == 0 && output_contains("shell: line too long"),
+    CHECK(read_command_line() == 0 && error_contains("shell: line too long"),
           "oversized line drained and rejected");
     CHECK(read_command_line() == 1 && strcmp(line, "echo a\n") == 0,
           "draining leaves subsequent command intact");
@@ -158,7 +179,7 @@ static void drained_line_not_dispatched(void) {
     append("\necho a\nexit\n");
     CHECK(shell_test_main() == 0 && spawn_calls == 1 && last_argc == 2,
           "oversized command never dispatches its prefix and following command runs once");
-    CHECK(output_contains("shell: line too long"), "dispatch path reports drained line");
+    CHECK(error_contains("shell: line too long"), "dispatch path reports drained line");
 }
 static void argument_boundaries(void) {
     reset();
@@ -167,7 +188,7 @@ static void argument_boundaries(void) {
     append("\necho a\nexit\n");
     CHECK(shell_test_main() == 0 && spawn_calls == 1 && last_argc == 2,
           "seventeenth token rejected without dispatch, next command runs");
-    CHECK(output_contains("shell: too many arguments"), "excess arguments diagnostic");
+    CHECK(error_contains("shell: too many arguments"), "excess arguments diagnostic");
     reset();
     append("echo");
     for (unsigned i = 0; i < 15; i++) append(" a");
@@ -212,7 +233,7 @@ static void quoted_tokens(void) {
     }
     reset();
     append("echo 'unterminated\necho a\nexit\n");
-    CHECK(shell_test_main() == 0 && spawn_calls == 1 && output_contains("shell: invalid quoting"),
+    CHECK(shell_test_main() == 0 && spawn_calls == 1 && error_contains("shell: invalid quoting"),
           "malformed quoting never dispatches its prefix and next command runs");
 }
 static void background_jobs(void) {
@@ -255,12 +276,91 @@ static void core_pinning(void) {
     reset();
     append("echo a @x\necho a @\necho a @12345\nexit\n");
     CHECK(shell_test_main() == 0 && spawn_calls == 0 &&
-          output_contains("shell: @N needs a core number"), "malformed @N rejected, nothing run");
+          error_contains("shell: @N needs a core number"), "malformed @N rejected, nothing run");
     reset();
     append("echo a @9\nexit\n");
     CHECK(shell_test_main() == 0 && spawn_calls == 1 &&
-          output_contains("shell: cannot run echo on cpu 9"), "spawn failure on a pinned core reported");
+          error_contains("shell: cannot run echo on cpu 9"), "spawn failure on a pinned core reported");
+}
+
+// What the screen shows for a short session: the echo of what was typed, the
+// child's own output, and the shell's lines, in that order.
+static void session_transcript(void) {
+    reset();
+    append("echo a\necho a &\nexit\n");
+    CHECK(shell_test_main() == 0, "a short session");
+    fflush(stdout);
+    CHECK(strcmp(fake_screen(NULL), "\nKoraOS shell. Type 'help'.\n"
+                                    "$ echo a\n"
+                                    "<echo>\n"
+                                    "[123] exited with 0\n"
+                                    "$ echo a &\n"
+                                    "<echo>\n"
+                                    "[124] started\n"
+                                    "[124] done, exit 7\n"
+                                    "$ exit\n"
+                                    "bye\n") == 0,
+          "prompt, typed line, child output and job lines in order");
+    CHECK(strcmp(fake_output(2, NULL), "") == 0, "nothing on stderr");
+}
+
+static void builtins(void) {
+    reset();
+    append("pwd\ncd\ncd there\nother:\nvolumes\nassign\nsync\nkill 124\nexit\n");
+    CHECK(shell_test_main() == 0 && spawn_calls == 0, "built-ins run no program");
+    fflush(stdout);
+    CHECK(strcmp(fake_screen(NULL), "\nKoraOS shell. Type 'help'.\n"
+                                    "$ pwd\n"
+                                    "boot:\n"
+                                    "$ cd\n"
+                                    "boot:\n"
+                                    "$ cd there\n"
+                                    "$ other:\n"
+                                    "$ volumes\n"
+                                    "sd0: KORA [boot]\n"
+                                    "usb0: (unlabelled) [read-only]\n"
+                                    "$ assign\n"
+                                    "sys: = boot:/ [fixed]\n"
+                                    "$ sync\n"
+                                    "$ kill 124\n"
+                                    "$ exit\n"
+                                    "bye\n") == 0,
+          "pwd, cd, volumes and assign print their listings");
+    CHECK(strcmp(fake_output(2, NULL), "") == 0 && fake_syncs() == 1, "quietly, and sync syncs");
+
+    reset();
+    append("help\nexit\n");
+    CHECK(shell_test_main() == 0 && output_contains("$ help\nKoraOS shell commands:\n  help ") &&
+              output_contains("  (try 'ls /bin')\n$ exit\n"),
+          "help prints the command list");
+}
+
+static void builtin_errors(void) {
+    reset();
+    append("pwd x\ncd a b\ncd nowhere\nnowhere:\nvolumes x\nsync x\nassign a b c\n"
+           "kill\nkill 12x\nkill 999\nnosuch\nexit\n");
+    fake_fail_sync(1);
+    CHECK(shell_test_main() == 0, "bad built-in commands");
+    CHECK(strcmp(fake_output(2, NULL), "usage: pwd\n"
+                                       "usage: cd [path]\n"
+                                       "cd: cannot change directory to nowhere\n"
+                                       "cd: cannot change directory to nowhere:\n"
+                                       "usage: volumes\n"
+                                       "usage: sync\n"
+                                       "usage: assign [name [target]]\n"
+                                       "usage: kill <pid>\n"
+                                       "usage: kill <pid>\n"
+                                       "kill: no such program: 999\n"
+                                       "shell: no such program: nosuch\n") == 0,
+          "each gets its usage or its reason, on stderr");
+    CHECK(!output_contains("usage") && !output_contains("cannot") && fake_syncs() == 0,
+          "and nothing of it on stdout");
+    reset();
+    append("sync\nexit\n");
+    fake_fail_sync(1);
+    CHECK(shell_test_main() == 0 && error_contains("sync: failed\n"), "a failed sync is reported");
 }
 
 TEST_MAIN(fragmented_reads, line_boundaries, drained_line_not_dispatched,
-          argument_boundaries, maximal_assign_line, quoted_tokens, background_jobs, core_pinning)
+          argument_boundaries, maximal_assign_line, quoted_tokens, background_jobs, core_pinning,
+          session_transcript, builtins, builtin_errors)
