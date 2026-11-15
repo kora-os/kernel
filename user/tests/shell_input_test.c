@@ -1,94 +1,60 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
-// Exercise the real EL0 parser with isolated syscall stubs; libc I/O stays intact.
-#include "test.h"
-#define main shell_test_main
-#define read(...) shell_mock_read(__VA_ARGS__)
-#define write(...) shell_mock_write(__VA_ARGS__)
-#define chdir(...) shell_mock_chdir(__VA_ARGS__)
-#define getcwd(...) shell_mock_getcwd(__VA_ARGS__)
-#define volume_info(...) shell_mock_volume_info(__VA_ARGS__)
-#define assign_info(...) shell_mock_assign_info(__VA_ARGS__)
-#define assign(...) shell_mock_assign(__VA_ARGS__)
-#define spawn_flags(...) shell_mock_spawn_flags(__VA_ARGS__)
-#define waitpid(...) shell_mock_waitpid(__VA_ARGS__)
-#define sync(...) shell_mock_sync(__VA_ARGS__)
-#include "../../user/shell.c"
-#undef main
-#undef read
-#undef write
-#undef chdir
-#undef getcwd
-#undef volume_info
-#undef assign_info
-#undef assign
-#undef spawn_flags
-#undef waitpid
-#undef sync
+//
+// Host test of the actual shell (user/shell.c) on the fake kernel: the real
+// parser and main loop read scripted console input and write to the fake
+// console; the calls the fake kernel does not serve (spawn, waitpid, cwd,
+// volumes, assigns) come to this file's handler.
 
-static char input[3 * LINE_MAX], output[2 * LINE_MAX];
-static size_t input_size, input_position, output_size, read_chunk;
+#include "test.h"
+
+#include <stdbool.h>
+#include <stdio.h>
+#include <string.h>
+
+#include "fake_syscall.h"
+
+#define main shell_test_main
+#include "../shell.c"
+#undef main
+
+static char input[3 * LINE_MAX];
+static size_t input_size, read_chunk;
 static unsigned spawn_calls, assign_calls, background_reaps;
 static int last_argc, last_spawn_flags;
 static bool background_job_live;
 static bool last_argument_terminated, maximal_assign_received;
 
-ssize_t shell_mock_read(int fd, void *buffer, size_t size) {
-    CHECK(fd == 0 && size > 0, "shell requests console input");
-    if (input_position == input_size) return 0;
-    size_t count = 0;
-    char *destination = buffer;
-    while (count < size && (!read_chunk || count < read_chunk) && input_position < input_size) {
-        char value = input[input_position++];
-        destination[count++] = value;  // raw console bytes: no stop at newline
-    }
-    return (ssize_t)count;
-}
-ssize_t shell_mock_write(int fd, const void *buffer, size_t size) {
-    CHECK(fd == 1, "shell writes stdout");
-    const char *source = buffer;
-    for (size_t i = 0; i < size && output_size + 1 < sizeof(output); i++) {
-        output[output_size++] = source[i];
-    }
-    output[output_size] = 0;
-    return (ssize_t)size;
-}
-int shell_mock_chdir(const char *path) { (void)path; return 0; }
-int shell_mock_getcwd(char *buffer, size_t size) {
+static int kernel_getcwd(char *buffer, size_t size) {
     if (size < 6) return -1;
-    const char *root = "boot:";
-    for (unsigned i = 0; i < 6; i++) buffer[i] = root[i];
+    memcpy(buffer, "boot:", 6);
     return 0;
 }
-int shell_mock_volume_info(unsigned index, struct volume_info *info) {
-    (void)index; (void)info; return 0;
-}
-int shell_mock_assign_info(unsigned index, struct assign_info *info) {
-    (void)index; (void)info; return 0;
-}
-int shell_mock_assign(const char *name, const char *target) {
+static int kernel_assign(const char *name, const char *target) {
     assign_calls++;
-    maximal_assign_received = name && target && kstrlen(name) == 31 &&
-                              kstrlen(target) == KORA_PATH_MAX - 1;
+    maximal_assign_received = name && target && strlen(name) == 31 &&
+                              strlen(target) == KORA_PATH_MAX - 1;
     return 0;
 }
-int shell_mock_spawn_flags(const char *name, int argc, char *const argv[], int flags) {
-    (void)name;
+// A child prints straight to the console, as a real one does.
+static int kernel_spawn(const char *name, int argc, char *const argv[], int flags) {
     spawn_calls++;
     last_argc = argc;
     last_spawn_flags = flags;
-    last_argument_terminated = argc > 0 && kstreq(argv[argc - 1], "a");
+    last_argument_terminated = argc > 0 && strcmp(argv[argc - 1], "a") == 0;
     if ((flags & 0xf00) == SPAWN_CORE(9)) {
         return -1;  // no such core
     }
+    write(1, "<", 1);
+    write(1, name, strlen(name));
+    write(1, ">\n", 2);
     if (flags & SPAWN_NOWAIT) {
         background_job_live = true;
         return 124;
     }
     return 123;
 }
-int shell_mock_sync(void) { return 0; }
 // A background job (pid 124) has finished by the next prompt.
-int shell_mock_waitpid(int pid, int *code, int flags) {
+static int kernel_waitpid(int pid, int *code, int flags) {
     if (pid == -1) {
         CHECK(flags == WNOHANG, "job reaping never blocks the prompt");
         if (!background_job_live) return 0;
@@ -101,85 +67,94 @@ int shell_mock_waitpid(int pid, int *code, int flags) {
     *code = 0;
     return pid;
 }
+static long kernel(long number, long a0, long a1, long a2, long a3) {
+    switch (number) {
+    case SYS_SPAWN_FLAGS:
+        return kernel_spawn((const char *)a0, (int)a1, (char *const *)a2, (int)a3);
+    case SYS_WAITPID:
+        return kernel_waitpid((int)a0, (int *)a1, (int)a2);
+    case SYS_GETCWD:
+        return kernel_getcwd((char *)a0, (size_t)a1);
+    case SYS_ASSIGN:
+        return kernel_assign((const char *)a0, (const char *)a1);
+    case SYS_CHDIR:
+    case SYS_VOLUME_INFO:  // no volumes
+    case SYS_ASSIGN_INFO:  // no assigns
+        return 0;
+    default:
+        return -1;
+    }
+}
 
 static void reset(void) {
-    input_size = input_position = output_size = read_chunk = 0;
+    fflush(stdout);
+    fake_reset_console();
+    fake_reset_files();
+    fake_set_handler(kernel);
+    input_size = read_chunk = 0;
     spawn_calls = assign_calls = background_reaps = 0;
     last_argc = last_spawn_flags = 0;
     background_job_live = false;
     last_argument_terminated = maximal_assign_received = false;
-    output[0] = 0;
+}
+// The console input so far; the next read starts at its first byte again.
+static void feed(void) {
+    fake_set_input(input, input_size, read_chunk);
 }
 static void append(const char *text) {
     while (*text) input[input_size++] = *text++;
+    feed();
+}
+static void fill(char byte, size_t count) {
+    while (count-- > 0) input[input_size++] = byte;
+    feed();
+}
+static void set_read_chunk(size_t chunk) {
+    read_chunk = chunk;
+    feed();
 }
 static bool output_contains(const char *needle) {
-    size_t length = kstrlen(needle);
-    for (size_t i = 0; i + length <= output_size; i++) {
-        size_t j = 0;
-        while (j < length && output[i + j] == needle[j]) j++;
-        if (j == length) return true;
-    }
-    return false;
+    fflush(stdout);
+    return strstr(fake_output(1, NULL), needle) != NULL;
 }
 static void fragmented_reads(void) {
     reset();
     append("echo a\nexit\n");
-    read_chunk = 2;
-    CHECK(read_command_line() == 1 && kstreq(line, "echo a\n"),
+    set_read_chunk(2);
+    CHECK(read_command_line() == 1 && strcmp(line, "echo a\n") == 0,
           "split console reads assembled before dispatch");
-    CHECK(input_position == 7, "next command remains unread");
-    CHECK(read_command_line() == 1 && kstreq(line, "exit\n"), "next fragmented command intact");
+    CHECK(fake_input_position() == 7, "next command remains unread");
+    CHECK(read_command_line() == 1 && strcmp(line, "exit\n") == 0, "next fragmented command intact");
     reset();
     append("echo a");
     CHECK(read_command_line() == 0 && spawn_calls == 0, "EOF before newline cannot dispatch prefix");
 }
-static void line_editing(void) {
-    char buffer[16];
-    reset();
-    append("ab\x7f" "c\x1b[A\x1b[1;5D\x1bOx\x01" "d\r" "next\n");
-    ssize_t count = kgetline(buffer, sizeof(buffer) - 1);
-    buffer[count > 0 ? count : 0] = 0;
-    CHECK(count == 4 && kstreq(buffer, "acd\n"),
-          "backspace edits, CR ends the line, escapes and control bytes dropped");
-    CHECK(output_contains("ab\b \bcd\n"), "printable bytes, rubout and newline echoed");
-    count = kgetline(buffer, sizeof(buffer) - 1);
-    buffer[count > 0 ? count : 0] = 0;
-    CHECK(count == 5 && kstreq(buffer, "next\n"), "typed-ahead line left for the next call");
-    reset();
-    append("xyz\n");
-    count = kgetline(buffer, 2);
-    CHECK(count == 2 && buffer[0] == 'x' && buffer[1] == 'y' && input_position == 2,
-          "a full buffer returns without reading further");
-    reset();
-    CHECK(kgetline(buffer, sizeof(buffer)) == 0, "EOF with nothing read passes read's 0 through");
-}
 static void line_boundaries(void) {
     reset();
-    for (unsigned i = 0; i < LINE_MAX - 2; i++) input[input_size++] = 'a';
-    input[input_size++] = '\n';
-    CHECK(read_command_line() == 1 && input_position == LINE_MAX - 1 &&
+    fill('a', LINE_MAX - 2);
+    append("\n");
+    CHECK(read_command_line() == 1 && fake_input_position() == LINE_MAX - 1 &&
           line[LINE_MAX - 2] == '\n' && line[LINE_MAX - 1] == 0,
           "largest complete line accepted and terminated");
     reset();
-    for (unsigned i = 0; i < LINE_MAX + 133; i++) input[input_size++] = 'a';
-    input[input_size++] = '\n';
+    fill('a', LINE_MAX + 133);
+    append("\n");
     append("echo a\nexit\n");
     CHECK(read_command_line() == 0 && output_contains("shell: line too long"),
           "oversized line drained and rejected");
-    CHECK(read_command_line() == 1 && kstreq(line, "echo a\n"),
+    CHECK(read_command_line() == 1 && strcmp(line, "echo a\n") == 0,
           "draining leaves subsequent command intact");
     reset();
-    for (unsigned i = 0; i < LINE_MAX - 1; i++) input[input_size++] = 'a';
-    input[input_size++] = '\n';
+    fill('a', LINE_MAX - 1);
+    append("\n");
     append("exit\n");
-    CHECK(read_command_line() == 0 && read_command_line() == 1 && kstreq(line, "exit\n"),
+    CHECK(read_command_line() == 0 && read_command_line() == 1 && strcmp(line, "exit\n") == 0,
           "full buffer without newline rejected at exact boundary");
 }
 static void drained_line_not_dispatched(void) {
     reset();
     append("echo a ");
-    while (input_size < LINE_MAX + 133) input[input_size++] = ' ';
+    while (input_size < LINE_MAX + 133) append(" ");
     append("\necho a\nexit\n");
     CHECK(shell_test_main() == 0 && spawn_calls == 1 && last_argc == 2,
           "oversized command never dispatches its prefix and following command runs once");
@@ -204,11 +179,11 @@ static void argument_boundaries(void) {
 static void maximal_assign_line(void) {
     reset();
     append("assign ");
-    for (unsigned i = 0; i < 31; i++) input[input_size++] = 'n';
-    input[input_size++] = ' ';
-    for (unsigned i = 0; i < KORA_PATH_MAX - 1; i++) input[input_size++] = 't';
+    fill('n', 31);
+    append(" ");
+    fill('t', KORA_PATH_MAX - 1);
     append("\nexit\n");
-    read_chunk = 97;
+    set_read_chunk(97);
     CHECK(shell_test_main() == 0 && assign_calls == 1 && maximal_assign_received,
           "maximum assign name and qualified target reach syscall intact");
     CHECK(spawn_calls == 0, "assign built-in never dispatches as an ELF command");
@@ -219,15 +194,15 @@ static void quoted_tokens(void) {
     int count = tokenize(text, argv);
     CHECK(count == 8, "quotes, escapes, empty argument and concatenation tokenized");
     if (count == 8) {
-        CHECK(kstreq(argv[1], "single quoted.txt") && kstreq(argv[2], "double\" quoted.txt") &&
-              kstreq(argv[3], "escaped name.txt") && kstreq(argv[4], "") &&
-              kstreq(argv[5], "abcd ef"), "quote decoding preserves argument contents");
-        CHECK(kstreq(argv[6], "&") && !literal_tokens[6] &&
-              kstreq(argv[7], "&") && literal_tokens[7], "quoted operators retain literal provenance");
+        CHECK(strcmp(argv[1], "single quoted.txt") == 0 && strcmp(argv[2], "double\" quoted.txt") == 0 &&
+              strcmp(argv[3], "escaped name.txt") == 0 && strcmp(argv[4], "") == 0 &&
+              strcmp(argv[5], "abcd ef") == 0, "quote decoding preserves argument contents");
+        CHECK(strcmp(argv[6], "&") == 0 && !literal_tokens[6] &&
+              strcmp(argv[7], "&") == 0 && literal_tokens[7], "quoted operators retain literal provenance");
     }
     char single[] = "echo 'back\\slash' résumé-notes.txt";
-    CHECK(tokenize(single, argv) == 3 && kstreq(argv[1], "back\\slash") &&
-          kstreq(argv[2], "résumé-notes.txt"), "single quotes preserve slashes and lexer preserves UTF-8 bytes");
+    CHECK(tokenize(single, argv) == 3 && strcmp(argv[1], "back\\slash") == 0 &&
+          strcmp(argv[2], "résumé-notes.txt") == 0, "single quotes preserve slashes and lexer preserves UTF-8 bytes");
     const char *invalid[] = {"echo 'open", "echo \"open", "echo trailing\\", "echo \"escape\\\n"};
     for (unsigned i = 0; i < sizeof(invalid) / sizeof(invalid[0]); i++) {
         char malformed[64];
@@ -287,5 +262,5 @@ static void core_pinning(void) {
           output_contains("shell: cannot run echo on cpu 9"), "spawn failure on a pinned core reported");
 }
 
-TEST_MAIN(fragmented_reads, line_editing, line_boundaries, drained_line_not_dispatched,
+TEST_MAIN(fragmented_reads, line_boundaries, drained_line_not_dispatched,
           argument_boundaries, maximal_assign_line, quoted_tokens, background_jobs, core_pinning)

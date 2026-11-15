@@ -50,8 +50,6 @@ run_test() {
 python3 "$ROOT/tests/check-syscall-abi.py" || failed=1
 python3 "$ROOT/tests/run-write-image-tests.py" || failed=1
 python3 "$ROOT/tests/run-ramdisk-image-tests.py" || failed=1
-run_test cp
-run_test shell_input
 run_test blkdev src/fs/blkdev.c
 run_test term src/video/term.c
 run_test printf src/lib/printf.c
@@ -73,6 +71,7 @@ run_test user_mem src/proc/user_mem.c
 TEST_FLAGS=(-DLIBK_HOST_TEST -pthread -I "$ROOT/user/libk")
 run_test libk_threads user/libk/mutex.c user/libk/job.c
 TEST_FLAGS=()
+"$ROOT/tests/run-user-tests.sh" || failed=1
 "$ROOT/tests/run-filesystem-tests.sh" || failed=1
 "$ROOT/tests/run-fat-write-tests.sh" || failed=1
 "$ROOT/tests/run-fat-namespace-tests.sh" || failed=1

@@ -42,6 +42,18 @@ def main():
         seen.add("SYS_EXIT")
     if "__syscall2(SYS_RENAME," in (ROOT / "user/libc/src/stdio/remove.c").read_text():
         seen.add("SYS_RENAME")
+    # The host twin of the stubs (user/tests) defines and renames the same set.
+    stub_names = {name for name, _ in re.findall(r"^SYSCALL\s+(\w+),\s*(SYS_\w+)", stubs, re.M)}
+    host = (ROOT / "user/tests/libk_host.c").read_text()
+    host_names = set(re.findall(r"^\w[\w \*]*?\b(\w+)\([^;{\n]*\) \{$", host, re.M))
+    if host_names != stub_names:
+        errors.append(f"user/tests/libk_host.c differs from syscall.S: "
+                      f"missing={sorted(stub_names - host_names)}, extra={sorted(host_names - stub_names)}")
+    renames = set(re.findall(r"^#define (\w+) libk_\1$",
+                             (ROOT / "user/tests/libk_host_rename.h").read_text(), re.M))
+    plain = {name for name in stub_names if not name.startswith("libk_")}
+    if not plain <= renames:
+        errors.append(f"user/tests/libk_host_rename.h does not rename {sorted(plain - renames)}")
     if seen != set(user):
         errors.append(f"SVC stubs differ from ABI: missing={sorted(set(user) - seen)}, extra={sorted(seen - set(user))}")
     fat = constants("include/fs/fat32.h", "FAT32_O_")
