@@ -17,6 +17,9 @@ concurrency:
 
 jobs:
   rebuild:
+    # The deploy hook is a secret of the main repository: a fork has none,
+    # and its pushes to main must not fail for that.
+    if: github.repository == 'kora-os/kernel'
     runs-on: ubuntu-latest
     steps:
       - name: Trigger Cloudflare Pages build
