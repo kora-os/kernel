@@ -190,10 +190,11 @@ categories:
         prs: [76, 77, 78, 79, 80, 81, 82, 83, 84, 85, 86]
       - id: userland-on-libc
         name: User programs on the C library
-        status: in_progress
+        status: completed
         description: The shell, the tools and the demos use stdio and the ISO C functions; libk keeps the KoraOS API only.
         milestone: 12
-        prs: [88, 89, 90, 91, 92]
+        completed: 2026-11-15
+        prs: [88, 89, 90, 91, 92, 93]
       - id: console-handles
         name: Console handles
         status: planned

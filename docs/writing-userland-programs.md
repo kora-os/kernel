@@ -20,14 +20,14 @@ A program runs in EL0 with a deliberately small runtime:
   `exit` flushes and closes everything; no `scanf` yet). `stdin`
   is the raw console: no echo, and Enter arrives as `'\r'`. See
   [libc-plan.md](../project_doc/libc-plan.md) for what is still missing.
-  libk's inline helpers in
-  [`user/libk/koraos.h`](../user/libk/koraos.h) (`kputs`, `kput_int`,
-  `kstrlen`, `kstreq`) write straight to the console, unbuffered: call
-  `fflush(stdout)` before mixing them with `printf`. libk flushes `stdout`
-  itself where the console changes hands: before `spawn` starts a child
-  (which writes to the console directly) and before `kgetline` reads and
-  echoes a line. A program that draws with escape sequences and no newline
-  ends each frame with `fflush(stdout)`. `koraos.h` includes
+  Programs print through `stdout` and report errors on `stderr`; they never
+  name the console by file descriptor (`write(1, ...)`), which
+  `tests/check-console-fds.py` enforces. libk
+  ([`user/libk/koraos.h`](../user/libk/koraos.h)) flushes `stdout` where the
+  console changes hands: before `spawn` starts a child (which writes to the
+  console directly) and before `kgetline` reads and echoes a line. A program
+  that draws with escape sequences and no newline ends each frame with
+  `fflush(stdout)`. `koraos.h` includes
   `<stddef.h>`, `<stdio.h>`, `<stdlib.h>` and `<string.h>`. The KoraOS calls
   themselves are in [syscalls.md](syscalls.md).
 - **Floating point.** C code may use `float` and `double`: the kernel keeps
@@ -88,18 +88,17 @@ A program runs in EL0 with a deliberately small runtime:
 #include "libk/koraos.h"
 
 int main(int argc, char **argv) {
-    kputs("hello");
+    printf("hello");
     for (int i = 1; i < argc; i++) {
-        kputs(" ");
-        kputs(argv[i]);
+        printf(" %s", argv[i]);
     }
-    kputs("\n");
+    printf("\n");
     return 0;
 }
 ```
 
-`kputs` is just `write(1, s, kstrlen(s))`. Look at the existing programs for
-patterns: [`user/hello.c`](../user/hello.c) (minimal),
+`koraos.h` brings in `<stdio.h>`, and the line reaches the console at its
+newline, in one write. Look at the existing programs for patterns: [`user/hello.c`](../user/hello.c) (minimal),
 [`user/echo.c`](../user/echo.c) (argv), [`user/cat.c`](../user/cat.c) and
 [`user/ls.c`](../user/ls.c) (the file syscalls),
 [`user/init.c`](../user/init.c) (spawning), and
