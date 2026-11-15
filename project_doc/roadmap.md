@@ -322,6 +322,10 @@ context switching and threads, milestone 8 current directory and milestone 9
 writes. The kernel syscall ABI stays private. The steps, and the end goals
 they serve (the koracli shell and MicroPython), are in `libc-plan.md`.
 
+The existing user programs then move to the libc (the "Userland migration"
+steps of `libc-plan.md`): libk keeps the KoraOS API and loses the helpers the
+libc duplicates.
+
 ## Console and screen (proposal, no milestone number yet)
 
 The terminal leaves the kernel, on the AmigaOS model (`console.device` plus

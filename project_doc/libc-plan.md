@@ -56,7 +56,67 @@ from step 4, on-target checks in the QEMU smoke tests. CI runs both.
 | 7 | `FILE` with buffered `stdout`/`stderr`, `printf`/`puts`/`putchar`/`fputs`/`fflush`, flush at exit; the rest of `<string.h>` | done (#85) |
 | 8 | File streams: `fopen`/`fclose`/`fread`/`fwrite`/`fseek`/`ftell`/`fgets`/`fgetc`/`ungetc`, `remove`, `rename`; libk's `rename` moves to libc | done (#86) |
 
-After step 8: koracli on libc (separate design discussion), then MicroPython.
+## Userland migration (one PR each)
+
+With stdio in place, the existing user programs move from libk's helpers
+(`kputs`, `kput_int`, `kstrlen`, `kstreq`, raw `write(1, ...)`) to the libc.
+libk keeps what is KoraOS specific: the syscall stubs, threads, jobs, `spawn`
+and `wait`, the mutex and atomics, `uptime_us`, volumes and assigns, the
+framebuffer, `kgetline` and `kheap_info`. The POSIX-shaped calls (`open`,
+`read`, `write`, `stat`, `readdir`, ...) stay in libk as KoraOS calls; a POSIX
+layer (`<unistd.h>`, `<dirent.h>`) is a later decision, with MicroPython.
+
+No step touches the kernel. Program output stays byte for byte the same, so
+the QEMU smoke tests are the regression check, next to the host tests.
+
+| # | Theme | Status |
+|---|-------|--------|
+| 9 | Harness and flush rules: the host tests that compile `user/cp.c` and `user/shell.c` build against the libc and its fake kernel; `kgetline` and `spawn` flush `stdout` first; a CI check for literal console fds | planned |
+| 10 | File tools on stdio: `cat`, `cp`, `ls`, `mkdir`, `mv`, `rm`, `rmdir`, `echo`, `hello`, `init`, `ps`, and `filetools.h`; errors go to `stderr` | planned |
+| 11 | Demos: `gfxdemo`, `termdemo`, `jobdemo`, `pindemo` | planned |
+| 12 | The shell: a mechanical migration, no redesign (koracli replaces it) | planned |
+| 13 | Test probes in `tests/user`, except `fpprobe` | planned |
+| 14 | libk cleanup: remove the helpers the libc duplicates, shrink the host-test fallback in `koraos.h`, update the userland guide | planned |
+
+Rules for the migration, which come from the console plan
+(`console-plan.md`):
+
+- **No literal console fds in programs.** stdin and stdout become handles to
+  a console instance, so programs use `stdin`, `stdout` and `stderr`, never
+  `write(1, ...)` or `read(0, ...)`. `tests/check-console-fds.py` enforces it
+  with a short allow-list: `kgetline` in libk, `fpprobe` (no libc call may
+  run between filling and checking its FP registers) and the blocking console
+  read in `threadprobe`.
+- **Errors go to `stderr`.** Both streams reach the same console today; the
+  split is what lets the console plan decide later where `stderr` goes.
+- **No investment in line input.** Line editing, history and the raw/cooked
+  switch move to the screen manager, which deletes `kgetline`. Until then it
+  only gains a flush of `stdout`, and the libc's `stdin` stays as it is.
+- **Programs that draw with escape sequences flush explicitly.** `stdout` is
+  line buffered, so a cursor move or a colour change with no newline waits in
+  the buffer: finish a frame with `fflush(stdout)`.
+- **A program flushes `stdout` before it hands the console over**: before it
+  reads the console directly and before it starts a child. libk does this in
+  `kgetline` and `spawn`, the libc in `stdin`.
+
+## What the console plan will ask of libc
+
+None of this is part of the migration; each item belongs to the console step
+that needs it.
+
+| Console step | libc change |
+|---|---|
+| 3. Handles | The standard streams take their handles at startup instead of the fixed fds 0, 1 and 2 in `src/stdio/file.c`. With `isatty`, `stdout` is fully buffered when it is not a console. |
+| 4. Screen manager | In cooked mode `stdin` may read a whole line per call instead of one byte, and `fgets(stdin)` replaces `kgetline`. |
+| 4. Ctrl+C | Nothing while a break is a plain `kill`: the program loses at most its unflushed output. A break a program can catch (MicroPython's `KeyboardInterrupt`) needs `<signal.h>`. |
+| Fonts | Nothing for bitmap fonts. FreeType would need `<setjmp.h>` and part of `<math.h>`. |
+
+Unicode needs nothing: `printf` passes UTF-8 bytes through and the console
+library decodes them itself. The streams already take a lock, so the threads
+of a screen manager can share them.
+
+After the migration: the console and screen work (`console-plan.md`), koracli
+on top of it (separate design discussion), then MicroPython.
 
 ## Known kernel gaps (not part of these steps)
 
@@ -66,8 +126,8 @@ After step 8: koracli on libc (separate design discussion), then MicroPython.
 - No wall clock (`time()`), no `fstat`/`isatty` on an fd, no environment
   passed at spawn (`getenv` returns `NULL`).
 - The console is raw: `stdin` gets no echo and Enter arrives as `'\r'`, so
-  line input needs the program's own editing (libk's `kgetline`); the
-  terminal design belongs to koracli.
+  line input needs the program's own editing (libk's `kgetline`). The
+  terminal design is in `console-plan.md`.
 - `lseek` cannot go past the end of a file, so neither can `fseek`.
 - Not provided yet: the `scanf` family, `tmpfile`/`tmpnam`, `<time.h>`,
   `<math.h>`, `<setjmp.h>`, `<signal.h>`, `<locale.h>`, `<wchar.h>`.
