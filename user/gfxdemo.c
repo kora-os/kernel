@@ -5,16 +5,16 @@
 #include "libk/koraos.h"
 
 static unsigned int color_from_name(const char *name) {
-    if (kstreq(name, "red")) {
+    if (strcmp(name, "red") == 0) {
         return 0x00ff0000u;
     }
-    if (kstreq(name, "green")) {
+    if (strcmp(name, "green") == 0) {
         return 0x0000ff00u;
     }
-    if (kstreq(name, "blue")) {
+    if (strcmp(name, "blue") == 0) {
         return 0x000000ffu;
     }
-    if (kstreq(name, "white")) {
+    if (strcmp(name, "white") == 0) {
         return 0x00ffffffu;
     }
     return 0;  // unknown -> gradient
@@ -23,7 +23,7 @@ static unsigned int color_from_name(const char *name) {
 int main(int argc, char **argv) {
     struct fb_info fb;
     if (fb_info(&fb) != 0) {
-        kputs("gfxdemo: no framebuffer\n");
+        fputs("gfxdemo: no framebuffer\n", stderr);
         return 1;
     }
 
@@ -46,10 +46,6 @@ int main(int argc, char **argv) {
         }
     }
 
-    kputs("gfxdemo: painted ");
-    kput_int((long)fb.width);
-    kputs("x");
-    kput_int((long)fb.height);
-    kputs("\n");
+    printf("gfxdemo: painted %ux%u\n", fb.width, fb.height);
     return 0;
 }

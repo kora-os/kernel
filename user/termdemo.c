@@ -5,48 +5,24 @@
 #include "libk/koraos.h"
 
 static void out(const char *s) {
-    write(1, s, kstrlen(s));
-}
-
-static void out_uint(unsigned v) {
-    char buf[12];
-    int n = 0;
-    do {
-        buf[n++] = (char)('0' + v % 10);
-        v /= 10;
-    } while (v != 0);
-    char rev[12];
-    for (int i = 0; i < n; i++) {
-        rev[i] = buf[n - 1 - i];
-    }
-    write(1, rev, (size_t)n);
+    fputs(s, stdout);
 }
 
 // ESC [ <a> ; <b> <final>, or with b < 0 just ESC [ <a> <final>.
 static void csi2(unsigned a, int b, char final) {
-    out("\x1b[");
-    out_uint(a);
     if (b >= 0) {
-        out(";");
-        out_uint((unsigned)b);
+        printf("\x1b[%u;%d%c", a, b, final);
+    } else {
+        printf("\x1b[%u%c", a, final);
     }
-    write(1, &final, 1);
 }
 
 static void bg256(unsigned i) {
-    out("\x1b[48;5;");
-    out_uint(i);
-    out("m ");
+    printf("\x1b[48;5;%um ", i);
 }
 
 static void bg_rgb(unsigned r, unsigned g, unsigned b) {
-    out("\x1b[48;2;");
-    out_uint(r);
-    out(";");
-    out_uint(g);
-    out(";");
-    out_uint(b);
-    out("m ");
+    printf("\x1b[48;2;%u;%u;%um ", r, g, b);
 }
 
 int main(void) {
@@ -109,5 +85,8 @@ int main(void) {
 
     out("Cursor is back after the saved position (ESC 7 / ESC 8).\n");
     out("Shift+PgUp / Shift+PgDn scroll back through history.\n");
+    // stdout is line buffered and escape sequences carry no newline: a
+    // program that draws with them ends its frame with a flush.
+    fflush(stdout);
     return 0;
 }

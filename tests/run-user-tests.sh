@@ -32,6 +32,7 @@ USER_FLAGS=(
     "${LIBC_FLAGS[@]}"
     -I "$ROOT/user" -I "$ROOT/user/tests"
     -include "$ROOT/user/tests/libk_host_rename.h"
+    -DLIBK_HOST_TEST  # koraos.h: the test supplies uptime_us()
 )
 
 mkdir -p "$OUT/libc"
@@ -71,6 +72,7 @@ run_test() {
 
 run_test libk_console
 run_test tools
+run_test demos user/libk/job.c
 run_test cp
 run_test shell_input
 

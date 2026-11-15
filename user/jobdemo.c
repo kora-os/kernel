@@ -1,5 +1,5 @@
 /* jobdemo: the libk job API, TempleOS style. Renders the Mandelbrot set
- * (integer fixed point: user programs build without FP) once as a single job
+ * (in integer fixed point) once as a single job
  * on core 0, then split into one job per online core, and reports both times
  * and the speedup. Job j renders every n-th row from row j, so the cheap and
  * the expensive rows share out evenly. Draws to the framebuffer when there is
@@ -103,28 +103,6 @@ static long run(const struct picture *pic, unsigned jobs, unsigned cpus, unsigne
     return total;
 }
 
-// Result lines go out in one write(), like every multi-core program's should.
-static char line[160];
-static unsigned line_len;
-
-static void add(const char *s) {
-    while (*s && line_len < sizeof(line) - 1) {
-        line[line_len++] = *s++;
-    }
-}
-
-static void add_num(unsigned long v) {
-    char digits[24];
-    unsigned n = 0;
-    do {
-        digits[n++] = (char)('0' + v % 10);
-        v /= 10;
-    } while (v != 0);
-    while (n > 0 && line_len < sizeof(line) - 1) {
-        line[line_len++] = digits[--n];
-    }
-}
-
 int main(int argc, char **argv) {
     unsigned max_iter = 1024;
     if (argc > 1) {
@@ -135,7 +113,7 @@ int main(int argc, char **argv) {
         }
     }
     if (argc > 2 || max_iter < 16 || max_iter > 4096) {
-        kputs("usage: jobdemo [iterations]   (16 to 4096, default 1024)\n");
+        fputs("usage: jobdemo [iterations]   (16 to 4096, default 1024)\n", stderr);
         return 2;
     }
     struct sysinfo info;
@@ -159,29 +137,12 @@ int main(int argc, char **argv) {
     long one = run(&pic, 1, cpus, &one_ms);
     long all = run(&pic, cpus, cpus, &all_ms);
     if (one < 0 || all < 0 || one != all) {
-        kputs(one < 0 || all < 0 ? "jobdemo: FAILED to queue the jobs\n"
-                                 : "jobdemo: FAILED, the renderings differ\n");
+        fputs(one < 0 || all < 0 ? "jobdemo: FAILED to queue the jobs\n"
+                                 : "jobdemo: FAILED, the renderings differ\n",
+              stderr);
         return 1;
     }
     unsigned long speedup = all_ms != 0 ? one_ms * 100 / all_ms : 100;
-    add("jobdemo: ");
-    add_num(pic.width);
-    add("x");
-    add_num(pic.height);
-    add(", ");
-    add_num(max_iter);
-    add(" iterations: 1 core ");
-    add_num(one_ms);
-    add(" ms, ");
-    add_num(cpus);
-    add(cpus == 1 ? " core " : " cores ");
-    add_num(all_ms);
-    add(" ms, speedup ");
-    add_num(speedup / 100);
-    add(".");
-    add_num(speedup / 10 % 10);
-    add_num(speedup % 10);
-    add("x");
     // Keep the picture on screen: save it, print, put it back.
     unsigned *saved = NULL;
     size_t words = (size_t)pic.height * pic.stride;
@@ -189,10 +150,13 @@ int main(int argc, char **argv) {
         for (size_t i = 0; i < words; i++) {
             saved[i] = pic.pixels[i];
         }
-        add(", press Enter");
     }
-    add("\n");
-    write(1, line, line_len);
+    // One line, so one write() once stdout sees the newline: no other
+    // program's output can land in the middle of it.
+    printf("jobdemo: %ux%u, %u iterations: 1 core %lu ms, %u %s %lu ms, speedup %lu.%02lux%s\n",
+           pic.width, pic.height, max_iter, one_ms, cpus, cpus == 1 ? "core" : "cores", all_ms,
+           speedup / 100, speedup % 100, saved != NULL ? ", press Enter" : "");
+    fflush(stdout);  // the terminal scrolls now, before the picture goes back
     if (saved != NULL) {
         for (size_t i = 0; i < words; i++) {
             pic.pixels[i] = saved[i];

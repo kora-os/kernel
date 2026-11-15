@@ -325,13 +325,17 @@ static inline int wait(int pid) {
 }
 
 /* Microseconds since boot, from the generic timer's virtual counter (readable
- * at EL0, no syscall). */
+ * at EL0, no syscall). Host tests (LIBK_HOST_TEST) supply their own clock. */
+#ifdef LIBK_HOST_TEST
+unsigned long uptime_us(void);
+#else
 static inline unsigned long uptime_us(void) {
     unsigned long count, freq;
     __asm__ volatile("isb; mrs %0, cntvct_el0" : "=r"(count));
     __asm__ volatile("mrs %0, cntfrq_el0" : "=r"(freq));
     return count / freq * 1000000u + count % freq * 1000000u / freq;
 }
+#endif
 
 /* Graphics */
 int fb_info(struct fb_info *out);
