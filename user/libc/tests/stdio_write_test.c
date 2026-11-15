@@ -56,6 +56,41 @@ static void test_unbuffered_stderr(void) {
     CHECK(fprintf(stderr, " %s=%d\n", "x", 5) == 5 && strcmp(err(), "oops x=5\n") == 0,
           "fprintf to stderr");
     CHECK(fputc('!', stderr) == '!' && strcmp(err(), "oops x=5\n!") == 0, "fputc to stderr");
+
+    // One message, one write: on a console shared with other programs a
+    // diagnostic then stays whole.
+    reset();
+    CHECK(fprintf(stderr, "%s: %s %s (%d)\n", "cp", "cannot open", "notes.txt", 7) == 30 &&
+              strcmp(err(), "cp: cannot open notes.txt (7)\n") == 0 && fake_writes(2) == 1,
+          "a formatted message to stderr is a single write");
+    CHECK(fputc('!', stderr) == '!' && fake_writes(2) == 2, "and stderr is unbuffered again after it");
+    reset();
+    char path[401];
+    memset(path, 'p', sizeof path - 1);
+    path[sizeof path - 1] = '\0';
+    CHECK(fprintf(stderr, "tool: %s\n", path) == 407 && strlen(err()) == 407 &&
+              strncmp(err(), "tool: ppp", 9) == 0 && err()[406] == '\n',
+          "a message longer than the borrowed buffer arrives whole");
+    CHECK(fake_writes(2) <= 4, "in a few writes (%u)", fake_writes(2));
+    reset();
+    fake_set_write_chunk(3);
+    CHECK(fprintf(stderr, "short %d writes\n", 12) == 16 &&
+              strcmp(err(), "short 12 writes\n") == 0,
+          "short writes of the message are completed");
+    reset();
+    fake_fail_writes(1);
+    errno = 0;
+    CHECK(fprintf(stderr, "lost %d\n", 1) == -1 && ferror(stderr) && errno == EIO,
+          "a failed write is reported by fprintf");
+    fake_fail_writes(0);
+    clearerr(stderr);
+    CHECK(fprintf(stderr, "back\n") == 5 && strcmp(err(), "back\n") == 0,
+          "and nothing of the lost message is left in the stream");
+    unsigned before = fake_writes(2);
+    errno = ENOENT;
+    perror("open");
+    CHECK(strncmp(err(), "back\nopen: ", 11) == 0 && fake_writes(2) == before + 1,
+          "perror is a single write too");
     CHECK(strcmp(out(), "") == 0, "stdout untouched");
 }
 
