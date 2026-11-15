@@ -37,10 +37,6 @@ ALLOWED = {
 
 # file -> the libc-plan.md step that migrates it.
 NOT_YET_MIGRATED = {
-    "user/cat.c": 10,
-    "user/echo.c": 10,
-    "user/hello.c": 10,
-    "user/ps.c": 10,
     "user/jobdemo.c": 11,
     "user/pindemo.c": 11,
     "user/termdemo.c": 11,

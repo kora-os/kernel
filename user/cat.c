@@ -1,29 +1,33 @@
 /* cat: print the contents of one or more files. Usage: cat <path>...
- * Exercises open()/read()/close() against the FAT32 filesystem.
+ * Reads through the libc's file streams, on the FAT32 filesystem.
  */
 #include "libk/koraos.h"
 
 static int cat_one(const char *path) {
-    int fd = open(path, O_RDONLY);
-    if (fd < 0) {
-        kputs("cat: cannot open ");
-        kputs(path);
-        kputs("\n");
+    FILE *file = fopen(path, "r");
+    if (file == NULL) {
+        fflush(stdout);  // what the files before it printed comes first
+        fprintf(stderr, "cat: cannot open %s\n", path);
         return 1;
     }
 
     char buf[256];
-    long n;
-    while ((n = read(fd, buf, sizeof(buf))) > 0) {
-        write(1, buf, (size_t)n);
+    size_t n;
+    while ((n = fread(buf, 1, sizeof(buf), file)) > 0) {
+        fwrite(buf, 1, n, stdout);
     }
-    close(fd);
-    return n < 0 ? 1 : 0;
+    int failed = ferror(file);
+    fclose(file);
+    if (failed) {  // a directory opens, but cannot be read
+        fflush(stdout);
+        fprintf(stderr, "cat: cannot read %s\n", path);
+    }
+    return failed ? 1 : 0;
 }
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        kputs("usage: cat <path>...\n");
+        fputs("usage: cat <path>...\n", stderr);
         return 1;
     }
     int rc = 0;

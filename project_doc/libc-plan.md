@@ -72,7 +72,7 @@ the QEMU smoke tests are the regression check, next to the host tests.
 | # | Theme | Status |
 |---|-------|--------|
 | 9 | Harness and flush rules: the host tests that compile `user/cp.c` and `user/shell.c` build against the libc and its fake kernel; `kgetline` and `spawn` flush `stdout` first; a CI check for literal console fds | done (#88) |
-| 10 | File tools on stdio: `cat`, `cp`, `ls`, `mkdir`, `mv`, `rm`, `rmdir`, `echo`, `hello`, `init`, `ps`, and `filetools.h`; errors go to `stderr` | planned |
+| 10 | File tools on stdio: `cat`, `cp`, `ls`, `mkdir`, `mv`, `rm`, `rmdir`, `echo`, `hello`, `init`, `ps`, and `filetools.h`; errors go to `stderr` | done (#89) |
 | 11 | Demos: `gfxdemo`, `termdemo`, `jobdemo`, `pindemo` | planned |
 | 12 | The shell: a mechanical migration, no redesign (koracli replaces it) | planned |
 | 13 | Test probes in `tests/user`, except `fpprobe` | planned |
@@ -100,6 +100,12 @@ Rules for the migration, which come from the console plan
 - **A program flushes `stdout` before it hands the console over**: before it
   reads the console directly and before it starts a child. libk does this in
   `kgetline` and `spawn`, the libc in `stdin`.
+
+What a program costs on disk after the migration, measured in step 10: the
+stdio core adds about 10 KB to a program (`echo`, `hello`), and `printf`
+about 16 KB more (`ls`, `ps`, the file tools: 13 KB before, 40 KB after).
+The float conversions are 5 KB of that, so linking them only on demand
+would save little.
 
 ## What the console plan will ask of libc
 

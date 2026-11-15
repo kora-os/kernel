@@ -7,11 +7,11 @@
 #include "libk/koraos.h"
 
 int main(void) {
-    kputs("init: starting /bin/shell\n");
+    puts("init: starting /bin/shell");
 
     int pid = spawn("shell", 0, 0);
     if (pid < 0) {
-        kputs("init: cannot start /bin/shell\n");
+        fputs("init: cannot start /bin/shell\n", stderr);
         return 1;
     }
     return wait(pid);

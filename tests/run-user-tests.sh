@@ -70,6 +70,7 @@ run_test() {
 }
 
 run_test libk_console
+run_test tools
 run_test cp
 run_test shell_input
 

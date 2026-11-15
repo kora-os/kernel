@@ -6,10 +6,10 @@
 int main(int argc, char **argv) {
     for (int i = 1; i < argc; i++) {
         if (i > 1) {
-            write(1, " ", 1);
+            putchar(' ');
         }
-        write(1, argv[i], kstrlen(argv[i]));
+        fputs(argv[i], stdout);
     }
-    write(1, "\n", 1);
+    putchar('\n');
     return argc - 1;  // exit code = number of arguments echoed
 }

@@ -193,7 +193,7 @@ categories:
         status: in_progress
         description: The shell, the tools and the demos use stdio and the ISO C functions; libk keeps the KoraOS API only.
         milestone: 12
-        prs: [88]
+        prs: [88, 89]
       - id: console-handles
         name: Console handles
         status: planned

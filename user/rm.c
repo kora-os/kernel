@@ -2,7 +2,7 @@
 
 int main(int argc, char **argv) {
     if (argc < 2) {
-        kputs("usage: rm file...\n");
+        fputs("usage: rm file...\n", stderr);
         return 1;
     }
     int failed = 0;

@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Host test of the actual cp utility (user/cp.c) on the fake kernel: short
-// reads and writes, an existing destination, a write the disk refuses, a
-// failing sync, and sources that cannot be copied.
+// reads and writes under its file streams, an existing destination, a write
+// the disk refuses, a failing sync, and sources that cannot be copied.
 
 #include "test.h"
 
@@ -41,8 +41,9 @@ static int destination_is(const char *want, size_t want_len) {
     return data != NULL && len == want_len && memcmp(data, want, len) == 0;
 }
 
+// Messages go to stderr; cp prints nothing on stdout.
 static int said(const char *text) {
-    return strstr(fake_output(1, NULL), text) != NULL;
+    return strcmp(fake_output(2, NULL), text) == 0 && strcmp(fake_output(1, NULL), "") == 0;
 }
 
 static void test_partial_io(void) {

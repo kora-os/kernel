@@ -3,25 +3,20 @@
  */
 #include "libk/koraos.h"
 
+static struct dirent entry;  // 800 bytes: kept off the 4 KB stack
+
 int main(int argc, char **argv) {
     const char *path = (argc > 1) ? argv[1] : ".";
 
     int fd = open(path, O_RDONLY);
     if (fd < 0) {
-        kputs("ls: cannot open ");
-        kputs(path);
-        kputs("\n");
+        fprintf(stderr, "ls: cannot open %s\n", path);
         return 1;
     }
 
-    struct dirent de;
     int r;
-    while ((r = readdir(fd, &de)) == 1) {
-        kputs(de.name);
-        if (de.is_dir) {
-            kputs("/");
-        }
-        kputs("\n");
+    while ((r = readdir(fd, &entry)) == 1) {
+        printf("%s%s\n", entry.name, entry.is_dir ? "/" : "");
     }
     close(fd);
     return r < 0 ? 1 : 0;

@@ -87,7 +87,7 @@ static struct {
     char data[CONSOLE_CAPACITY];
     size_t len;
     unsigned writes;
-} console[3];
+} console[3];  // [1] and [2] per fd; [0] is both, in the order written
 static size_t write_chunk;
 static int writes_fail;
 static const char *input;
@@ -112,6 +112,11 @@ static long fake_write(int fd, const char *buf, size_t len) {
     __builtin_memcpy(console[fd].data + console[fd].len, buf, len);
     console[fd].len += len;
     console[fd].data[console[fd].len] = '\0';
+    size_t room = CONSOLE_CAPACITY - 1 - console[0].len;
+    size_t shown = len < room ? len : room;
+    __builtin_memcpy(console[0].data + console[0].len, buf, shown);
+    console[0].len += shown;
+    console[0].data[console[0].len] = '\0';
     unlock_state();
     return (long)len;
 }
@@ -139,6 +144,10 @@ const char *fake_output(int fd, size_t *len) {
         *len = console[fd].len;
     }
     return console[fd].data;
+}
+
+const char *fake_screen(size_t *len) {
+    return fake_output(0, len);
 }
 
 unsigned fake_writes(int fd) {
@@ -394,6 +403,14 @@ static long fs_syscall(long number, long a0, long a1, long a2) {
         st->is_dir = files[f].is_dir;
         return 0;
     }
+    case SYS_MKDIR: {
+        int f = find_file((const char *)a0);
+        if (f >= 0 || (f = new_file((const char *)a0)) < 0) {
+            return -1;
+        }
+        files[f].is_dir = 1;
+        return 0;
+    }
     case SYS_UNLINK:
     case SYS_RMDIR: {
         int f = find_file((const char *)a0);
@@ -516,6 +533,7 @@ long __syscall(long number, long a0, long a1, long a2, long a3) {
     case SYS_CLOSE:
     case SYS_LSEEK:
     case SYS_STAT:
+    case SYS_MKDIR:
     case SYS_UNLINK:
     case SYS_RMDIR:
     case SYS_RENAME: {

@@ -14,8 +14,8 @@
 //                                     optional short or failing writes
 //   SYS_READ from fd 0                scripted input (fake_set_input)
 //   SYS_OPEN, CLOSE, READ, WRITE,     an in-memory filesystem of flat paths
-//   LSEEK, STAT, UNLINK, RMDIR,       with the kernel's rules: open flag
-//   RENAME (fds 3 and up)             checks, no seeking past the end, 16
+//   LSEEK, STAT, MKDIR, UNLINK,       with the kernel's rules: open flag
+//   RMDIR, RENAME (fds 3 and up)      checks, no seeking past the end, 16
 //                                     fds, read-only files; optional short
 //                                     reads and writes and failing writes
 //   SYS_SYNC                          counted, with an optional failure
@@ -58,6 +58,8 @@ int fake_exit_status(void);
 // SYS_WRITE calls. fake_reset_console() clears both, the input and the
 // write limits.
 const char *fake_output(int fd, size_t *len);
+// fd 1 and 2 together, in the order the writes arrived: what the screen shows.
+const char *fake_screen(size_t *len);
 unsigned fake_writes(int fd);
 void fake_reset_console(void);
 // Each SYS_WRITE takes at most `n` bytes (0: no limit), like a short write.

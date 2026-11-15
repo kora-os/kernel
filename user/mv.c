@@ -2,7 +2,7 @@
 
 int main(int argc, char **argv) {
     if (argc != 3) {
-        kputs("usage: mv source new-destination\n");
+        fputs("usage: mv source new-destination\n", stderr);
         return 1;
     }
     int failed = rename(argv[1], argv[2]) < 0;

@@ -17,16 +17,7 @@ const char *messages[] = {
 
 static volatile int which = 0;
 
-static size_t str_len(const char *s) {
-    size_t n = 0;
-    while (s[n]) {
-        n++;
-    }
-    return n;
-}
-
 int main(void) {
-    const char *msg = messages[which];
-    write(1, msg, str_len(msg));
+    fputs(messages[which], stdout);
     return 0;
 }
