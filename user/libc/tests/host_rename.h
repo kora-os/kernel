@@ -91,6 +91,12 @@
 #define fprintf kora_fprintf
 #define vprintf kora_vprintf
 #define vfprintf kora_vfprintf
+#define scanf kora_scanf
+#define fscanf kora_fscanf
+#define sscanf kora_sscanf
+#define vscanf kora_vscanf
+#define vfscanf kora_vfscanf
+#define vsscanf kora_vsscanf
 #define fflush kora_fflush
 #define setvbuf kora_setvbuf
 #define setbuf kora_setbuf

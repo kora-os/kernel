@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // <stdio.h> (C11 7.21): files and streams, character and block I/O,
-// formatted output, positioning, remove and rename. stdout is line buffered,
-// stderr unbuffered, stdin reads one byte at a time (the console is
+// formatted output and input, positioning, remove and rename. stdout is line
+// buffered, stderr unbuffered, stdin reads one byte at a time (the console is
 // interactive and raw: no echo, Enter is '\r'); exit() flushes and closes
-// everything. Not provided: the scanf family, tmpfile and tmpnam. The
+// everything. Not provided: tmpfile and tmpnam, and in the scanf family the
+// wide-character conversions (%lc, %ls, %l[). The
 // va_list parameters are spelled __builtin_va_list so this header does not
 // define va_list itself, as the standard asks.
 #ifndef LIBC_STDIO_H
@@ -69,6 +70,15 @@ int vsnprintf(char *restrict s, size_t n, const char *restrict format, __builtin
     _LIBC_PRINTF(3, 0);
 int vsprintf(char *restrict s, const char *restrict format, __builtin_va_list arg)
     _LIBC_PRINTF(2, 0);
+
+int fscanf(FILE *restrict stream, const char *restrict format, ...) _LIBC_SCANF(2, 3);
+int scanf(const char *restrict format, ...) _LIBC_SCANF(1, 2);
+int sscanf(const char *restrict s, const char *restrict format, ...) _LIBC_SCANF(2, 3);
+int vfscanf(FILE *restrict stream, const char *restrict format, __builtin_va_list arg)
+    _LIBC_SCANF(2, 0);
+int vscanf(const char *restrict format, __builtin_va_list arg) _LIBC_SCANF(1, 0);
+int vsscanf(const char *restrict s, const char *restrict format, __builtin_va_list arg)
+    _LIBC_SCANF(2, 0);
 
 int fgetc(FILE *stream);
 char *fgets(char *restrict s, int n, FILE *restrict stream);
