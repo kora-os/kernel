@@ -326,6 +326,12 @@ The existing user programs then move to the libc (the "Userland migration"
 steps of `libc-plan.md`): libk keeps the KoraOS API and loses the helpers the
 libc duplicates.
 
+The rest of the ISO library follows (`<setjmp.h>`, `<signal.h>`, `<math.h>`,
+the `scanf` family and `<time.h>`), again without touching the kernel. A
+break a program can catch and a wall clock for `time()` are the two parts
+that need it; they are described in `libc-plan.md` and wait for the console
+work.
+
 ## Console and screen (proposal, no milestone number yet)
 
 The terminal leaves the kernel, on the AmigaOS model (`console.device` plus
