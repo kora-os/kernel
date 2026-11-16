@@ -135,13 +135,6 @@ void tty_serial_init(void) {
     uart_rx_irq_enable(serial_isr);
 }
 
-void tty_scrollback(int halfpages) {
-    uint64_t flags = spin_lock_irqsave(&input_lock);
-    scroll_request += halfpages;
-    wait_queue_wake_all(&input_waiters);
-    spin_unlock_irqrestore(&input_lock, flags);
-}
-
 // Called with input_lock held; returns and clears the pending request.
 static int take_scroll_request(void) {
     int request = scroll_request;
