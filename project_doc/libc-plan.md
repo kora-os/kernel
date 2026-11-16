@@ -139,7 +139,7 @@ What steps 1 to 8 left out. None of these steps touches the kernel.
 |---|-------|--------|
 | 15 | `<setjmp.h>`; ISO `<signal.h>`: `signal`, `raise`, and `abort` raising `SIGABRT` | done (#95) |
 | 16 | `<math.h>`: the C99 functions, imported from musl's libm (MIT licence) | done (#96) |
-| 17 | `scanf` family: `sscanf`, `fscanf`, `scanf` and the `v` forms | planned |
+| 17 | `scanf` family: `sscanf`, `fscanf`, `scanf` and the `v` forms | done (#97) |
 | 18 | `<time.h>` without a wall clock: `clock`, `difftime`, `mktime`, `gmtime`, `localtime`, `asctime`, `ctime`, `strftime`; `time()` returns `(time_t)-1` | planned |
 
 Decisions:
@@ -168,7 +168,19 @@ Decisions:
   together: 26 KB).
 - **`scanf` on `stdin` is of little use until the console has a cooked
   mode** (no echo, Enter arrives as `'\r'`). `sscanf` and `fscanf` on files
-  are complete.
+  are complete, but for the wide-character conversions (`%lc`, `%ls`,
+  `%l[`), which wait for `<wchar.h>` and stop the scan.
+- **A number that is cut short fails.** The engine reads one character at a
+  time and gives back one at most, which is all a stream allows; so `"0x"`
+  with no digit after it, `"1e+"` or `"infin"` are read and then fail, as
+  the standard defines it, where `strtol` and `strtod` (which can back up in
+  their string) return the `0` or the `1`. Host libraries differ on these
+  cases among themselves.
+- **Floats read by `scanf` are correctly rounded too**: the item goes to
+  `strtod`, as a text of bounded length that converts to the same bits (at
+  most 800 significant digits and a marker for "more"), since an item may be
+  any length and the stack is 4 KB. A float conversion uses about 1.5 KB of
+  it. `sscanf` adds about 10 KB to a program that already formats numbers.
 
 Two things need the kernel, and wait for it:
 
@@ -198,8 +210,9 @@ Two things need the kernel, and wait for it:
   returns, without going through `exit()`: no `atexit` handler runs and no
   stream is flushed. Complete lines on `stdout` are already out; anything
   else needs an `fflush` or an `exit()`.
-- Not provided yet: the `scanf` family, `tmpfile`/`tmpnam`, `<time.h>`,
-  `<locale.h>`, `<wchar.h>`, `<fenv.h>`, `<complex.h>`, `<tgmath.h>`.
+- Not provided yet: `tmpfile`/`tmpnam`, `<time.h>`, `<locale.h>`,
+  `<wchar.h>` (and with it `%lc`, `%ls` and `%l[` in `scanf`), `<fenv.h>`,
+  `<complex.h>`, `<tgmath.h>`.
 - The main thread has a single 4 KB stack page: libc keeps large buffers off
   the stack, but exactness costs some: printing a float takes about 1.5 KB
   (its exact decimal digits), `strtod` about 750 bytes.

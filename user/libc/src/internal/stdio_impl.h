@@ -45,6 +45,9 @@ void __stdio_exit(void);
 int __fflush_unlocked(FILE *f);
 // Writes n bytes through the buffer; returns how many were accepted.
 size_t __fwrite_unlocked(const void *data, size_t n, FILE *f);
+// fgetc and ungetc on a stream the caller has locked (the scanf engine).
+int __stdio_getc(FILE *f);
+int __stdio_ungetc(int c, FILE *f);
 // Makes sure f has its buffer (allocated on first use when it has none).
 void __stdio_setup_buffer(FILE *f);
 // Before writing: forgets read-ahead and moves the fd back to the logical

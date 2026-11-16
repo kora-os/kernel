@@ -14,4 +14,7 @@
 // variable arguments from parameter `first` (0 for a va_list).
 #define _LIBC_PRINTF(fmt, first) __attribute__((__format__(__printf__, fmt, first)))
 
+// The same for scanf-style functions.
+#define _LIBC_SCANF(fmt, first) __attribute__((__format__(__scanf__, fmt, first)))
+
 #endif // _LIBC_CDEFS_H

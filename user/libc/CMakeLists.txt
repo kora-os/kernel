@@ -219,11 +219,15 @@ if(KORAOS_HOST_CC)
                    src/stdio/format_float.c src/string/string.c src/errno/errno.c FLAGS -Wno-format)
     set(LIBC_STDIO_SOURCES src/stdio/file.c src/stdio/fwrite.c src/stdio/printf.c
         src/stdio/fopen.c src/stdio/fread.c src/stdio/fseek.c src/stdio/remove.c
+        src/stdio/scan.c src/stdio/scanf.c src/stdio/sscanf.c src/stdlib/strtod.c
+        src/ctype/ctype.c
         src/stdio/format.c src/stdio/format_float.c src/stdio/snprintf.c src/string/string.c
         src/string/search.c src/string/strerror.c src/errno/errno.c src/stdlib/exit.c
         src/stdlib/malloc.c ${LIBC_FAKE_KERNEL})
     libc_host_test(stdio_write SOURCES ${LIBC_STDIO_SOURCES} FLAGS -pthread -Wno-format)
     libc_host_test(stdio_file SOURCES ${LIBC_STDIO_SOURCES})
+    libc_host_test(stdio_scanf SOURCES ${LIBC_STDIO_SOURCES} src/stdlib/convert.c
+                   FLAGS -Wno-format)
     libc_host_test(stdlib_strtod SOURCES src/stdlib/strtod.c src/ctype/ctype.c src/string/string.c
                    src/errno/errno.c)
     # The whole of src/math against the host's libm. The functions that are a
