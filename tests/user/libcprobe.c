@@ -6,7 +6,8 @@
 // va_list (the host tests run on other variadic conventions), setjmp and
 // longjmp (AArch64 assembly, which CI's x86-64 hosts cannot run) with a
 // signal handler that jumps out of abort(), sscanf (the AAPCS64 va_list again,
-// and a float item of a thousand digits on the 4 KB stack), <math.h> (the functions that are
+// and a float item of a thousand digits on the 4 KB stack), <time.h> (clock()
+// on the real generic timer), <math.h> (the functions that are
 // one AArch64 instruction, musl's functions giving the same bits as on the
 // hosts, and the long double functions, which move binary128 bits by hand),
 // and an atexit
@@ -29,6 +30,7 @@
 #include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
+#include <time.h>
 
 // user/libc/tests/setjmp_registers.S: 0 if a longjmp restores every
 // callee-saved register, the frame pointer and the stack pointer.
@@ -396,6 +398,30 @@ static void test_sscanf(void) {
           "sscanf: incomplete numbers fail");
 }
 
+// <time.h>: clock() reads the generic timer, which no host test can; the
+// calendar code is the same as on the hosts, checked once here.
+static void test_time(void) {
+    clock_t before = clock();
+    msleep(30);
+    clock_t passed = clock() - before;
+    check(before > 0 && passed >= 30000 && passed < 10 * CLOCKS_PER_SEC,
+          "clock advances by the time slept");
+    time_t none = 0;
+    check(time(&none) == (time_t)-1 && none == (time_t)-1, "time: no wall clock yet");
+
+    time_t t = 1000000000;
+    char text[48];
+    struct tm *tm = gmtime(&t);
+    check(tm != NULL && strftime(text, sizeof text, "%Y-%m-%d %H:%M:%S %a %j %G-W%V", tm) == 36 &&
+              strcmp(text, "2001-09-09 01:46:40 Sun 252 2001-W36") == 0,
+          "gmtime and strftime");
+    check(strcmp(ctime(&t), "Sun Sep  9 01:46:40 2001\n") == 0, "ctime");
+    struct tm late = {0, 0, 0, 366, 0, 100, 0, 0, 0};  // January 366, 2000
+    check(mktime(&late) == 978220800 && late.tm_mon == 11 && late.tm_mday == 31 && late.tm_wday == 0,
+          "mktime carries a day out of range");
+    check(difftime(t, 999999990) == 10.0, "difftime");
+}
+
 static void test_files(void) {
     const char *name = "libc probe.txt", *moved = "libc probe moved.txt";
     FILE *f = fopen(name, "w");
@@ -482,6 +508,7 @@ int main(int argc, char **argv) {
     test_math_values();
     test_math_long_double();
     test_sscanf();
+    test_time();
     if (failed) {
         return 1;
     }
