@@ -3,7 +3,9 @@
 // tests cannot reach. The AArch64 binary128 strtold path, floating point in
 // EL0 through libc code, errno, qsort/bsearch on the 4 KB main stack, the
 // rand sequence (the same on every platform), snprintf with the AAPCS64
-// va_list (the host tests run on other variadic conventions), and an atexit
+// va_list (the host tests run on other variadic conventions), setjmp and
+// longjmp (AArch64 assembly, which CI's x86-64 hosts cannot run) with a
+// signal handler that jumps out of abort(), and an atexit
 // handler run by crt0's exit() after main returns. stdout is made fully
 // buffered, so "libcprobe: checks passed" (printf) and then the handler's
 // "libcprobe: atexit ran" (puts) only appear if exit() flushes stdout after
@@ -18,8 +20,14 @@
 #include <errno.h>
 #include <float.h>
 #include <limits.h>
+#include <setjmp.h>
+#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
+
+// user/libc/tests/setjmp_registers.S: 0 if a longjmp restores every
+// callee-saved register, the frame pointer and the stack pointer.
+long setjmp_registers(jmp_buf env);
 
 static int failed;
 
@@ -136,6 +144,59 @@ static void test_strtod(void) {
     errno = 0;
 }
 
+static jmp_buf jump;
+static volatile sig_atomic_t caught;
+
+__attribute__((noinline)) static void dive(int depth) {
+    volatile char pad[64];  // a real frame each time, small: the stack is 4 KB
+    pad[0] = (char)depth;
+    if (depth == 0) {
+        longjmp(jump, 7);
+    }
+    dive(depth - 1);
+    pad[1] = pad[0];  // keeps the call from becoming a jump
+}
+
+static void on_signal(int sig) {
+    caught = sig;
+}
+
+static void jump_out(int sig) {
+    longjmp(jump, sig);
+}
+
+static void test_setjmp_and_signals(void) {
+    volatile int passes = 0;
+    volatile double kept = 2.5;
+    int value = setjmp(jump);
+    passes = passes + 1;
+    if (value == 0) {
+        dive(20);
+    }
+    check(value == 7 && passes == 2 && kept == 2.5, "longjmp out of nested calls");
+    value = setjmp(jump);
+    if (value == 0) {
+        longjmp(jump, 0);
+    }
+    check(value == 1, "longjmp(env, 0) gives 1");
+    static jmp_buf registers;
+    check(setjmp_registers(registers) == 0, "longjmp restores the callee-saved registers");
+
+    check(signal(SIGINT, on_signal) == SIG_DFL && raise(SIGINT) == 0 && caught == SIGINT,
+          "raise calls the handler");
+    check(signal(SIGINT, SIG_DFL) == on_signal, "signal returns the previous handler");
+    errno = 0;
+    check(signal(3, on_signal) == SIG_ERR && errno == EINVAL, "signal rejects other numbers");
+    errno = 0;
+    signal(SIGABRT, jump_out);
+    value = setjmp(jump);
+    if (value == 0) {
+        abort();
+    }
+    check(value == SIGABRT, "abort raises SIGABRT and a handler can jump out");
+    signal(SIGABRT, SIG_DFL);
+}
+
 static void test_files(void) {
     const char *name = "libc probe.txt", *moved = "libc probe moved.txt";
     FILE *f = fopen(name, "w");
@@ -207,6 +268,7 @@ int main(int argc, char **argv) {
     test_heap();
     test_snprintf();
     test_strtod();
+    test_setjmp_and_signals();
     if (failed) {
         return 1;
     }

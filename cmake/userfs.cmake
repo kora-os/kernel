@@ -62,7 +62,8 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
     koraos_add_user_program(sumprobe "${SOURCE_ROOT}/tests/user/sumprobe.c")
     koraos_add_user_program(nsprobe "${SOURCE_ROOT}/tests/user/nsprobe.c")
     koraos_add_user_program(writeprobe "${SOURCE_ROOT}/tests/user/writeprobe.c")
-    koraos_add_user_program(libcprobe "${SOURCE_ROOT}/tests/user/libcprobe.c")
+    koraos_add_user_program(libcprobe "${SOURCE_ROOT}/tests/user/libcprobe.c"
+        "${USER_DIR}/libc/tests/setjmp_registers.S")
 
     # Retain the previous --bindir glob installation order in /bin.
     list(SORT USER_PROGRAM_ELVES)
