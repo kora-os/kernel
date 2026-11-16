@@ -156,10 +156,13 @@ if(KORAOS_HOST_CC)
     set(LIBC_TEST_BUILD_COMMANDS)
     set(LIBC_TEST_RUN_COMMANDS)
 
-    # libc_host_test(<name> SOURCES <files relative to user/libc>... [FLAGS <flags>...])
-    # builds tests/<name>_test.c with the given sources and runs it.
+    # libc_host_test(<name> SOURCES <files relative to user/libc>... [FLAGS <flags>...]
+    #                [LIBS <host libraries>...])
+    # builds tests/<name>_test.c with the given sources and runs it. LIBS come
+    # last on the command line, where a linker that only keeps the libraries
+    # needed so far still finds a use for them.
     function(libc_host_test name)
-        cmake_parse_arguments(T "" "" "SOURCES;FLAGS" ${ARGN})
+        cmake_parse_arguments(T "" "" "SOURCES;FLAGS;LIBS" ${ARGN})
         set(sources)
         foreach(src IN LISTS T_SOURCES)
             list(APPEND sources "${LIBC_DIR}/${src}")
@@ -167,7 +170,7 @@ if(KORAOS_HOST_CC)
         set(exe "${LIBC_TEST_OUT}/${name}_test")
         set(LIBC_TEST_BUILD_COMMANDS ${LIBC_TEST_BUILD_COMMANDS}
             COMMAND "${KORAOS_HOST_CC}" ${LIBC_HOST_FLAGS} ${T_FLAGS}
-                    -o "${exe}" "${LIBC_TEST_DIR}/${name}_test.c" ${sources}
+                    -o "${exe}" "${LIBC_TEST_DIR}/${name}_test.c" ${sources} ${T_LIBS}
             PARENT_SCOPE)
         set(LIBC_TEST_RUN_COMMANDS ${LIBC_TEST_RUN_COMMANDS} COMMAND "${exe}" PARENT_SCOPE)
     endfunction()
@@ -206,6 +209,19 @@ if(KORAOS_HOST_CC)
     libc_host_test(stdio_file SOURCES ${LIBC_STDIO_SOURCES})
     libc_host_test(stdlib_strtod SOURCES src/stdlib/strtod.c src/ctype/ctype.c src/string/string.c
                    src/errno/errno.c)
+    # The whole of src/math against the host's libm. The functions that are a
+    # single AArch64 instruction come from src/math/aarch64 on arm64 hosts and
+    # from the host's libm elsewhere (tests/math_host_arch.c).
+    file(GLOB LIBC_MATH_TEST_SOURCES RELATIVE "${LIBC_DIR}" CONFIGURE_DEPENDS
+        "${LIBC_SRC_DIR}/math/*.c")
+    if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
+        file(GLOB LIBC_MATH_ARCH_SOURCES RELATIVE "${LIBC_DIR}" CONFIGURE_DEPENDS
+            "${LIBC_SRC_DIR}/math/aarch64/*.c")
+    else()
+        set(LIBC_MATH_ARCH_SOURCES tests/math_host_arch.c)
+    endif()
+    libc_host_test(math SOURCES ${LIBC_MATH_TEST_SOURCES} ${LIBC_MATH_ARCH_SOURCES}
+                   src/string/string.c FLAGS ${LIBC_MATH_FLAGS} LIBS -lm)
     libc_host_test(malloc SOURCES ${LIBC_MALLOC_SOURCES})
     libc_host_test(malloc_threads SOURCES ${LIBC_MALLOC_SOURCES} FLAGS -pthread)
 
