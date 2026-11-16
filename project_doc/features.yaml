@@ -444,6 +444,7 @@ categories:
         name: Input events
         status: in_progress
         description: Keys and mouse reach user space as structured events instead of bytes.
+        prs: [99]
       - id: mouse
         name: Mouse
         status: planned
