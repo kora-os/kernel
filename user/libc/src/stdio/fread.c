@@ -52,7 +52,7 @@ static int fill(FILE *f) {
     return 1;
 }
 
-static int getc_unlocked_(FILE *f) {
+int __stdio_getc(FILE *f) {
     if (f->ungot != EOF) {
         int c = f->ungot;
         f->ungot = EOF;
@@ -71,7 +71,7 @@ static int getc_unlocked_(FILE *f) {
 
 int fgetc(FILE *stream) {
     __lock(&stream->lock);
-    int c = getc_unlocked_(stream);
+    int c = __stdio_getc(stream);
     __unlock(&stream->lock);
     return c;
 }
@@ -93,7 +93,7 @@ char *fgets(char *restrict s, int n, FILE *restrict stream) {
     stream->flags &= ~F_ERR;
     int i = 0;
     while (i < n - 1) {
-        int c = getc_unlocked_(stream);
+        int c = __stdio_getc(stream);
         if (c == EOF) {
             break;
         }
@@ -151,7 +151,7 @@ size_t fread(void *restrict ptr, size_t size, size_t nmemb, FILE *restrict strea
             done += (size_t)r;
             continue;
         }
-        int c = getc_unlocked_(stream);
+        int c = __stdio_getc(stream);
         if (c == EOF) {
             break;
         }
@@ -161,17 +161,18 @@ size_t fread(void *restrict ptr, size_t size, size_t nmemb, FILE *restrict strea
     return done / size;
 }
 
-int ungetc(int c, FILE *stream) {
-    if (c == EOF) {
+int __stdio_ungetc(int c, FILE *f) {
+    if (c == EOF || f->ungot != EOF || !(f->flags & F_READ)) {
         return EOF;
     }
+    f->ungot = (unsigned char)c;
+    f->flags &= ~F_EOF;
+    return (unsigned char)c;
+}
+
+int ungetc(int c, FILE *stream) {
     __lock(&stream->lock);
-    int result = EOF;
-    if (stream->ungot == EOF && (stream->flags & F_READ)) {
-        stream->ungot = (unsigned char)c;
-        stream->flags &= ~F_EOF;
-        result = (unsigned char)c;
-    }
+    int result = __stdio_ungetc(c, stream);
     __unlock(&stream->lock);
     return result;
 }
