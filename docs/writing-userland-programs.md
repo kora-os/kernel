@@ -17,7 +17,9 @@ A program runs in EL0 with a deliberately small runtime:
   `atexit`, the heap) and `<stdio.h>` (`printf` and friends, `fopen`,
   `fgets`, `fread`, `fwrite`, `fseek`, `remove`, `rename`; `stdout` is line
   buffered, `stderr` is unbuffered but sends each `fprintf` in one write,
-  `exit` flushes and closes everything; no `scanf` yet), `<setjmp.h>`,
+  `exit` flushes and closes everything; `sscanf` and `fscanf` read numbers
+  and fields back, `scanf` reads the raw console described below),
+  `<setjmp.h>`,
   `<signal.h>` (`signal` and `raise` only: a handler runs when the program
   itself raises the signal, nothing arrives from outside) and `<math.h>`
   (the C99 functions for `double` and `float`, from musl; the `long double`
