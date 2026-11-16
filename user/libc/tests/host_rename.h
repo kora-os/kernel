@@ -137,6 +137,17 @@
 #define signal kora_signal
 #define raise kora_raise
 
+#define clock kora_clock
+#define difftime kora_difftime
+#define mktime kora_mktime
+#define time kora_time
+#define timespec_get kora_timespec_get
+#define asctime kora_asctime
+#define ctime kora_ctime
+#define gmtime kora_gmtime
+#define localtime kora_localtime
+#define strftime kora_strftime
+
 // <math.h>, and the internal symbols of src/math (musl's libm).
 #define acos kora_acos
 #define acosf kora_acosf
