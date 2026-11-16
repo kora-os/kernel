@@ -126,4 +126,7 @@
 
 #define __errno_location kora_errno_location
 
+#define setjmp kora_setjmp
+#define longjmp kora_longjmp
+
 #endif // LIBC_HOST_RENAME_H
