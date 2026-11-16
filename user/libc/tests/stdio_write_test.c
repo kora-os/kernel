@@ -210,7 +210,7 @@ static void test_exit_flushes(void) {
     reset();
     printf("pending");
     atexit(late_output);
-    if (setjmp(&env) == 0) {
+    if (fake_setjmp(&env) == 0) {
         fake_arm_exit(&env);
         exit(3);
     }
@@ -220,7 +220,7 @@ static void test_exit_flushes(void) {
 
     reset();
     printf("dropped");
-    if (setjmp(&env) == 0) {
+    if (fake_setjmp(&env) == 0) {
         fake_arm_exit(&env);
         _Exit(0);
     }

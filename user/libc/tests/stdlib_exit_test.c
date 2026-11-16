@@ -15,7 +15,7 @@ static fake_jmp_buf env;
 
 #define EXPECT_EXIT(call, want, what)       \
     do {                                    \
-        if (setjmp(&env) == 0) {            \
+        if (fake_setjmp(&env) == 0) {       \
             fake_arm_exit(&env);            \
             call;                           \
             CHECK(0, "%s returned", what);  \
