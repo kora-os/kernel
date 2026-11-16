@@ -7,14 +7,18 @@
 
 #include "arch/irq.h"
 #include "console.h"
+#include "input/input.h"
+#include "input/input_tty.h"
 #include "lib/panic.h"
 #include "arch/spinlock.h"
 #include "mini_uart.h"
 #include "proc/task.h"
 #include "video/console_fb.h"
 
-// Input queue, filled by keyboard and UART interrupt handlers (and terminal
-// replies) and drained by tasks reading the console. input_lock (IRQ-safe)
+// Input queue of bytes, drained by tasks reading the console. Two things fill
+// it: tty_input_push(), for input that is bytes already (the UART and the
+// terminal's status replies), and the keyboards' events, which readers move
+// here from the input event queue (drain_key_events). input_lock (IRQ-safe)
 // covers the queue, scroll_request and the wait queue's condition.
 #define INPUT_QUEUE_SIZE 256  // power of two
 
@@ -34,6 +38,39 @@ void tty_input_push(char c) {
         input_head = head + 1;
         wait_queue_wake_all(&input_waiters);
     }
+    spin_unlock_irqrestore(&input_lock, flags);
+}
+
+// Scrollback requests, in half screens, from the keyboard's Shift+PageUp and
+// Shift+PageDown. The task waiting for input applies them (see tty_getc).
+static int scroll_request;
+
+// Keyboards post key events to the input event queue (input/input.h); this
+// is its consumer for now. Move the pending events into the byte queue as
+// the bytes a terminal sends for them (input/input_tty.h), in task context,
+// stopping while a whole sequence may not fit: events then wait in their own
+// queue, and no escape sequence is ever cut short. Called with input_lock
+// held.
+static void drain_key_events(void) {
+    struct input_event event;
+    while (INPUT_QUEUE_SIZE - (input_head - input_tail) >= INPUT_TTY_MAX_BYTES &&
+           input_poll(&event)) {
+        struct input_tty_bytes out;
+        input_tty_translate(&event, &out);
+        for (unsigned i = 0; i < out.length; i++) {
+            input_queue[input_head % INPUT_QUEUE_SIZE] = out.bytes[i];
+            input_head++;
+        }
+        scroll_request += out.scroll;
+    }
+}
+
+// A key event was queued (from IRQ context): wake the readers, which drain it.
+// Taking input_lock orders this against a reader about to sleep, which has
+// either not checked the event queue yet or is already on the wait queue.
+void input_consumer_wake(void) {
+    uint64_t flags = spin_lock_irqsave(&input_lock);
+    wait_queue_wake_all(&input_waiters);
     spin_unlock_irqrestore(&input_lock, flags);
 }
 
@@ -98,11 +135,6 @@ void tty_serial_init(void) {
     uart_rx_irq_enable(serial_isr);
 }
 
-// Scrollback requests from the keyboard (IRQ context), in half screens. They
-// are applied by the task waiting for input (see tty_getc), so the screen is
-// never drawn from an interrupt handler.
-static int scroll_request;
-
 void tty_scrollback(int halfpages) {
     uint64_t flags = spin_lock_irqsave(&input_lock);
     scroll_request += halfpages;
@@ -124,15 +156,17 @@ void tty_flush(void) {
 int tty_getc(void) {
     tty_flush();  // whatever was echoed or printed must be visible while we wait
 
-    // Sleep until a keyboard (USB, VirtIO) or UART interrupt pushes input.
-    // The queue is checked and the sleep entered under input_lock, so a byte
-    // arriving in between still wakes us; other tasks run meanwhile, and with
-    // nothing runnable the scheduler idles with IRQs open.
+    // Sleep until a UART interrupt pushes a byte or a keyboard (USB, VirtIO)
+    // posts a key event. The queues are checked and the sleep entered under
+    // input_lock, so input arriving in between still wakes us; other tasks
+    // run meanwhile, and with nothing runnable the scheduler idles with IRQs
+    // open.
     // Scrollback is drawn outside the lock: the screen belongs to tasks (the
     // BKL), not to the interrupt handlers input_lock fends off.
     uint64_t flags = spin_lock_irqsave(&input_lock);
     char c;
     for (;;) {
+        drain_key_events();
         int scroll = take_scroll_request();
         if (scroll != 0) {
             spin_unlock_irqrestore(&input_lock, flags);
@@ -162,6 +196,7 @@ long tty_read(char *buf, size_t len) {
     buf[0] = (char)ch;
     size_t n = 1;
     uint64_t flags = spin_lock_irqsave(&input_lock);
+    drain_key_events();
     while (n < len && input_pop(&buf[n])) {
         n++;
     }
