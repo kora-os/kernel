@@ -28,6 +28,19 @@ USPi (<https://github.com/rsta2/uspi>), the C USB library carved out of Circle,
 was evaluated first. We chose Circle because, unlike USPi, it supports the
 Raspberry Pi 4's xHCI controller, letting a single stack serve both boards.
 
+## musl libm
+
+- **Project:** musl, a C standard library.
+- **Author:** Rich Felker and contributors; much of the math code is by Sun
+  Microsystems, the FreeBSD project's contributors and Arm Limited, as the
+  individual files say.
+- **Upstream:** <https://musl.libc.org/>
+- **License:** MIT (`user/libc/src/math/COPYRIGHT`).
+- **What we use:** the `<math.h>` functions for `double` and `float`, copied
+  from musl 1.2.5 into `user/libc/src/math`. The rest of the C library is
+  KoraOS's own. `user/libc/src/math/README.md` lists the files and every local
+  change.
+
 ## Raspberry Pi boot firmware
 
 - **Files:** the GPU boot firmware and device trees in [`firmware/`](firmware/)

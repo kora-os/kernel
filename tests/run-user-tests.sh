@@ -39,14 +39,17 @@ USER_FLAGS=(
 mkdir -p "$OUT/libc"
 failed=0
 
-# The whole libc and the fake kernel, once, as host objects.
+# The whole libc and the fake kernel, once, as host objects. All but src/math:
+# no user program calls <math.h> yet, and that directory needs flags of its
+# own and has AArch64-only files (see user/libc/CMakeLists.txt, whose
+# math_test covers it).
 objects=()
 while IFS= read -r src; do
     name="${src#"$LIBC/"}"
     obj="$OUT/libc/${name//\//_}.o"
     "$CC" "${LIBC_FLAGS[@]}" -c -o "$obj" "$src"
     objects+=("$obj")
-done < <(find "$LIBC/src" -name '*.c' | sort; echo "$LIBC/tests/fake_syscall.c")
+done < <(find "$LIBC/src" -name '*.c' -not -path '*/math/*' | sort; echo "$LIBC/tests/fake_syscall.c")
 "$CC" "${USER_FLAGS[@]}" -c -o "$OUT/libk_host.o" "$ROOT/user/tests/libk_host.c"
 objects+=("$OUT/libk_host.o")
 

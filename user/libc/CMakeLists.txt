@@ -33,6 +33,19 @@ set(LIBC_INCLUDE_DIR "${LIBC_DIR}/includes")
 set(LIBC_INTERNAL_DIR "${LIBC_SRC_DIR}/internal")
 file(GLOB_RECURSE LIBC_SOURCES CONFIGURE_DEPENDS "${LIBC_SRC_DIR}/*.c" "${LIBC_SRC_DIR}/*.S")
 
+# src/math is musl's libm (see src/math/README.md). Its sources include
+# musl-internal headers that live beside them; musl's <math.h> pulls in its
+# <features.h>, ours does not, so that one is included up front. They are
+# built without fusing a multiply and an add into one instruction, which is
+# how musl itself is built (GCC's ISO mode): results are then the same on
+# every machine. The two warnings are for upstream code left as it is: an
+# evaluation forced, for its exception flags, by assigning to a volatile that
+# is never read, and nan() ignoring its argument.
+file(GLOB_RECURSE LIBC_MATH_SOURCES CONFIGURE_DEPENDS "${LIBC_SRC_DIR}/math/*.c")
+set(LIBC_MATH_FLAGS "-I${LIBC_SRC_DIR}/math" -include "${LIBC_SRC_DIR}/math/features.h"
+    -ffp-contract=off -Wno-unused-but-set-variable -Wno-unused-parameter)
+set_source_files_properties(${LIBC_MATH_SOURCES} PROPERTIES COMPILE_OPTIONS "${LIBC_MATH_FLAGS}")
+
 # Standalone, the library is part of `all`; inside the kernel build it is only
 # built on request.
 if(LIBC_STANDALONE)
@@ -66,10 +79,27 @@ add_custom_command(
     DEPENDS koraos_libc "${LIBC_DIR}/tests/link_check.c"
     COMMENT "Linking the whole libc into a PIE (undefined symbol check)"
     VERBATIM)
+# The <math.h> classification macros in a program built without optimization:
+# they must link for every argument type (tests/math_macros_check.c).
+set(LIBC_MACROS_CHECK_ELF "${CMAKE_CURRENT_BINARY_DIR}/libc_math_macros_check.elf")
+set(LIBC_TARGET_FLAGS_O0 ${LIBC_TARGET_FLAGS})
+list(REMOVE_ITEM LIBC_TARGET_FLAGS_O0 -O2)
+add_custom_command(
+    OUTPUT "${LIBC_MACROS_CHECK_ELF}"
+    COMMAND ${CMAKE_C_COMPILER} ${LIBC_TARGET_FLAGS_O0} -O0 -isystem "${LIBC_INCLUDE_DIR}"
+            -fuse-ld=lld -Wl,-pie -Wl,-e,_start -Wl,--pack-dyn-relocs=none
+            -Wl,-z,norelro -Wl,-z,noexecstack -Wl,-z,max-page-size=4096
+            "${LIBC_DIR}/tests/math_macros_check.c" "$<TARGET_FILE:koraos_libc>"
+            -o "${LIBC_MACROS_CHECK_ELF}"
+    DEPENDS koraos_libc "${LIBC_DIR}/tests/math_macros_check.c" "${LIBC_INCLUDE_DIR}/math.h"
+    COMMENT "Linking the math classification macros at -O0 (no compiler-rt check)"
+    VERBATIM)
 if(LIBC_STANDALONE)
-    add_custom_target(libc_link_check ALL DEPENDS "${LIBC_LINK_CHECK_ELF}")
+    add_custom_target(libc_link_check ALL
+        DEPENDS "${LIBC_LINK_CHECK_ELF}" "${LIBC_MACROS_CHECK_ELF}")
 else()
-    add_custom_target(libc_link_check DEPENDS "${LIBC_LINK_CHECK_ELF}")
+    add_custom_target(libc_link_check
+        DEPENDS "${LIBC_LINK_CHECK_ELF}" "${LIBC_MACROS_CHECK_ELF}")
 endif()
 
 # Every public header must compile on its own (and twice, for the include
@@ -143,10 +173,13 @@ if(KORAOS_HOST_CC)
     set(LIBC_TEST_BUILD_COMMANDS)
     set(LIBC_TEST_RUN_COMMANDS)
 
-    # libc_host_test(<name> SOURCES <files relative to user/libc>... [FLAGS <flags>...])
-    # builds tests/<name>_test.c with the given sources and runs it.
+    # libc_host_test(<name> SOURCES <files relative to user/libc>... [FLAGS <flags>...]
+    #                [LIBS <host libraries>...])
+    # builds tests/<name>_test.c with the given sources and runs it. LIBS come
+    # last on the command line, where a linker that only keeps the libraries
+    # needed so far still finds a use for them.
     function(libc_host_test name)
-        cmake_parse_arguments(T "" "" "SOURCES;FLAGS" ${ARGN})
+        cmake_parse_arguments(T "" "" "SOURCES;FLAGS;LIBS" ${ARGN})
         set(sources)
         foreach(src IN LISTS T_SOURCES)
             list(APPEND sources "${LIBC_DIR}/${src}")
@@ -154,7 +187,7 @@ if(KORAOS_HOST_CC)
         set(exe "${LIBC_TEST_OUT}/${name}_test")
         set(LIBC_TEST_BUILD_COMMANDS ${LIBC_TEST_BUILD_COMMANDS}
             COMMAND "${KORAOS_HOST_CC}" ${LIBC_HOST_FLAGS} ${T_FLAGS}
-                    -o "${exe}" "${LIBC_TEST_DIR}/${name}_test.c" ${sources}
+                    -o "${exe}" "${LIBC_TEST_DIR}/${name}_test.c" ${sources} ${T_LIBS}
             PARENT_SCOPE)
         set(LIBC_TEST_RUN_COMMANDS ${LIBC_TEST_RUN_COMMANDS} COMMAND "${exe}" PARENT_SCOPE)
     endfunction()
@@ -193,6 +226,19 @@ if(KORAOS_HOST_CC)
     libc_host_test(stdio_file SOURCES ${LIBC_STDIO_SOURCES})
     libc_host_test(stdlib_strtod SOURCES src/stdlib/strtod.c src/ctype/ctype.c src/string/string.c
                    src/errno/errno.c)
+    # The whole of src/math against the host's libm. The functions that are a
+    # single AArch64 instruction come from src/math/aarch64 on arm64 hosts and
+    # from the host's libm elsewhere (tests/math_host_arch.c).
+    file(GLOB LIBC_MATH_TEST_SOURCES RELATIVE "${LIBC_DIR}" CONFIGURE_DEPENDS
+        "${LIBC_SRC_DIR}/math/*.c")
+    if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
+        file(GLOB LIBC_MATH_ARCH_SOURCES RELATIVE "${LIBC_DIR}" CONFIGURE_DEPENDS
+            "${LIBC_SRC_DIR}/math/aarch64/*.c")
+    else()
+        set(LIBC_MATH_ARCH_SOURCES tests/math_host_arch.c)
+    endif()
+    libc_host_test(math SOURCES ${LIBC_MATH_TEST_SOURCES} ${LIBC_MATH_ARCH_SOURCES}
+                   src/string/string.c FLAGS ${LIBC_MATH_FLAGS} LIBS -lm)
     libc_host_test(malloc SOURCES ${LIBC_MALLOC_SOURCES})
     libc_host_test(malloc_threads SOURCES ${LIBC_MALLOC_SOURCES} FLAGS -pthread)
 
