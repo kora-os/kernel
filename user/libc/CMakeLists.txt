@@ -243,6 +243,10 @@ if(KORAOS_HOST_CC)
     endif()
     libc_host_test(math SOURCES ${LIBC_MATH_TEST_SOURCES} ${LIBC_MATH_ARCH_SOURCES}
                    src/string/string.c FLAGS ${LIBC_MATH_FLAGS} LIBS -lm)
+    # Without src/time/counter.c, which reads the AArch64 timer: the test
+    # supplies the counter.
+    libc_host_test(time SOURCES src/time/calendar.c src/time/strftime.c src/time/asctime.c
+                   src/time/time.c src/time/clock.c src/string/string.c src/errno/errno.c)
     libc_host_test(malloc SOURCES ${LIBC_MALLOC_SOURCES})
     libc_host_test(malloc_threads SOURCES ${LIBC_MALLOC_SOURCES} FLAGS -pthread)
 

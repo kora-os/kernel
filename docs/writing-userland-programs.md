@@ -23,7 +23,10 @@ A program runs in EL0 with a deliberately small runtime:
   `<signal.h>` (`signal` and `raise` only: a handler runs when the program
   itself raises the signal, nothing arrives from outside) and `<math.h>`
   (the C99 functions for `double` and `float`, from musl; the `long double`
-  ones compute at double precision; no `M_PI`, which is not ISO C). `stdin`
+  ones compute at double precision; no `M_PI`, which is not ISO C) and
+  `<time.h>` (`clock` counts microseconds since boot; `mktime`, `gmtime`,
+  `strftime` and the rest work in UTC; `time` returns -1, since there is no
+  wall clock yet). `stdin`
   is the raw console: no echo, and Enter arrives as `'\r'`. See
   [libc-plan.md](../project_doc/libc-plan.md) for what is still missing.
   Programs print through `stdout` and report errors on `stderr`; they never
