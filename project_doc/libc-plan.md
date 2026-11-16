@@ -138,7 +138,7 @@ What steps 1 to 8 left out. None of these steps touches the kernel.
 | # | Theme | Status |
 |---|-------|--------|
 | 15 | `<setjmp.h>`; ISO `<signal.h>`: `signal`, `raise`, and `abort` raising `SIGABRT` | done (#95) |
-| 16 | `<math.h>`: the C99 functions, imported from musl's libm (MIT licence) | planned |
+| 16 | `<math.h>`: the C99 functions, imported from musl's libm (MIT licence) | done (#96) |
 | 17 | `scanf` family: `sscanf`, `fscanf`, `scanf` and the `v` forms | planned |
 | 18 | `<time.h>` without a wall clock: `clock`, `difftime`, `mktime`, `gmtime`, `localtime`, `asctime`, `ctime`, `strftime`; `time()` returns `(time_t)-1` | planned |
 
@@ -155,7 +155,17 @@ Decisions:
   `user/libc/src/math`, with their licence notices. musl as a whole was
   rejected because it is bound to Linux syscalls; its libm makes none.
 - **`long double` math runs at double precision**, like `strtold`: there is
-  no compiler-rt for binary128 arithmetic.
+  no compiler-rt for binary128 arithmetic. `fabsl` and `copysignl` are exact,
+  and the classification macros (`isnan`, `fpclassify`, ...) read a long
+  double's bits. Comparing two long doubles, with the operators or with
+  `isgreater` and friends, still does not link.
+- **`<math.h>` is ISO only**: no `M_PI` and no Bessel functions (both POSIX).
+  Errors set the floating-point exception flags, never `errno`
+  (`math_errhandling` is `MATH_ERREXCEPT`); there is no `<fenv.h>` to read
+  them yet. The functions that are a single AArch64 instruction are just
+  that; a program pays for what it calls (`sqrt` and `floor`: 0.3 KB; `sin`
+  and `cos`: 10 KB; `pow`, `exp`, `log`, `sin`, `atan2` and `tgamma`
+  together: 26 KB).
 - **`scanf` on `stdin` is of little use until the console has a cooked
   mode** (no echo, Enter arrives as `'\r'`). `sscanf` and `fscanf` on files
   are complete.
@@ -189,7 +199,7 @@ Two things need the kernel, and wait for it:
   stream is flushed. Complete lines on `stdout` are already out; anything
   else needs an `fflush` or an `exit()`.
 - Not provided yet: the `scanf` family, `tmpfile`/`tmpnam`, `<time.h>`,
-  `<math.h>`, `<locale.h>`, `<wchar.h>`.
+  `<locale.h>`, `<wchar.h>`, `<fenv.h>`, `<complex.h>`, `<tgmath.h>`.
 - The main thread has a single 4 KB stack page: libc keeps large buffers off
   the stack, but exactness costs some: printing a float takes about 1.5 KB
   (its exact decimal digits), `strtod` about 750 bytes.
