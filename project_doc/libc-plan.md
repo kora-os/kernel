@@ -140,7 +140,7 @@ What steps 1 to 8 left out. None of these steps touches the kernel.
 | 15 | `<setjmp.h>`; ISO `<signal.h>`: `signal`, `raise`, and `abort` raising `SIGABRT` | done (#95) |
 | 16 | `<math.h>`: the C99 functions, imported from musl's libm (MIT licence) | done (#96) |
 | 17 | `scanf` family: `sscanf`, `fscanf`, `scanf` and the `v` forms | done (#97) |
-| 18 | `<time.h>` without a wall clock: `clock`, `difftime`, `mktime`, `gmtime`, `localtime`, `asctime`, `ctime`, `strftime`; `time()` returns `(time_t)-1` | planned |
+| 18 | `<time.h>` without a wall clock: `clock`, `difftime`, `mktime`, `gmtime`, `localtime`, `asctime`, `ctime`, `strftime`; `time()` returns `(time_t)-1` | done (#98) |
 
 Decisions:
 
@@ -182,6 +182,13 @@ Decisions:
   any length and the stack is 4 KB. A float conversion uses about 1.5 KB of
   it. `sscanf` adds about 10 KB to a program that already formats numbers.
 
+- **Time is UTC, and `time_t` is 64 bits.** There are no time zones:
+  `localtime` is `gmtime` and `tm_isdst` is 0. The calendar is the proleptic
+  Gregorian one over the whole range a `struct tm` holds. `clock()` counts
+  microseconds since boot from the generic timer: the kernel keeps no
+  account of processor time per program, so it is elapsed time. `strftime`
+  formats its own numbers, so printing a date does not link `printf`.
+
 Two things need the kernel, and wait for it:
 
 - **A break a program can catch** (`SIGINT` from Ctrl+C, MicroPython's
@@ -210,9 +217,9 @@ Two things need the kernel, and wait for it:
   returns, without going through `exit()`: no `atexit` handler runs and no
   stream is flushed. Complete lines on `stdout` are already out; anything
   else needs an `fflush` or an `exit()`.
-- Not provided yet: `tmpfile`/`tmpnam`, `<time.h>`, `<locale.h>`,
-  `<wchar.h>` (and with it `%lc`, `%ls` and `%l[` in `scanf`), `<fenv.h>`,
-  `<complex.h>`, `<tgmath.h>`.
+- Not provided yet: `tmpfile`/`tmpnam`, `<locale.h>`, `<wchar.h>` (and
+  with it `%lc`, `%ls` and `%l[` in `scanf`), `<fenv.h>`, `<complex.h>`,
+  `<tgmath.h>`, `<assert.h>`, `<inttypes.h>`.
 - The main thread has a single 4 KB stack page: libc keeps large buffers off
   the stack, but exactness costs some: printing a float takes about 1.5 KB
   (its exact decimal digits), `strtod` about 750 bytes.
