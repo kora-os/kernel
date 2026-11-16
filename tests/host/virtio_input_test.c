@@ -3,6 +3,8 @@
 #include "arch/irq.h"
 #include "drivers/virtio.h"
 #include "drivers/virtio_input.h"
+#include "input/hid_keys.h"
+#include "input/input.h"
 #include "platform/virt.h"
 
 int test_failures, test_checks;
@@ -17,9 +19,8 @@ static uint32_t completed_length;
 static int completion;
 static unsigned queue_inits, submits, ready_calls, notifications, disconnected;
 static irq_handler_t handler;
-static char output[32];
+static struct input_event output[32];
 static unsigned output_length;
-static int scroll;
 static bool queue_fail;
 
 const struct virt_platform *virt_platform_get(void) { return &platform; }
@@ -33,11 +34,17 @@ void irq_disconnect(unsigned irq) {
     handler = NULL;
     disconnected++;
 }
-void tty_input_push(char c) {
-    CHECK(output_length < sizeof(output), "output test capture fits");
-    if (output_length < sizeof(output)) output[output_length++] = c;
+void input_post(const struct input_event *event) {
+    CHECK(output_length < sizeof(output) / sizeof(output[0]), "output test capture fits");
+    if (output_length < sizeof(output) / sizeof(output[0])) output[output_length++] = *event;
 }
-void tty_scrollback(int halfpages) { scroll += halfpages; }
+static bool posted_key(unsigned index, uint8_t type, uint8_t flags, uint16_t modifiers,
+                       uint16_t keycode, uint32_t codepoint) {
+    const struct input_event *event = &output[index];
+    return index < output_length && event->type == type && event->flags == flags &&
+           event->modifiers == modifiers && event->keycode == keycode &&
+           event->codepoint == codepoint;
+}
 void *coherent_page(unsigned slot) {
     CHECK(slot == VIRTIO_INPUT_BUFFER_SLOT, "receive events use dedicated coherent page");
     return page;
@@ -126,7 +133,7 @@ int main(int argc, char **argv) {
     bool initialized = virtio_input_init();
     CHECK(config[0] == 0x11 && config[1] == 1, "query EV_KEY capabilities with select and subsel");
     if (strcmp(scenario, "normal")) {
-        CHECK(!initialized && !handler && !ready_calls, "unsupported device leaves IRQ and TTY available");
+        CHECK(!initialized && !handler && !ready_calls, "unsupported device leaves IRQ and serial input available");
         CHECK(!output_length, "failed initialization emits no input");
         CHECK(!virtio_input_init(), "failed initialization cannot reuse DMA storage");
     } else {
@@ -137,11 +144,21 @@ int main(int argc, char **argv) {
         event(1, 30, 2, 8); // repeat
         event(1, 30, 0, 8); // release
         event(1, 104, 1, 8); // ShiftPgUp
-        CHECK(output_length == 2 && output[0] == 'A' && output[1] == 'A', "IRQ translates modifier and repeat");
-        CHECK(scroll == 1, "IRQ applies scrollback request");
-        CHECK(submits == 9 && allocated == 15, "IRQ reposts each consumed receive buffer");
+        event(2, 0, 5, 8); // pointer motion: not a key
+        event(0, 0, 0, 8); // EV_SYN report
+        CHECK(output_length == 5, "IRQ posts one event per key transition (%u)", output_length);
+        CHECK(posted_key(0, INPUT_EVENT_KEY_DOWN, 0, INPUT_MOD_LEFT_SHIFT, HID_KEY_LEFT_CTRL + 1, 0),
+              "IRQ posts the modifier key itself");
+        CHECK(posted_key(1, INPUT_EVENT_KEY_DOWN, 0, INPUT_MOD_LEFT_SHIFT, HID_KEY_A, 'A') &&
+              posted_key(2, INPUT_EVENT_KEY_DOWN, INPUT_FLAG_REPEAT, INPUT_MOD_LEFT_SHIFT, HID_KEY_A, 'A'),
+              "IRQ posts key down and repeat with the modifier and the character");
+        CHECK(posted_key(3, INPUT_EVENT_KEY_UP, 0, INPUT_MOD_LEFT_SHIFT, HID_KEY_A, 0),
+              "IRQ posts the key going up");
+        CHECK(posted_key(4, INPUT_EVENT_KEY_DOWN, 0, INPUT_MOD_LEFT_SHIFT, HID_KEY_PAGE_UP, 0),
+              "IRQ posts Shift+PageUp as a key: scrolling is the consumer's business");
+        CHECK(submits == 11 && allocated == 15, "IRQ reposts each consumed receive buffer");
         event(1, 30, 1, 7); // malformed truncated payload
-        CHECK(!handler && disconnected == 1 && output_length == 2, "truncated completion stops keyboard safely");
+        CHECK(!handler && disconnected == 1 && output_length == 5, "truncated completion stops keyboard safely");
         CHECK(!virtio_input_init(), "failed keyboard never reuses device-owned buffers");
     }
     printf("virtio_input(%s): %d checks, %d failures\n", scenario, test_checks, test_failures);

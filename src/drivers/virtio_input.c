@@ -4,9 +4,9 @@
 #if defined(KORAOS_VIRT) && defined(KORAOS_VIRTIO_INPUT)
 #include "arch/irq.h"
 #include "drivers/virtio.h"
+#include "input/input.h"
 #include "mm/coherent.h"
 #include "platform/virt.h"
-#include "tty.h"
 
 #define INPUT_CFG_EV_BITS 0x11
 #define INPUT_EV_KEY 1
@@ -14,18 +14,19 @@
 #define KEY_A 30
 #define INPUT_CONFIG_ATTEMPTS 8
 
-struct input_event {
+// What the device writes into a receive buffer: a Linux evdev event.
+struct virtio_input_event {
     uint16_t type;
     uint16_t code;
     uint32_t value;
 };
-_Static_assert(sizeof(struct input_event) == 8, "VirtIO input event ABI");
+_Static_assert(sizeof(struct virtio_input_event) == 8, "VirtIO input event ABI");
 
 static struct {
     struct virtio_device device;
     struct virtio_queue events;
     struct virtio_queue status;
-    volatile struct input_event *buffers;
+    volatile struct virtio_input_event *buffers;
     uint8_t buffer_by_head[VIRTIO_QUEUE_MAX];
     struct virtio_keymap_state keymap;
     unsigned irq;
@@ -86,7 +87,7 @@ static bool is_keyboard(void) {
 static bool post_event(unsigned buffer_index) {
     struct virtio_buffer buffer = {
         .address = (uintptr_t)&keyboard.buffers[buffer_index],
-        .length = sizeof(struct input_event),
+        .length = sizeof(struct virtio_input_event),
         .device_writes = true
     };
     uint16_t head;
@@ -136,21 +137,17 @@ static void keyboard_events(void) {
         if (!result) {
             return;
         }
-        if (result < 0 || length != sizeof(struct input_event) ||
+        if (result < 0 || length != sizeof(struct virtio_input_event) ||
             head >= keyboard.events.size ||
             keyboard.buffer_by_head[head] >= keyboard.events.size) {
             stop_keyboard();
             return;
         }
         unsigned index = keyboard.buffer_by_head[head];
-        volatile const struct input_event *event = &keyboard.buffers[index];
-        struct virtio_keymap_result key;
-        virtio_keymap_event(&keyboard.keymap, event->type, event->code, event->value, &key);
-        for (unsigned j = 0; j < key.length; j++) {
-            tty_input_push(key.bytes[j]);
-        }
-        if (key.scroll) {
-            tty_scrollback(key.scroll);
+        volatile const struct virtio_input_event *event = &keyboard.buffers[index];
+        struct input_event key;
+        if (virtio_keymap_event(&keyboard.keymap, event->type, event->code, event->value, &key)) {
+            input_post(&key);
         }
         if (!post_event(index)) {
             stop_keyboard();
