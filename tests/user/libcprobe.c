@@ -5,7 +5,10 @@
 // rand sequence (the same on every platform), snprintf with the AAPCS64
 // va_list (the host tests run on other variadic conventions), setjmp and
 // longjmp (AArch64 assembly, which CI's x86-64 hosts cannot run) with a
-// signal handler that jumps out of abort(), and an atexit
+// signal handler that jumps out of abort(), <math.h> (the functions that are
+// one AArch64 instruction, musl's functions giving the same bits as on the
+// hosts, and the long double functions, which move binary128 bits by hand),
+// and an atexit
 // handler run by crt0's exit() after main returns. stdout is made fully
 // buffered, so "libcprobe: checks passed" (printf) and then the handler's
 // "libcprobe: atexit ran" (puts) only appear if exit() flushes stdout after
@@ -20,6 +23,7 @@
 #include <errno.h>
 #include <float.h>
 #include <limits.h>
+#include <math.h>
 #include <setjmp.h>
 #include <signal.h>
 #include <stdint.h>
@@ -197,6 +201,165 @@ static void test_setjmp_and_signals(void) {
     signal(SIGABRT, SIG_DFL);
 }
 
+// Volatile, so nothing below is computed by the compiler.
+static volatile double half = 0.5, one = 1.0, two = 2.0, ten = 10.0, zero = 0.0;
+static volatile float halff = 0.5f, twof = 2.0f, tenf = 10.0f;
+
+static void bits64(double got, uint64_t want, const char *what) {
+    uint64_t bits;
+    memcpy(&bits, &got, sizeof bits);
+    if (bits != want) {
+        fprintf(stderr, "libcprobe: FAILED %s: %016lx, want %016lx\n", what, bits, want);
+        failed = 1;
+    }
+}
+
+static void bits32(float got, uint32_t want, const char *what) {
+    uint32_t bits;
+    memcpy(&bits, &got, sizeof bits);
+    if (bits != want) {
+        fprintf(stderr, "libcprobe: FAILED %s: %08x, want %08x\n", what, bits, want);
+        failed = 1;
+    }
+}
+
+// The functions src/math/aarch64 does in one instruction each, which CI's
+// x86-64 hosts cannot run.
+static void test_math_instructions(void) {
+    double eps = DBL_EPSILON;
+    check(sqrt(two) == 0x1.6a09e667f3bcdp+0 && sqrtf(twof) == 0x1.6a09e6p+0f && sqrt(-one) != sqrt(-one),
+          "sqrt");
+    check(fabs(-two) == 2.0 && !signbit(fabs(-zero)) && fabsf(-twof) == 2.0f, "fabs");
+    check(floor(-half) == -1.0 && floor(two + half) == 2.0 && floorf(-halff) == -1.0f, "floor");
+    check(ceil(half) == 1.0 && signbit(ceil(-half)) && ceil(-half) == 0.0 && ceilf(halff) == 1.0f,
+          "ceil");
+    check(trunc(-two - half) == -2.0 && truncf(twof + halff) == 2.0f, "trunc");
+    check(round(two + half) == 3.0 && round(-half) == -1.0 && roundf(halff) == 1.0f, "round");
+    check(rint(two + half) == 2.0 && rint(one + half) == 2.0 && rintf(twof + halff) == 2.0f, "rint");
+    check(nearbyint(two + one + half) == 4.0 && nearbyintf(halff) == 0.0f, "nearbyint");
+    check(lrint(two + half) == 2 && lrintf(twof + halff + 1) == 4 && llrint(-two - one - half) == -4 &&
+              llrintf(halff) == 0,
+          "lrint, llrint");
+    check(lround(two + half) == 3 && lroundf(-halff) == -1 && llround(-two - half) == -3 &&
+              llroundf(twof + halff) == 3 && llround(ten * 1e17) == 1000000000000000000ll,
+          "lround, llround");
+    check(fma(one + eps, one - eps, -one) == -eps * eps && fmaf(twof, twof, halff) == 4.5f,
+          "fma rounds once");
+    check(fmax(one, two) == 2.0 && fmax(zero / zero, one) == 1.0 && fmaxf(halff, twof) == 2.0f,
+          "fmax");
+    check(fmin(one, two) == 1.0 && fmin(one, zero / zero) == 1.0 && fminf(halff, twof) == 0.5f,
+          "fmin");
+}
+
+// musl's functions: the bits the same code gives on the hosts, where the host
+// unit tests compare it with the host's libm. A difference here means the
+// target build computes something else (another instruction selection, a
+// fused multiply-add, a wrong table).
+static void test_math_values(void) {
+    bits64(sin(half), 0x3fdeaee8744b05f0ull, "sin");
+    bits64(cos(half), 0x3fec1528065b7d50ull, "cos");
+    bits64(tan(half), 0x3fe17b4f5bf3474aull, "tan");
+    bits64(asin(half), 0x3fe0c152382d7366ull, "asin");
+    bits64(acos(half), 0x3ff0c152382d7366ull, "acos");
+    bits64(atan(half), 0x3fddac670561bb4full, "atan");
+    bits64(atan2(one, two), 0x3fddac670561bb4full, "atan2");
+    bits64(sinh(one), 0x3ff2cd9fc44eb982ull, "sinh");
+    bits64(cosh(one), 0x3ff8b07551d9f550ull, "cosh");
+    bits64(tanh(half), 0x3fdd9353d7568af3ull, "tanh");
+    bits64(asinh(two), 0x3ff719218313d087ull, "asinh");
+    bits64(acosh(two), 0x3ff5124271980434ull, "acosh");
+    bits64(atanh(half), 0x3fe193ea7aad030aull, "atanh");
+    bits64(exp(one), 0x4005bf0a8b145769ull, "exp");
+    bits64(exp2(half), 0x3ff6a09e667f3bcdull, "exp2");
+    bits64(expm1(half), 0x3fe4c2531c3c0d38ull, "expm1");
+    bits64(log(ten), 0x40026bb1bbb55516ull, "log");
+    bits64(log2(ten), 0x400a934f0979a371ull, "log2");
+    bits64(log10(two), 0x3fd34413509f79ffull, "log10");
+    bits64(log1p(half), 0x3fd9f323ecbf984cull, "log1p");
+    bits64(pow(two, half), 0x3ff6a09e667f3bcdull, "pow");
+    bits64(pow(ten, -ten), 0x3ddb7cdfd9d7bdbbull, "pow with a negative exponent");
+    bits64(cbrt(two), 0x3ff428a2f98d728bull, "cbrt");
+    bits64(hypot(one, two), 0x4001e3779b97f4a8ull, "hypot");
+    bits64(erf(half), 0x3fe0a7ef5c18edd2ull, "erf");
+    bits64(erfc(two), 0x3f7328f5ec350e66ull, "erfc");
+    bits64(tgamma(ten * half - half), 0x40274371e7866c65ull, "tgamma");
+    bits64(lgamma(ten + half), 0x402be199a0f64393ull, "lgamma");
+    // 1e22 needs the reduction by pi to hundreds of bits, on the 4 KB stack.
+    bits64(sin(ten * 1e21), 0xbfeb453ab76bf397ull, "sin of 1e22");
+    bits64(cos(ten * 1e21), 0x3fe0be2cef01c8f4ull, "cos of 1e22");
+    bits64(fmod(ten, two + half), 0, "fmod");
+    bits64(remainder(ten, two + one), 0x3ff0000000000000ull, "remainder");
+    bits32(sinf(halff), 0x3ef57744u, "sinf");
+    bits32(cosf(halff), 0x3f60a940u, "cosf");
+    bits32(tanf(halff), 0x3f0bda7bu, "tanf");
+    bits32(atan2f(halff, twof), 0x3e7adbb0u, "atan2f");
+    bits32(expf(halff), 0x3fd3094cu, "expf");
+    bits32(logf(tenf), 0x40135d8eu, "logf");
+    bits32(log2f(tenf), 0x40549a78u, "log2f");
+    bits32(powf(twof, halff), 0x3fb504f3u, "powf");
+    bits32(sinhf(halff), 0x3f056680u, "sinhf");
+    bits32(cbrtf(twof), 0x3fa14518u, "cbrtf");
+    bits32(erff(halff), 0x3f053f7bu, "erff");
+    bits32(tgammaf(tenf * halff - halff), 0x413a1b8fu, "tgammaf");
+    bits32(sinf(tenf * 1e21f), 0xbf3becc4u, "sinf of 1e22");
+    bits32(hypotf(halff, twof), 0x4003f07bu, "hypotf");
+
+    int e = 0;
+    double whole = 0;
+    check(frexp(ten, &e) == 0.625 && e == 4 && ldexp(half, 11) == 1024.0 && ilogb(ten) == 3 &&
+              modf(-two - half, &whole) == -0.5 && whole == -2.0 && scalbn(one, -1074) == DBL_TRUE_MIN,
+          "frexp, ldexp, ilogb, modf, scalbn");
+    check(nextafter(one, two) == 1.0 + DBL_EPSILON && copysign(two, -zero) == -2.0 &&
+              fdim(one, two) == 0.0 && pow(zero / zero, zero) == 1.0 && isnan(log(-one)) &&
+              isinf(exp(ten * ten * ten)) && fpclassify(DBL_TRUE_MIN * one) == FP_SUBNORMAL,
+          "special values and the classification macros");
+}
+
+// long double is binary128 here, with no compiler-rt: even comparing two of
+// them is a library call, so values are built and checked as bits. The
+// functions compute in double; fabsl and copysignl are exact.
+static long double quad(uint64_t high, uint64_t low) {
+    uint64_t words[2] = {low, high};
+    long double value;
+    memcpy(&value, words, sizeof value);
+    return value;
+}
+
+static int quad_is(long double value, uint64_t high, uint64_t low) {
+    uint64_t words[2];
+    memcpy(words, &value, sizeof words);
+    return words[1] == high && words[0] == low;
+}
+
+static void test_math_long_double(void) {
+    check(quad_is(sqrtl(2.0L), 0x3fff6a09e667f3bcull, 0xd000000000000000ull), "sqrtl(2)");
+    check(quad_is(powl(2.0L, 10.0L), 0x4009000000000000ull, 0), "powl(2, 10)");
+    check(quad_is(sinl(0.5L), 0x3ffdeaee8744b05full, 0), "sinl(0.5) is sin(0.5) widened");
+    long double whole = 0.0L;
+    check(quad_is(modfl(-3.75L, &whole), 0xbffe800000000000ull, 0) &&
+              quad_is(whole, 0xc000800000000000ull, 0),
+          "modfl");
+    check(lrintl(2.5L) == 2 && llroundl(-2.5L) == -3 && ilogbl(1024.5L) == 10, "lrintl, ilogbl");
+    // -(1 + 2^-112) is no double: narrowing it would lose the last bit.
+    check(quad_is(fabsl(quad(0xbfff000000000000ull, 1)), 0x3fff000000000000ull, 1) &&
+              quad_is(copysignl(quad(0x3fff000000000000ull, 1), -0.0L), 0xbfff000000000000ull, 1),
+          "fabsl and copysignl are exact");
+    check(isnan(nanl("")) && fpclassify(1.5L) == FP_NORMAL && isinf(HUGE_VALL) && signbit(-1.5L) &&
+              !isfinite(HUGE_VALL) && fpclassify(0.0L) == FP_ZERO,
+          "classification of long doubles");
+    // nexttoward compares x with y exactly: 1 + 2^-100 and 1 - 2^-100 both
+    // round to the double 1, but lie on either side of it.
+    long double above = quad(0x3fff000000000000ull, 1ull << 12);
+    long double below = quad(0x3ffeffffffffffffull, 0xffffffffffffe000ull);
+    check(nexttoward(one, above) == 1.0 + DBL_EPSILON && nexttoward(one, below) == 1.0 - DBL_EPSILON / 2 &&
+              nexttoward(one, 1.0L) == 1.0 && nexttoward(zero, -1.0L) == -DBL_TRUE_MIN &&
+              isnan(nexttoward(one, nanl(""))),
+          "nexttoward compares with the long double exactly");
+    check(nexttowardf(twof - 1, above) == 1.0f + FLT_EPSILON &&
+              nexttowardf(twof - 1, below) == 1.0f - FLT_EPSILON / 2,
+          "nexttowardf");
+}
+
 static void test_files(void) {
     const char *name = "libc probe.txt", *moved = "libc probe moved.txt";
     FILE *f = fopen(name, "w");
@@ -269,6 +432,9 @@ int main(int argc, char **argv) {
     test_snprintf();
     test_strtod();
     test_setjmp_and_signals();
+    test_math_instructions();
+    test_math_values();
+    test_math_long_double();
     if (failed) {
         return 1;
     }
