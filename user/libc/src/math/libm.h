@@ -4,8 +4,19 @@
 #include <stdint.h>
 #include <float.h>
 #include <math.h>
-#include <endian.h>
+/* KoraOS: musl's <endian.h> and <features.h> are not public headers here. The
+ * compiler knows the byte order; features.h is the private one beside this
+ * file. */
+#include <features.h>
+#define __LITTLE_ENDIAN __ORDER_LITTLE_ENDIAN__
+#define __BIG_ENDIAN __ORDER_BIG_ENDIAN__
+#define __BYTE_ORDER __BYTE_ORDER__
 #include "fp_arch.h"
+
+/* KoraOS: <math.h> is ISO only, so it has no M_PI_2 (cosf.c, sinf.c, tanf.c). */
+#ifndef M_PI_2
+#define M_PI_2 1.57079632679489661923 /* pi/2 */
+#endif
 
 #if LDBL_MANT_DIG == 53 && LDBL_MAX_EXP == 1024
 #elif LDBL_MANT_DIG == 64 && LDBL_MAX_EXP == 16384 && __BYTE_ORDER == __LITTLE_ENDIAN

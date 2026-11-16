@@ -32,8 +32,19 @@ set(LIBC_SRC_DIR "${LIBC_DIR}/src")
 set(LIBC_INCLUDE_DIR "${LIBC_DIR}/includes")
 set(LIBC_INTERNAL_DIR "${LIBC_SRC_DIR}/internal")
 file(GLOB_RECURSE LIBC_SOURCES CONFIGURE_DEPENDS "${LIBC_SRC_DIR}/*.c" "${LIBC_SRC_DIR}/*.S")
-# src/math is being imported from musl and does not build yet.
-list(FILTER LIBC_SOURCES EXCLUDE REGEX "/src/math/")
+
+# src/math is musl's libm (see src/math/README.md). Its sources include
+# musl-internal headers that live beside them; musl's <math.h> pulls in its
+# <features.h>, ours does not, so that one is included up front. They are
+# built without fusing a multiply and an add into one instruction, which is
+# how musl itself is built (GCC's ISO mode): results are then the same on
+# every machine. The two warnings are for upstream code left as it is: an
+# evaluation forced, for its exception flags, by assigning to a volatile that
+# is never read, and nan() ignoring its argument.
+file(GLOB_RECURSE LIBC_MATH_SOURCES CONFIGURE_DEPENDS "${LIBC_SRC_DIR}/math/*.c")
+set(LIBC_MATH_FLAGS "-I${LIBC_SRC_DIR}/math" -include "${LIBC_SRC_DIR}/math/features.h"
+    -ffp-contract=off -Wno-unused-but-set-variable -Wno-unused-parameter)
+set_source_files_properties(${LIBC_MATH_SOURCES} PROPERTIES COMPILE_OPTIONS "${LIBC_MATH_FLAGS}")
 
 # Standalone, the library is part of `all`; inside the kernel build it is only
 # built on request.
