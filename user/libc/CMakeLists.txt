@@ -79,10 +79,27 @@ add_custom_command(
     DEPENDS koraos_libc "${LIBC_DIR}/tests/link_check.c"
     COMMENT "Linking the whole libc into a PIE (undefined symbol check)"
     VERBATIM)
+# The <math.h> classification macros in a program built without optimization:
+# they must link for every argument type (tests/math_macros_check.c).
+set(LIBC_MACROS_CHECK_ELF "${CMAKE_CURRENT_BINARY_DIR}/libc_math_macros_check.elf")
+set(LIBC_TARGET_FLAGS_O0 ${LIBC_TARGET_FLAGS})
+list(REMOVE_ITEM LIBC_TARGET_FLAGS_O0 -O2)
+add_custom_command(
+    OUTPUT "${LIBC_MACROS_CHECK_ELF}"
+    COMMAND ${CMAKE_C_COMPILER} ${LIBC_TARGET_FLAGS_O0} -O0 -isystem "${LIBC_INCLUDE_DIR}"
+            -fuse-ld=lld -Wl,-pie -Wl,-e,_start -Wl,--pack-dyn-relocs=none
+            -Wl,-z,norelro -Wl,-z,noexecstack -Wl,-z,max-page-size=4096
+            "${LIBC_DIR}/tests/math_macros_check.c" "$<TARGET_FILE:koraos_libc>"
+            -o "${LIBC_MACROS_CHECK_ELF}"
+    DEPENDS koraos_libc "${LIBC_DIR}/tests/math_macros_check.c" "${LIBC_INCLUDE_DIR}/math.h"
+    COMMENT "Linking the math classification macros at -O0 (no compiler-rt check)"
+    VERBATIM)
 if(LIBC_STANDALONE)
-    add_custom_target(libc_link_check ALL DEPENDS "${LIBC_LINK_CHECK_ELF}")
+    add_custom_target(libc_link_check ALL
+        DEPENDS "${LIBC_LINK_CHECK_ELF}" "${LIBC_MACROS_CHECK_ELF}")
 else()
-    add_custom_target(libc_link_check DEPENDS "${LIBC_LINK_CHECK_ELF}")
+    add_custom_target(libc_link_check
+        DEPENDS "${LIBC_LINK_CHECK_ELF}" "${LIBC_MACROS_CHECK_ELF}")
 endif()
 
 # Every public header must compile on its own (and twice, for the include

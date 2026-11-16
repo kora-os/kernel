@@ -45,14 +45,19 @@ typedef double double_t;
     __builtin_fpclassify(FP_NAN, FP_INFINITE, FP_NORMAL, FP_SUBNORMAL, FP_ZERO, (x))
 #if __LDBL_MANT_DIG__ == 113
 // The compiler would classify a binary128 long double with comparisons, which
-// are compiler-rt calls; the libc looks at its bits instead.
+// are compiler-rt calls; the libc looks at its bits instead. The choice is
+// made with __builtin_choose_expr and not with ?:, so that the branch not
+// taken produces no code at all: without optimization, a compiler may
+// otherwise emit the conversion of a double argument to long double, another
+// compiler-rt call, for a call that never happens.
 int __fpclassifyl(long double x);
-#define _LIBC_IS_LONG(x) (sizeof(x) == sizeof(long double))
-#define fpclassify(x) (_LIBC_IS_LONG(x) ? __fpclassifyl(x) : _LIBC_FPCLASSIFY(x))
-#define isfinite(x) (_LIBC_IS_LONG(x) ? __fpclassifyl(x) > FP_INFINITE : __builtin_isfinite(x))
-#define isinf(x) (_LIBC_IS_LONG(x) ? __fpclassifyl(x) == FP_INFINITE : __builtin_isinf(x))
-#define isnan(x) (_LIBC_IS_LONG(x) ? __fpclassifyl(x) == FP_NAN : __builtin_isnan(x))
-#define isnormal(x) (_LIBC_IS_LONG(x) ? __fpclassifyl(x) == FP_NORMAL : __builtin_isnormal(x))
+#define _LIBC_CLASSIFY(x, long_double, other) \
+    __builtin_choose_expr(sizeof(x) == sizeof(long double), (long_double), (other))
+#define fpclassify(x) _LIBC_CLASSIFY(x, __fpclassifyl(x), _LIBC_FPCLASSIFY(x))
+#define isfinite(x) _LIBC_CLASSIFY(x, __fpclassifyl(x) > FP_INFINITE, __builtin_isfinite(x))
+#define isinf(x) _LIBC_CLASSIFY(x, __fpclassifyl(x) == FP_INFINITE, __builtin_isinf(x))
+#define isnan(x) _LIBC_CLASSIFY(x, __fpclassifyl(x) == FP_NAN, __builtin_isnan(x))
+#define isnormal(x) _LIBC_CLASSIFY(x, __fpclassifyl(x) == FP_NORMAL, __builtin_isnormal(x))
 #else
 #define fpclassify(x) _LIBC_FPCLASSIFY(x)
 #define isfinite(x) __builtin_isfinite(x)
