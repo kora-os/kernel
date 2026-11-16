@@ -572,7 +572,7 @@ long __syscall(long number, long a0, long a1, long a2, long a3) {
         }
         exit_armed = 0;
         last_exit_status = (int)a0;
-        longjmp(armed_exit_env, 1);
+        fake_longjmp(armed_exit_env, 1);
     default:
         return handler != NULL ? handler(number, a0, a1, a2, a3) : -1;
     }

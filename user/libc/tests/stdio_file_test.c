@@ -275,7 +275,7 @@ static void test_exit_closes_files(void) {
     reset();
     FILE *f = fopen("unclosed", "w");
     fputs("buffered, never closed", f);
-    if (setjmp(&env) == 0) {
+    if (fake_setjmp(&env) == 0) {
         fake_arm_exit(&env);
         exit(0);
     }

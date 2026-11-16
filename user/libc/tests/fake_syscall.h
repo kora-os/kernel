@@ -40,15 +40,19 @@ void fake_set_page_budget(size_t pages);
 // Release the freed runs held back for stale reads (see fake_syscall.c).
 void fake_flush_freed_runs(void);
 
-// Arm SYS_EXIT: the next exit stores its status and longjmp()s to `env`. An
-// exit while unarmed traps. The host's headers are shadowed by the libc's, so
-// setjmp/longjmp are declared by hand with a buffer larger than any host's
-// jmp_buf.
+// Arm SYS_EXIT: the next exit stores its status and jumps to `env`. An exit
+// while unarmed traps. The host's headers are shadowed by the libc's, and
+// host_rename.h renames the libc's own setjmp and longjmp, so the host's are
+// bound by symbol name here, with a buffer larger than any host's jmp_buf.
 typedef struct {
     _Alignas(16) long opaque[64];
 } fake_jmp_buf;
-int setjmp(fake_jmp_buf *env) __attribute__((returns_twice));
-void longjmp(fake_jmp_buf *env, int value) __attribute__((noreturn));
+#define FAKE_STRINGIFY2(x) #x
+#define FAKE_STRINGIFY(x) FAKE_STRINGIFY2(x)
+#define FAKE_HOST_SYMBOL(name) __asm__(FAKE_STRINGIFY(__USER_LABEL_PREFIX__) #name)
+int fake_setjmp(fake_jmp_buf *env) __attribute__((returns_twice)) FAKE_HOST_SYMBOL(setjmp);
+void fake_longjmp(fake_jmp_buf *env, int value) __attribute__((noreturn))
+    FAKE_HOST_SYMBOL(longjmp);
 
 void fake_arm_exit(fake_jmp_buf *env);
 int fake_exit_status(void);

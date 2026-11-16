@@ -116,6 +116,8 @@ test.
 | `errno_test.c` | `errno` storage, distinct codes, `strerror` for every code and the unknown fallback |
 | `binary128_test.c` | `src/internal/binary128.h`: the integer-only double/binary128 conversions behind `strtold` and `%Lf`. Widening (normals, signed zeros, subnormals, infinities, NaN payloads) and narrowing (ties to even, carries, overflow, subnormal results), as bit patterns; 100 000 random round trips |
 | `stdlib_exit_test.c` | `exit`, `_Exit`, `quick_exit` and `abort` reach `SYS_EXIT` with the right status; `atexit`/`at_quick_exit` handlers run last first and once, a handler may register another, the 32-handler limit, `_Exit`/`abort` run none |
+| `signal_test.c` | `signal` and `raise`: handlers installed and returned for the six ISO signals, other numbers and `SIG_ERR` rejected with `EINVAL`, `raise` calls the handler in the caller and leaves it installed, `SIG_IGN`, the default action (exit code minus the signal number), a handler raising its own signal or installing another; `abort` raises `SIGABRT` and ends the program even if the handler returns or the signal is ignored, unless the handler jumps out |
+| `setjmp_test.c` | `src/setjmp/setjmp.S`, on arm64 hosts only (it is AArch64 assembly; no sanitizers): return values, `longjmp(env, 0)` giving 1, a jump out of 40 frames, independent buffers, and `tests/setjmp_registers.S`, which fills x19 to x28 and d8 to d15, jumps and reports every register, frame pointer or stack pointer that did not come back. libcprobe runs the same checks on the target, which is where CI (x86-64 hosts) covers them |
 | `stdlib_sort_test.c` | `qsort` over 15 sizes and 6 input shapes (sorted permutation, at most about 2 n log2 n comparisons), 1-byte, 3-byte, 24-byte and unaligned elements; `bsearch` hits and misses at every position |
 | `stdlib_misc_test.c` | `abs`/`div` families at the limits (no signed-overflow UB), `rand`/`srand` sequences, range and rough uniformity, `getenv` |
 | `stdio_snprintf_test.c` | The `snprintf` family, mostly differential: about 490 000 combinations of flags, width and precision (literal and `*`), length modifier and edge values for `d i o u x X c s`, and about 250 000 for `f e E g G a A` (halfway cases, carries, extremes, random doubles, `%.40f` expansions), must match the host libc's `snprintf` byte for byte. By hand: inf/nan, `%a` subnormals and ties (the host libcs disagree there), `(null)`, `%p`, unknown conversions, truncation and return values, every `%n` length, UTF-8 for `%lc`/`%ls` (precision never splits a character, `EILSEQ`), `EOVERFLOW`. libcprobe repeats a many-argument `snprintf` on the target, whose AAPCS64 `va_list` the hosts do not use |
@@ -269,7 +271,9 @@ and child each fill all 32 vector registers and FPCR; the child must start from
 zeroed registers and the parent's must survive), runs `libcprobe` (the libc
 on the target: the binary128 `strtold` path, FP through libc code, `errno`,
 `qsort`/`bsearch`, the `rand` sequence, the heap, float formatting and
-`strtod`, a many-argument `snprintf`, and a fully buffered `stdout` that only
+`strtod`, a many-argument `snprintf`, `setjmp`/`longjmp` with a check of
+every callee-saved register, a signal handler that jumps out of `abort`, and a
+fully buffered `stdout` that only
 `exit` flushes, after the `atexit` handler; on writable roots also
 `libcprobe files`: file streams through the real FAT32 layer, then `sync`),
 checks `tasks` (init and the shell

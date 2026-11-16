@@ -1,10 +1,11 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Program termination (C11 7.22.4). exit() runs the atexit() handlers, last
-// registered first, flushes the stdio streams, then ends the program; quick_exit() does the same with
-// the at_quick_exit() handlers; _Exit() and abort() end it at once. The
-// kernel ends the whole program, from any of its threads, and reclaims its
-// pages. A handler may register more handlers; they run too.
+// registered first, flushes the stdio streams, then ends the program;
+// quick_exit() does the same with the at_quick_exit() handlers; _Exit() ends
+// it at once (abort() is in abort.c). The kernel ends the whole program, from
+// any of its threads, and reclaims its pages. A handler may register more
+// handlers; they run too.
 
 #include <stdlib.h>
 
@@ -15,10 +16,6 @@
 // Set by stdio once a stream has buffered output; NULL in programs that never
 // use stdio, so they do not link it.
 void (*__stdio_exit_hook)(void);
-
-// Exit code of a program ended by abort(): negative signal number, like the
-// kernel's own kill() (-9).
-#define EXIT_ABORTED (-6)
 
 // The standard asks for at least 32 of each.
 #define MAX_HANDLERS 32
@@ -87,8 +84,4 @@ void exit(int status) {
 void quick_exit(int status) {
     run_handlers(&at_quick);
     _Exit(status);
-}
-
-void abort(void) {
-    _Exit(EXIT_ABORTED);
 }

@@ -120,15 +120,58 @@ that needs it.
 |---|---|
 | 3. Handles | The standard streams take their handles at startup instead of the fixed fds 0, 1 and 2 in `src/stdio/file.c`. With `isatty`, `stdout` is fully buffered when it is not a console. |
 | 4. Screen manager | In cooked mode `stdin` may read a whole line per call instead of one byte, and `fgets(stdin)` replaces `kgetline`. |
-| 4. Ctrl+C | Nothing while a break is a plain `kill`: the program loses at most its unflushed output. A break a program can catch (MicroPython's `KeyboardInterrupt`) needs `<signal.h>`. |
+| 4. Ctrl+C | Nothing while a break is a plain `kill`: the program loses at most its unflushed output. A break a program can catch (MicroPython's `KeyboardInterrupt`) needs the break word described under "Rest of the ISO library". |
 | Fonts | Nothing for bitmap fonts. FreeType would need `<setjmp.h>` and part of `<math.h>`. |
 
 Unicode needs nothing: `printf` passes UTF-8 bytes through and the console
 library decodes them itself. The streams already take a lock, so the threads
 of a screen manager can share them.
 
-After the migration: the console and screen work (`console-plan.md`), koracli
-on top of it (separate design discussion), then MicroPython.
+After the migration: the rest of the ISO library (below), the console and
+screen work (`console-plan.md`), koracli on top of it (separate design
+discussion), then MicroPython.
+
+## Rest of the ISO library (one PR each)
+
+What steps 1 to 8 left out. None of these steps touches the kernel.
+
+| # | Theme | Status |
+|---|-------|--------|
+| 15 | `<setjmp.h>`; ISO `<signal.h>`: `signal`, `raise`, and `abort` raising `SIGABRT` | done (#95) |
+| 16 | `<math.h>`: the C99 functions, imported from musl's libm (MIT licence) | planned |
+| 17 | `scanf` family: `sscanf`, `fscanf`, `scanf` and the `v` forms | planned |
+| 18 | `<time.h>` without a wall clock: `clock`, `difftime`, `mktime`, `gmtime`, `localtime`, `asctime`, `ctime`, `strftime`; `time()` returns `(time_t)-1` | planned |
+
+Decisions:
+
+- **Signals are synchronous.** `raise` calls the handler directly; nothing
+  is delivered from outside the program. The kernel's `kill` ends a program
+  with nothing to catch, and a fault at EL0 halts the machine, so `SIGSEGV`,
+  `SIGILL` and `SIGFPE` never come from hardware. A handler stays installed
+  after it runs. The default action ends the program with the negative
+  signal number as its exit code, the convention of the kernel's `kill`
+  (-9): `abort()` gives -6.
+- **musl's libm is copied, not linked.** Only the files needed go into
+  `user/libc/src/math`, with their licence notices. musl as a whole was
+  rejected because it is bound to Linux syscalls; its libm makes none.
+- **`long double` math runs at double precision**, like `strtold`: there is
+  no compiler-rt for binary128 arithmetic.
+- **`scanf` on `stdin` is of little use until the console has a cooked
+  mode** (no echo, Enter arrives as `'\r'`). `sscanf` and `fscanf` on files
+  are complete.
+
+Two things need the kernel, and wait for it:
+
+- **A break a program can catch** (`SIGINT` from Ctrl+C, MicroPython's
+  `KeyboardInterrupt`). The plan is the AmigaOS way, a flag instead of an
+  interruption: the program registers the address of a break word, the
+  kernel sets it, and the program polls it at safe points. Without a
+  registered word a break is a `kill`, as today. Recognizing Ctrl+C and
+  knowing the foreground program belong to the screen manager (console
+  step 4); real asynchronous signals are not planned.
+- **A wall clock** for `time()`: a clock syscall, the PL031 RTC on virt and
+  a settable clock on the Pi 3 and 4, which have no RTC. FAT32 timestamps
+  and times in `stat` follow from it.
 
 ## Known kernel gaps (not part of these steps)
 
@@ -146,7 +189,7 @@ on top of it (separate design discussion), then MicroPython.
   stream is flushed. Complete lines on `stdout` are already out; anything
   else needs an `fflush` or an `exit()`.
 - Not provided yet: the `scanf` family, `tmpfile`/`tmpnam`, `<time.h>`,
-  `<math.h>`, `<setjmp.h>`, `<signal.h>`, `<locale.h>`, `<wchar.h>`.
+  `<math.h>`, `<locale.h>`, `<wchar.h>`.
 - The main thread has a single 4 KB stack page: libc keeps large buffers off
   the stack, but exactness costs some: printing a float takes about 1.5 KB
   (its exact decimal digits), `strtod` about 750 bytes.

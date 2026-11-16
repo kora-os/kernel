@@ -170,7 +170,16 @@ if(KORAOS_HOST_CC)
     libc_host_test(binary128)
     libc_host_test(headers)
     libc_host_test(errno SOURCES src/errno/errno.c src/string/strerror.c src/string/string.c)
-    libc_host_test(stdlib_exit SOURCES src/stdlib/exit.c ${LIBC_FAKE_KERNEL})
+    libc_host_test(stdlib_exit SOURCES src/stdlib/exit.c src/stdlib/abort.c src/signal/signal.c
+                   src/errno/errno.c ${LIBC_FAKE_KERNEL})
+    libc_host_test(signal SOURCES src/signal/signal.c src/stdlib/abort.c src/stdlib/exit.c
+                   src/errno/errno.c ${LIBC_FAKE_KERNEL})
+    # setjmp.S is AArch64 assembly: its host test needs an arm64 host. On the
+    # target, libcprobe runs the same register check (QEMU smoke tests).
+    if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")
+        libc_host_test(setjmp SOURCES src/setjmp/setjmp.S tests/setjmp_registers.S
+                       FLAGS -fno-sanitize=address,undefined)
+    endif()
     libc_host_test(stdlib_sort SOURCES src/stdlib/sort.c src/string/string.c)
     libc_host_test(stdlib_misc SOURCES src/stdlib/integer.c src/stdlib/rand.c src/stdlib/getenv.c)
     libc_host_test(stdio_snprintf SOURCES src/stdio/snprintf.c src/stdio/format.c
@@ -188,8 +197,8 @@ if(KORAOS_HOST_CC)
     libc_host_test(malloc_threads SOURCES ${LIBC_MALLOC_SOURCES} FLAGS -pthread)
 
     file(GLOB_RECURSE LIBC_TEST_DEPENDS CONFIGURE_DEPENDS
-        "${LIBC_TEST_DIR}/*.c" "${LIBC_TEST_DIR}/*.h"
-        "${LIBC_SRC_DIR}/*.c" "${LIBC_SRC_DIR}/*.h" "${LIBC_INCLUDE_DIR}/*.h")
+        "${LIBC_TEST_DIR}/*.c" "${LIBC_TEST_DIR}/*.h" "${LIBC_TEST_DIR}/*.S"
+        "${LIBC_SRC_DIR}/*.c" "${LIBC_SRC_DIR}/*.h" "${LIBC_SRC_DIR}/*.S" "${LIBC_INCLUDE_DIR}/*.h")
 
     file(MAKE_DIRECTORY "${LIBC_TEST_OUT}")
     add_custom_target(libc_tests
