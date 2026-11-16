@@ -170,7 +170,10 @@ if(KORAOS_HOST_CC)
     libc_host_test(binary128)
     libc_host_test(headers)
     libc_host_test(errno SOURCES src/errno/errno.c src/string/strerror.c src/string/string.c)
-    libc_host_test(stdlib_exit SOURCES src/stdlib/exit.c ${LIBC_FAKE_KERNEL})
+    libc_host_test(stdlib_exit SOURCES src/stdlib/exit.c src/stdlib/abort.c src/signal/signal.c
+                   src/errno/errno.c ${LIBC_FAKE_KERNEL})
+    libc_host_test(signal SOURCES src/signal/signal.c src/stdlib/abort.c src/stdlib/exit.c
+                   src/errno/errno.c ${LIBC_FAKE_KERNEL})
     # setjmp.S is AArch64 assembly: its host test needs an arm64 host. On the
     # target, libcprobe runs the same register check (QEMU smoke tests).
     if(CMAKE_HOST_SYSTEM_PROCESSOR MATCHES "^(arm64|aarch64)$")

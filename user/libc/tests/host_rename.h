@@ -128,5 +128,7 @@
 
 #define setjmp kora_setjmp
 #define longjmp kora_longjmp
+#define signal kora_signal
+#define raise kora_raise
 
 #endif // LIBC_HOST_RENAME_H
