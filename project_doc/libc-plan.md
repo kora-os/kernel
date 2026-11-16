@@ -137,7 +137,7 @@ What steps 1 to 8 left out. None of these steps touches the kernel.
 
 | # | Theme | Status |
 |---|-------|--------|
-| 15 | `<setjmp.h>`; ISO `<signal.h>`: `signal`, `raise`, and `abort` raising `SIGABRT` | in progress |
+| 15 | `<setjmp.h>`; ISO `<signal.h>`: `signal`, `raise`, and `abort` raising `SIGABRT` | done (#95) |
 | 16 | `<math.h>`: the C99 functions, imported from musl's libm (MIT licence) | planned |
 | 17 | `scanf` family: `sscanf`, `fscanf`, `scanf` and the `v` forms | planned |
 | 18 | `<time.h>` without a wall clock: `clock`, `difftime`, `mktime`, `gmtime`, `localtime`, `asctime`, `ctime`, `strftime`; `time()` returns `(time_t)-1` | planned |
@@ -189,7 +189,7 @@ Two things need the kernel, and wait for it:
   stream is flushed. Complete lines on `stdout` are already out; anything
   else needs an `fflush` or an `exit()`.
 - Not provided yet: the `scanf` family, `tmpfile`/`tmpnam`, `<time.h>`,
-  `<math.h>`, `<setjmp.h>`, `<signal.h>`, `<locale.h>`, `<wchar.h>`.
+  `<math.h>`, `<locale.h>`, `<wchar.h>`.
 - The main thread has a single 4 KB stack page: libc keeps large buffers off
   the stack, but exactness costs some: printing a float takes about 1.5 KB
   (its exact decimal digits), `strtod` about 750 bytes.
