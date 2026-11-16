@@ -5,7 +5,8 @@
 // rand sequence (the same on every platform), snprintf with the AAPCS64
 // va_list (the host tests run on other variadic conventions), setjmp and
 // longjmp (AArch64 assembly, which CI's x86-64 hosts cannot run) with a
-// signal handler that jumps out of abort(), <math.h> (the functions that are
+// signal handler that jumps out of abort(), sscanf (the AAPCS64 va_list again,
+// and a float item of a thousand digits on the 4 KB stack), <math.h> (the functions that are
 // one AArch64 instruction, musl's functions giving the same bits as on the
 // hosts, and the long double functions, which move binary128 bits by hand),
 // and an atexit
@@ -360,6 +361,41 @@ static void test_math_long_double(void) {
           "nexttowardf");
 }
 
+// The scanf engine on the target: integers of every size through the AAPCS64
+// va_list, and floats, whose conversion is the deepest use of the 4 KB stack
+// in the libc (the item's text, then strtod's working space).
+static void test_sscanf(void) {
+    int i = 0, n = 0;
+    long l = 0;
+    short h = 0;
+    unsigned char hh = 0;
+    unsigned x = 0;
+    float f = 0;
+    double d = 0, e = 0;
+    char word[16], set[16], c = 0;
+    int r = sscanf(" -42 123456789012 -7 200 0xff 2.5 1e-3 hello [a,b] !", "%d %ld %hd %hhu %x %f %lf %15s %[^ ] %c%n",
+                   &i, &l, &h, &hh, &x, &f, &d, word, set, &c, &n);
+    check(r == 10 && i == -42 && l == 123456789012l && h == -7 && hh == 200 && x == 255 &&
+              f == 2.5f && d == 1e-3 && strcmp(word, "hello") == 0 && strcmp(set, "[a,b]") == 0 &&
+              c == '!' && n == 52,
+          "sscanf with ten conversions");
+    // A float with more digits than strtod keeps, and its exact neighbour.
+    static char digits[1200];
+    memset(digits, '0', 1100);
+    memcpy(digits, "1.0000000000000001110223024625156540423631668090820312", 54);
+    digits[1100] = '\0';
+    check(sscanf(digits, "%lf", &d) == 1 && d == 1.0, "sscanf: just below the midpoint above 1");
+    digits[54] = '5';
+    digits[1099] = '1';
+    check(sscanf(digits, "%lf", &e) == 1 && e == 1.0 + DBL_EPSILON,
+          "sscanf: just above it, a thousand digits later");
+    long double wide = 0.0L;
+    check(sscanf("1.5", "%Lf", &wide) == 1 && quad_is(wide, 0x3fff800000000000ull, 0),
+          "sscanf %Lf stores a binary128");
+    check(sscanf("0xz", "%x", &x) == 0 && sscanf("1e+", "%lf", &d) == EOF && sscanf("", "%d", &i) == EOF,
+          "sscanf: incomplete numbers fail");
+}
+
 static void test_files(void) {
     const char *name = "libc probe.txt", *moved = "libc probe moved.txt";
     FILE *f = fopen(name, "w");
@@ -385,6 +421,16 @@ static void test_files(void) {
         lines++;
     }
     check(lines == 200 && good && feof(f) && !ferror(f), "read back with fgets");
+    // The same lines through fscanf.
+    rewind(f);
+    int number = 0, rows = 0;
+    double value = 0;
+    good = 1;
+    while (fscanf(f, " line %d %lf", &number, &value) == 2) {
+        good &= number == rows && value == rows / 8.0;
+        rows++;
+    }
+    check(rows == 200 && good && feof(f), "read back with fscanf");
     check(fseek(f, 0, SEEK_END) == 0 && ftell(f) == total, "ftell at the end");
     check(fseek(f, line10, SEEK_SET) == 0 && fgets(line, sizeof line, f) != NULL &&
               strcmp(line, "line 010 1.250\n") == 0,
@@ -435,6 +481,7 @@ int main(int argc, char **argv) {
     test_math_instructions();
     test_math_values();
     test_math_long_double();
+    test_sscanf();
     if (failed) {
         return 1;
     }
