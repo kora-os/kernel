@@ -1,15 +1,16 @@
 # Console and screen plan (handover)
 
-Status: **proposal, not started.** It is the outcome of a design discussion on
+Status: **step 1 of 5 done.** It is the outcome of a design discussion on
 2026-11-12 and is the "terminal design" that `libc-plan.md` defers to koracli.
-Nothing here is implemented, and no milestone number has been assigned yet.
+No milestone number has been assigned yet.
 
 Diagram (Claude Whiteboard, private to the author unless shared):
 https://claude.ai/artifact/QXgrsw5YDAKwu67d5rLjhX. The Mermaid block below
 carries the same content, so the link is not needed to follow the plan.
 
 Code references were read from `lazzelor/koraos-kernel` at `ee4225f`
-(2026-11-11). Check them against the working tree before relying on them.
+(2026-11-11), and "Today" was brought up to date with step 1. Check them
+against the working tree before relying on them.
 
 ## Decision
 
@@ -43,12 +44,16 @@ to pretend to be one.
   grid, scrollback, alternate screen. Already pixel-free; `console_fb.c` is
   the renderer, with the embedded 8x8 font (`font8x8.h`).
 - `src/tty.c`: input ring of **bytes**, `tty_read` / `tty_write`, ONLCR, the
-  serial route switch (Ctrl-T) and scrollback requests.
+  serial route switch (Ctrl-T) and scrollback requests. Its readers are the
+  one consumer of the input event queue, for now.
 - `src/sys/syscall.c`: fd 0 is hard-wired to `tty_read`, fd 1 and 2 to
   `tty_write`. Other fds are FAT32 files.
-- Keys become bytes inside the kernel: `virtio_input.c` and
-  `circle/circle_env.cpp` call `tty_input_push`. Terminal status replies take
-  the same path (`term.c`).
+- Keys are events (step 1): `virtio_input.c` and `circle/circle_env.cpp` post
+  a `struct input_event` (`include/input/event.h`) to the kernel queue in
+  `src/input/input.c`. They still become bytes inside the kernel, in the
+  temporary adapter `src/input/input_tty.c`, which the tasks reading the tty
+  run. Serial input and terminal status replies (`term.c`) are bytes already
+  and call `tty_input_push`.
 - Line editing is in user space: `kgetline` in `user/libk/koraos.h`.
 - The kernel log is UART-only (`kernel.c`). Programs can already draw straight
   into the framebuffer through `fb_info` (`gfxdemo`).
@@ -131,13 +136,37 @@ flowchart TB
 
 ## Steps (one PR each)
 
-- [ ] 1. Keyboard to an event queue. Keep the current byte path as a
+- [x] 1. Keyboard to an event queue. Keep the current byte path as a
       temporary adapter so nothing else changes.
 - [ ] 2. Lift `term.c` into a library that builds for kernel and user space.
 - [ ] 3. Message ports and handle-based stdin/stdout.
 - [ ] 4. Screen manager on top of the library. The kernel terminal becomes
       the boot and panic fallback only.
 - [ ] 5. Mouse events, then the graphics layer.
+
+## Step 1 as built
+
+- **The event** is 16 bytes: type (key down or up), a repeat flag, the
+  modifier state, the uptime in milliseconds, the key code and the Unicode
+  character. The last 8 bytes are the payload; step 5 gives mouse events
+  their own.
+- **The key code is a USB HID usage** (Keyboard/Keypad page): the key's
+  position, whatever the layout prints on it. The Pi's keyboard sends it as
+  is; the VirtIO keyboard maps its evdev codes to it.
+- **The character comes from the driver's layout**: the built-in US table on
+  virt, Circle's keymap (`KORAOS_KEYMAP`, picked at build time) on the Pi.
+  Ctrl, Alt and GUI never change it; they are in the modifier state, and what
+  they mean is the consumer's business.
+- **The queue** holds 256 events, is filled from interrupt handlers and
+  drops, and counts, new events when it is full. It has one consumer, which
+  provides `input_consumer_wake()`.
+- **The adapter** is that consumer until step 4: a task reading the tty
+  drains the queue into the byte ring, as the bytes and xterm sequences the
+  VirtIO keyboard sent before. The Pi's keyboard now sends the same ones, so
+  its arrows, Home, End, Insert, Delete and Ctrl+punctuation reach programs
+  (they were dropped), and Alt+key types the key (it typed nothing). Step 4
+  removes the adapter, the byte ring's keyboard half and
+  `input_consumer_wake()` with it: the screen manager reads the events.
 
 ## Safety net
 
@@ -156,3 +185,15 @@ is today.
 - Whether boot text stays on screen in the long run or only the log ring.
 - Milestone number. `roadmap.md` has an unnumbered section and
   `features.yaml` has the entries, as planned features without a milestone.
+- Where the keyboard layout lives. Today each driver has its own (see "Step 1
+  as built"). The aim is layouts as data files that a user command loads, in
+  the manner of DOS's `KEYB` and `KEYBOARD.SYS`, with one translator for
+  every keyboard. Because an event always carries the key's position and the
+  modifiers, the translation can move without changing the event. What is
+  open is who holds the active table: the kernel's input layer, which keeps
+  the event's character right for every consumer and for the boot and panic
+  fallback, or the console library, as AmigaOS does with `keymap.library`.
+  Dead keys and compose sequences are stateful and belong to the console
+  either way.
+- What Alt does in a console. The event reports it; the step 1 adapter
+  ignores it. The xterm convention is to send ESC before the key.

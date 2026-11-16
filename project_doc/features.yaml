@@ -442,7 +442,7 @@ categories:
         milestone: 11
       - id: input-events
         name: Input events
-        status: planned
+        status: in_progress
         description: Keys and mouse reach user space as structured events instead of bytes.
       - id: mouse
         name: Mouse
