@@ -32,6 +32,8 @@ set(LIBC_SRC_DIR "${LIBC_DIR}/src")
 set(LIBC_INCLUDE_DIR "${LIBC_DIR}/includes")
 set(LIBC_INTERNAL_DIR "${LIBC_SRC_DIR}/internal")
 file(GLOB_RECURSE LIBC_SOURCES CONFIGURE_DEPENDS "${LIBC_SRC_DIR}/*.c" "${LIBC_SRC_DIR}/*.S")
+# src/math is being imported from musl and does not build yet.
+list(FILTER LIBC_SOURCES EXCLUDE REGEX "/src/math/")
 
 # Standalone, the library is part of `all`; inside the kernel build it is only
 # built on request.
