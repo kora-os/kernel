@@ -110,8 +110,11 @@ int main(int argc, char **argv) {
 newline, in one write. Look at the existing programs for patterns: [`user/hello.c`](../user/hello.c) (minimal),
 [`user/echo.c`](../user/echo.c) (argv), [`user/cat.c`](../user/cat.c) and
 [`user/ls.c`](../user/ls.c) (the file syscalls),
-[`user/init.c`](../user/init.c) (spawning), and
-[`user/gfxdemo.c`](../user/gfxdemo.c) (framebuffer).
+[`user/init.c`](../user/init.c) (spawning),
+[`user/gfxdemo.c`](../user/gfxdemo.c) (framebuffer), and
+[`user/condemo.c`](../user/condemo.c) (consoles of the console library,
+`user/libconsole`, drawn in windows on the framebuffer; its registration in
+`cmake/userfs.cmake` shows how a program links the library's sources).
 
 ## Building it
 

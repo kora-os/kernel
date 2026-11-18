@@ -47,6 +47,10 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
 - Kernels built without `--ramdisk` boot from the first volume with
   `/bin/init` (SD card, USB drive; a VirtIO disk on virt), so QEMU raspi runs
   need `--ramdisk 16M` or a card/drive from `tests/create-sd-card-image.py`.
+- The terminal (escape parser, grid, renderer) is the console library
+  `user/libconsole`: one source built into the kernel (`KORAOS_KERNEL`, glue in
+  `src/video/console_fb.c`) and linked by user programs (`condemo`). Keep it
+  free of kernel calls; what it needs comes through `term_host_t`.
 - Keyboards post key events to the input event queue (`src/input`,
   `include/input/input.h`); only input that is bytes already (serial, the
   terminal's status replies) calls `tty_input_push`. The adapter that turns
