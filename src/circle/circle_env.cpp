@@ -3,12 +3,14 @@
 // Construction and bring-up of the vendored Circle USB stack on the KoraOS HAL
 // bridge: the host controller for this board (CUSBHCIDevice is the DWC2 on the
 // Pi 3, the xHCI behind PCIe on the Pi 4), device enumeration, the USB
-// keyboard feeding the tty and the mass storage drives for the block layer.
+// keyboard feeding the input event queue and the mass storage drives for the
+// block layer.
 // QEMU's raspi4b has no PCIe, so the caller gates enumeration with `enumerate`.
 
 #include "circle_env.h"
 
 #include <circle/devicenameservice.h>
+#include <circle/input/keymap.h>
 #include <circle/interrupt.h>
 #include <circle/logger.h>
 #include <circle/machineinfo.h>
@@ -18,49 +20,72 @@
 #include <circle/usb/usbkeyboard.h>
 
 #include "drivers/usb_storage.h"
+#include "input/hid_keyboard.h"
+#include "input/hid_keys.h"
+#include "input/input.h"
 #include "mm/mmu.h"
-#include "tty.h"
 
 extern "C" void tfp_printf(const char *fmt, ...);
 
 namespace {
 
-// Cooked keystrokes from the USB keyboard (IRQ context) feed the tty input
-// queue that read(fd 0) waits on. Multi-byte strings are escape sequences for
-// arrows, function keys and the like, which nothing consumes yet: drop them.
-void key_pressed_handler(const char *pString) {
-    if (pString[0] != '\0' && pString[1] == '\0') {
-        tty_input_push(pString[0]);
+// The USB keyboard, in Circle's raw mode: each HID boot report (IRQ context,
+// core 0) is compared with the one before, and every key that went down or up
+// is posted to the input event queue. Circle's cooked mode, which hands over
+// strings, is not used.
+struct hid_keyboard usb_keyboard;
+
+// Circle's keymap gives the character of a key under the layout picked at
+// build time (KORAOS_KEYMAP); it also keeps the Caps Lock and Num Lock state.
+CKeyMap *usb_keymap;
+
+// The character a key types, as a Unicode code point, or 0 for none. Call
+// once for each key that goes down: Translate() is what toggles the locks.
+// `level` holds the modifiers that pick a column of the layout (Shift and
+// AltGr); Ctrl, Alt and GUI are left out, since they do not change the
+// character.
+uint32_t key_character(uint8_t usage, uint8_t level) {
+    u16 code = usb_keymap->Translate(usage, level);
+    char buffer[2];
+    const char *string = usb_keymap->GetString(code, 0, buffer);
+    // Keys that type nothing have no string, a control code (Enter, Tab,
+    // Backspace, Escape) or an escape sequence (arrows, function keys).
+    if (string == 0 || string[0] == '\0' || string[1] != '\0') {
+        return 0;
     }
+    unsigned char c = (unsigned char)string[0];
+    if (c < 0x20 || c == 0x7F) {
+        return 0;
+    }
+    // The keymaps are in Windows-1252, which is Unicode outside 0x80 to 0x9F;
+    // of that range they only use the euro sign.
+    if (c == 0x80) {
+        return 0x20AC;
+    }
+    return c >= 0x80 && c <= 0x9F ? 0 : c;
 }
 
-// Shift+PageUp / Shift+PageDown scroll the screen's history. Circle's keymaps
-// give these no cooked string, so they are picked out of the raw HID boot
-// reports; the handler runs in mixed mode, so cooked keys still flow above.
-constexpr unsigned char kHidPageUp = 0x4B;
-constexpr unsigned char kHidPageDown = 0x4E;
-constexpr unsigned char kHidShiftMask = 0x02 | 0x20;  // left / right shift
+void key_changed(void *, uint8_t usage, bool down, uint8_t modifiers) {
+    struct input_event event = {};
+    event.type = down ? INPUT_EVENT_KEY_DOWN : INPUT_EVENT_KEY_UP;
+    event.keycode = usage;
+    if (down && usage < HID_KEY_LEFT_CTRL) {
+        event.codepoint = key_character(
+            usage, modifiers & (KEY_LSHIFT_MASK | KEY_RSHIFT_MASK | KEY_ALTGR_MASK));
+    }
+    u8 locks = usb_keymap->GetLEDStatus();
+    event.modifiers = modifiers;  // a report's modifier byte is INPUT_MOD_*'s low byte
+    if (locks & KEYB_LED_CAPS_LOCK) {
+        event.modifiers |= INPUT_MOD_CAPS_LOCK;
+    }
+    if (locks & KEYB_LED_NUM_LOCK) {
+        event.modifiers |= INPUT_MOD_NUM_LOCK;
+    }
+    input_post(&event);
+}
 
 void key_status_raw(unsigned char ucModifiers, const unsigned char RawKeys[6]) {
-    static unsigned char previous[6];
-    for (unsigned i = 0; i < 6; i++) {
-        unsigned char key = RawKeys[i];
-        bool held_before = false;
-        for (unsigned j = 0; j < 6; j++) {
-            held_before |= key == previous[j];
-        }
-        if (key == 0 || held_before || !(ucModifiers & kHidShiftMask)) {
-            continue;
-        }
-        if (key == kHidPageUp) {
-            tty_scrollback(1);
-        } else if (key == kHidPageDown) {
-            tty_scrollback(-1);
-        }
-    }
-    for (unsigned i = 0; i < 6; i++) {
-        previous[i] = RawKeys[i];
-    }
+    hid_keyboard_report(&usb_keyboard, ucModifiers, RawKeys, key_changed, 0);
 }
 
 }  // namespace
@@ -132,7 +157,8 @@ void circle_usb_init(int enumerate) {
         return;
     }
 
-    pKeyboard->RegisterKeyPressedHandler(key_pressed_handler);
-    pKeyboard->RegisterKeyStatusHandlerRaw(key_status_raw, TRUE /* mixed mode */);
+    static CKeyMap KeyMap;
+    usb_keymap = &KeyMap;
+    pKeyboard->RegisterKeyStatusHandlerRaw(key_status_raw, FALSE /* raw only */);
     tfp_printf("circle: USB keyboard ready -- input goes to the screen terminal\n");
 }

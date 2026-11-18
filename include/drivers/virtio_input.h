@@ -2,24 +2,22 @@
 #pragma once
 
 #include "common.h"
+#include "input/event.h"
 
 // Initialize one modern virtio MMIO keyboard discovered by the platform DTB.
-// IRQ input feeds the existing TTY; failure leaves the serial input available.
+// Its interrupt handler posts key events to the input queue (input/input.h);
+// failure leaves the serial input available.
 bool virtio_input_init(void);
 
-// Pure US evdev key translation, shared with host tests. A result may contain
-// a NUL control byte, so length (rather than string termination) is authoritative.
+// Pure evdev key translation with a US layout, shared with host tests: Linux
+// evdev key codes in, input events out.
 struct virtio_keymap_state {
-    uint8_t shift;
-    uint8_t control;
+    uint8_t modifiers;  // held modifier keys, as the low byte of INPUT_MOD_*
     bool caps_lock;
     bool caps_down;
 };
-struct virtio_keymap_result {
-    char bytes[4];
-    unsigned length;
-    int scroll;
-};
-void virtio_keymap_event(struct virtio_keymap_state *state, uint16_t type,
-                         uint16_t code, uint32_t value,
-                         struct virtio_keymap_result *result);
+// Feed one device event (type, code, value). Returns true when it is a key
+// going down, repeating or going up, with `event` filled (but for its time);
+// false for everything else, `event` untouched.
+bool virtio_keymap_event(struct virtio_keymap_state *state, uint16_t type,
+                         uint16_t code, uint32_t value, struct input_event *event);

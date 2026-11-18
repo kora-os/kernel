@@ -341,6 +341,8 @@ space holds the escape parser, the cell grid, the renderer and the fonts; a
 screen manager task owns the screen and hosts the console instances programs
 use as stdin and stdout. It is the base for koracli and for an optional GUI.
 The design, its five steps and its open decisions are in `console-plan.md`.
+Step 1 is done: keyboards post key events to a kernel queue, and a temporary
+adapter turns them back into the bytes the terminal reads.
 
 ## QEMU virt development platform
 

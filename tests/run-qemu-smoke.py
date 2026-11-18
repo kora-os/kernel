@@ -288,9 +288,10 @@ def storage_steps(q, what, label, writable, cores):
            "%s: read-only unless built --storage-writable" % what), writes
 
 
-def run(q, graphics=True, keyboard=False, repeat=0, multi_volume=False, write_test=False, cores=1,
+def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_test=False, cores=1,
         stress=0, media=()):
-    """Yield (name, check) steps; each check raises Failure on error. `media` lists
+    """Yield (name, check) steps; each check raises Failure on error. `keyboard`
+    names the keyboard to type on ("VirtIO" or "USB"), if any. `media` lists
     the attached scratch drives as (what, volume label, writable) tuples."""
 
     def boot():
@@ -997,18 +998,24 @@ def run(q, graphics=True, keyboard=False, repeat=0, multi_volume=False, write_te
         def keyboard_input():
             # Typed entirely through the virtual device, including Shift,
             # release transitions, editing and Enter. UART is only the observer.
-            for key in ("e", "c", "h", "o", "spc", "shift-a", "b", "c", "backspace", "ret"):
+            # Every key travels as events through the kernel's input queue and
+            # comes back as bytes; the arrow is an escape sequence the shell's
+            # line editor swallows, so a broken one would show in the line.
+            # A USB keyboard is polled, and QEMU queues only a few transitions
+            # for it: leave it time to fetch each key.
+            gap = 0.1 if keyboard == "USB" else 0.02
+            for key in ("e", "c", "h", "o", "spc", "shift-a", "b", "up", "c", "backspace", "ret"):
                 reply = q.monitor("sendkey " + key + " 10")
                 if b"Error" in reply or b"unknown" in reply.lower():
                     raise Failure("QEMU key injection failed: %r" % reply)
-                time.sleep(0.02)
+                time.sleep(gap)
             q.expect(rb"^Ab\r?$")
             q.expect(rb"exited with 1")
             q.expect(PROMPT)
             q.monitor("sendkey shift-pgup 10")
-            time.sleep(0.02)
+            time.sleep(gap)
             q.monitor("sendkey shift-pgdn 10")
-        yield "VirtIO keyboard handles Shift, release, editing and Enter", keyboard_input
+        yield "%s keyboard handles Shift, release, an arrow, editing and Enter" % keyboard, keyboard_input
 
     if not graphics:
         return
@@ -1062,7 +1069,8 @@ def main():
     parser.add_argument("--expect-root-failure", action="store_true",
                         help="require a boot failure: a configured disk that does not mount, or (without "
                              "--disk) a kernel without a ramdisk finding no volume with /bin/init")
-    parser.add_argument("--keyboard", action="store_true", help="inject keys through a VirtIO keyboard")
+    parser.add_argument("--keyboard", action="store_true",
+                        help="type on a keyboard: VirtIO on virt, USB on raspi3b")
     parser.add_argument("--disk", help="external bare FAT32 or MBR FAT32 disk for virt")
     parser.add_argument("--multi-volume", action="store_true", help="require scratch BOOT/EXTRAS partitions")
     parser.add_argument("--write-test", action="store_true", help="mutate a disposable writable FAT32 root")
@@ -1140,9 +1148,13 @@ def main():
     elif args.usb_stick_writable:
         parser.error("--usb-stick-writable requires --usb-stick")
     if args.keyboard:
-        if args.machine != "virt":
-            parser.error("--keyboard requires virt")
-        extra += ["-device", "virtio-keyboard-device"]
+        # QEMU's raspi4b has no PCIe, so no xHCI and no USB keyboard.
+        if args.machine == "raspi4b":
+            parser.error("--keyboard requires virt or raspi3b")
+        if args.machine == "virt":
+            extra += ["-device", "virtio-keyboard-device"]
+        elif not args.usb_stick:  # which brings a keyboard with it
+            extra += ["-device", "usb-kbd"]
     if args.disk:
         if args.machine != "virt" or not os.path.isfile(args.disk):
             parser.error("--disk requires virt and an existing image")
@@ -1190,6 +1202,8 @@ def main():
             if m.groups() != want:
                 raise Failure("USB drive line %r, want %s" % (m.group(0), want))
             print("ok   - USB drive: %s MB, %s" % (m.group(1).decode(), m.group(2).decode()))
+        elif args.keyboard and args.machine == "raspi3b":
+            q.expect(rb"^circle: USB keyboard ready")
         if args.ramdisk:
             # After Circle's USB lines, before the SD card and VirtIO probes.
             m = q.expect(rb"^\[ramdisk\] (\d+) MB at 0x[0-9a-f]+, read-write")
@@ -1220,11 +1234,12 @@ def main():
             q.expect(rb"kernel: failed to load /bin/init")
             print("ok   - configured invalid disk fails without ramdisk fallback")
             return
-        if args.keyboard:
+        if args.keyboard and args.machine == "virt":
             q.expect(rb"\[virtio-input\] keyboard ready")
         media = ([("SD card", "SDCARD", args.sd_writable)] if args.sd else []) + \
             ([("USB drive", "USBSTICK", args.usb_stick_writable)] if args.usb_stick else [])
-        for name, check in run(q, not args.no_graphics, args.keyboard, args.repeat, args.multi_volume,
+        keyboard = ("VirtIO" if args.machine == "virt" else "USB") if args.keyboard else None
+        for name, check in run(q, not args.no_graphics, keyboard, args.repeat, args.multi_volume,
                                args.write_test or (args.ramdisk and not args.disk), cores, args.stress,
                                media):
             try:

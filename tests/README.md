@@ -40,6 +40,11 @@ Current suites:
 | `placement_test.c` | `src/proc/placement.c`: least-loaded core with ties to the lowest, offline cores skipped, even spreading, pinned requests honoured or refused (offline or nonexistent core) |
 | `spinlock_test.c` | `src/arch/spinlock.c`: one thread per simulated core; lock/trylock/irqsave bookkeeping, panics on recursive locking and foreign unlock (in forked children), and a contended counter with no lost updates or overlapping critical sections. Runs twice: on arm64 hosts the real `LDAXR`/`STXR` code, and the compiler-atomic fallback (`SPINLOCK_PORTABLE`) |
 | `kmalloc_test.c` | `src/mm/kmalloc.c`, `src/mm/kmalloc_stress.c`: alignment, zeroing, cache-line separation, block reuse, slab release, page runs, over-aligned blocks, exhaustion, invalid and double frees, balanced IRQ masking, seeded stress |
+| `input_test.c` | `src/input/input.c`, the input event queue: order, the uptime stamp, a wake-up for each queued event and none with the queue's lock held, a full queue dropping and counting the newest events while it keeps the others, wraparound from several ring positions |
+| `input_tty_test.c` | `src/input/input_tty.c`, the adapter from key events to console bytes: characters, Enter/Tab/Backspace/Escape, the xterm sequences of the navigation keys, Ctrl folding of letters and punctuation, Alt and GUI ignored, Shift+PageUp/PageDown as scrollback requests, key up and repeat |
+| `hid_keyboard_test.c` | `src/input/hid_keyboard.c`, the USB keyboard's boot reports as key transitions: presses and releases across slots, the eight modifier keys one at a time, the order within a report, rollover reports, error codes and duplicate usages |
+| `virtio_keymap_test.c` | `src/drivers/virtio_keymap.c` with `src/input/input_tty.c`: the US layout, modifiers, Caps Lock and repeats must type the bytes the VirtIO keyboard typed before events existed; then the events themselves (HID usage of every evdev key, modifier bits, repeat flag, characters) |
+| `virtio_input_test.c` | `src/drivers/virtio_input.c` on a fake VirtIO transport: discovery, queue setup, one event posted for each key transition, receive buffers reposted, malformed completions stopping the device |
 | `term_test.c` | `src/video/term.c`: autowrap, scrollback and its view, scroll regions, insert/delete/erase, alternate screen, status replies, colours (16/256/24-bit, bce), UTF-8 and DEC line drawing, tabs, origin mode, cursor style/visibility, OSC, REP |
 
 The scratch MBR fixture suite is independent of cross compilation and QEMU:
@@ -296,9 +301,11 @@ and placement (with more than one core: `@N` pins a job to core N, two
 unpinned jobs land on different cores, and two spinners lose whole time slices
 when they share a core but not on separate cores; with one core, `@1` fails),
 and checks terminal
-colors and graphics pixels using QEMU screenshots. Virt optionally injects
-Shift/release, Backspace, Enter and scrollback through a VirtIO keyboard. UART
-observes output. `--repeat N` runs `allocprobe` N times: page runs, a `malloc`
+colors and graphics pixels using QEMU screenshots. `--keyboard` types a
+command through a keyboard, a VirtIO one on virt and QEMU's USB keyboard
+(the Circle path of the Pi) on raspi3b: Shift/release, an arrow, Backspace,
+Enter and scrollback, all of it travelling through the kernel's input event
+queue. UART observes output. `--repeat N` runs `allocprobe` N times: page runs, a `malloc`
 heap grown to about 1.5 MiB with churn and `realloc`, a nested child while it is
 live, and deliberate leaks. The kernel heap's live count and the free page count
 must be the same after the last run as after the first, so everything a reaped

@@ -8,7 +8,7 @@ mkdir -p "$OUT"
     -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer \
     -I "$ROOT/include" -I "$ROOT/tests/host" \
     "$ROOT/tests/host/virtio_keymap_test.c" "$ROOT/src/drivers/virtio_keymap.c" \
-    -o "$OUT/virtio_keymap_test"
+    "$ROOT/src/input/input_tty.c" -o "$OUT/virtio_keymap_test"
 "$OUT/virtio_keymap_test"
 "${CC:-clang}" -std=c11 -g -O1 -Wall -Wextra -Werror \
     -fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer \

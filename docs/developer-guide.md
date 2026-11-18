@@ -169,6 +169,8 @@ Typing on the serial line talks to the kernel debug console (`koraos> `, `src/co
 
 Under QEMU the serial line starts on the screen terminal and the shell is mirrored to the UART as before; Ctrl-T reaches the debug console. QEMU's raspi3b models the Pi 3's DWC2 USB controller, so the raspi3b kernel enumerates there too (QEMU's `usb-kbd` and `usb-storage` devices work); raspi4b has no PCIe, so no Pi 4 USB. The keyboard layout defaults to US; pick another of Circle's keymaps at configure time with `-DKORAOS_KEYMAP=IT` (or UK, DE, FR, ES, DV).
 
+Keyboards do not hand bytes to the terminal. The USB keyboard (`src/circle/circle_env.cpp`) and the VirtIO keyboard (`src/drivers/virtio_input.c`) post key events to the kernel's input event queue (`include/input/input.h`): key down and up, the key's position as a USB HID usage, the modifier state and the Unicode character the key types under the layout. For now the tasks reading the terminal turn those events back into bytes and xterm escape sequences (`src/input/input_tty.c`), the same ones on every target: arrows, Home, End, Insert, Delete and PageUp/PageDown send their sequences, Ctrl folds letters and punctuation to control codes, and Alt changes nothing. That adapter is temporary: `project_doc/console-plan.md` moves the terminal to user space, where a console reads the events itself. Serial input and the terminal's status replies are bytes already and skip the queue.
+
 The screen terminal understands the xterm escape sequences that the `xterm-256color` terminfo entry uses: cursor movement and addressing, erase/insert/delete, scroll regions, SGR attributes with 16, 256 and 24-bit colour, the alternate screen, save/restore cursor, tab stops, DEC line drawing (and UTF-8 box characters), and the status/size reports. `termdemo` shows most of it. **Shift+PgUp / Shift+PgDn** scroll back through the history (`TERM_SCROLLBACK_LINES`, default 1000); new output returns to the live screen. The cursor is a block by default; set `TERM_DEFAULT_CURSOR` in `include/video/term.h` to `TERM_CURSOR_UNDERLINE` or `TERM_CURSOR_BAR` (programs can also change it with `ESC [ n SP q`).
 
 ## Tests
@@ -211,7 +213,7 @@ symbols. Pi GPIO, mailbox and Circle USB are excluded from virt.
 
 ramfb provides a 1024x768 XRGB8888 screen and `fb_info`; `KORA_QEMU_RAMFB=0`
 omits it for serial fallback. The VirtIO keyboard uses a US keymap with
-Shift/Ctrl/Caps, editing/navigation and Shift+PgUp/PgDn scrollback.
+Shift/Ctrl/Caps; its keys reach the terminal as input events, like the Pi's.
 `KORA_QEMU_KEYBOARD=0` omits it. UART mirrors shell output and Ctrl-T switches
 to the debug console. Pi USB layouts still use the Circle keymap setting.
 

@@ -59,6 +59,9 @@ run_test placement src/proc/placement.c
 run_test sd src/drivers/sd.c
 run_test readahead src/drivers/readahead.c
 run_test ramdisk_image src/fs/ramdisk_image.c
+run_test input src/input/input.c
+run_test input_tty src/input/input_tty.c
+run_test hid_keyboard src/input/hid_keyboard.c
 TEST_FLAGS=(-DKORAOS_HOST_TEST)
 run_test kmalloc src/mm/kmalloc.c src/mm/kmalloc_stress.c src/arch/spinlock.c
 TEST_FLAGS=(-DKORAOS_HOST_TEST -pthread)

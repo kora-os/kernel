@@ -79,15 +79,18 @@ Take locks only in this order (a lock may be skipped, never taken backwards):
    interrupt handler
 4. `tty input` (`src/tty.c`): the console input queue, scrollback requests,
    and the condition readers sleep on
-5. `sched` (`src/proc/task.c`): task states, wait queues, sleep deadlines;
+5. `input events` (`src/input/input.c`): the input event queue. A leaf:
+   keyboard drivers post under their own locks and readers poll under
+   `tty input`, and the queue releases it before it wakes the readers
+6. `sched` (`src/proc/task.c`): task states, wait queues, sleep deadlines;
    held across a context switch and released by the task switched to
-6. `heap` (`src/mm/kmalloc.c`), then `frames` (`src/mm/frame_alloc.c`)
-7. `irq table` (`src/arch/irq.c`): handler registration against dispatch
-8. `printf` (`src/lib/panic.c`): whole writes to the serial line (`printf`
+7. `heap` (`src/mm/kmalloc.c`), then `frames` (`src/mm/frame_alloc.c`)
+8. `irq table` (`src/arch/irq.c`): handler registration against dispatch
+9. `printf` (`src/lib/panic.c`): whole writes to the serial line (`printf`
    calls, `uart_puts`, the debug console's prompt and echo, and the screen
    terminal's serial copy of each `write`), so lines from different cores
    never mix mid-line; bypassed while panicking
-9. `circle timers` (`src/circle/timer.cpp`): Circle's kernel timers, started
+10. `circle timers` (`src/circle/timer.cpp`): Circle's kernel timers, started
    on any core and fired by core 0's tick (see Circle below)
 
 A task blocks by marking itself blocked under `sched` before it drops the BKL,
@@ -105,8 +108,9 @@ opens IRQs on its own core meanwhile (a caller on core 0 would otherwise wait
 for its own completion interrupt).
 
 Circle's spinlocks come after the BKL and before `tty input`: Circle code
-holding one may allocate (`heap`, `frames`), log (`printf`), feed the keyboard
-into `tty input`, or start a kernel timer. The timer bridge's table
+holding one may allocate (`heap`, `frames`), log (`printf`), post the
+keyboard's events (`input events`, then `tty input` to wake the readers), or
+start a kernel timer. The timer bridge's table
 (`circle timers`, `src/circle/timer.cpp`) is a leaf lock; timer handlers run
 without it. Everything else Circle shares with the rest of the kernel (the
 heap, the frame allocator, the input queue, the IRQ table) is protected by the

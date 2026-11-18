@@ -47,6 +47,11 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
 - Kernels built without `--ramdisk` boot from the first volume with
   `/bin/init` (SD card, USB drive; a VirtIO disk on virt), so QEMU raspi runs
   need `--ramdisk 16M` or a card/drive from `tests/create-sd-card-image.py`.
+- Keyboards post key events to the input event queue (`src/input`,
+  `include/input/input.h`); only input that is bytes already (serial, the
+  terminal's status replies) calls `tty_input_push`. The adapter that turns
+  events into console bytes (`src/input/input_tty.c`) is temporary: see
+  `project_doc/console-plan.md`.
 - Use `run-qemu.sh` for rapid UART smoke tests; see the developer guide for hardware installation steps.
 - Documentation lives under `docs/`; do not store temporary todos there—use `project_doc/` for roadmap-level planning instead.
 
