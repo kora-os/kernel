@@ -78,6 +78,7 @@ run_test libk_console
 run_test libk_threads user/libk/mutex.c user/libk/job.c user/libk/heap.c
 run_test tools
 run_test demos user/libk/job.c
+run_test condemo user/libconsole/term.c user/libconsole/term_render.c
 run_test cp
 run_test shell_input
 

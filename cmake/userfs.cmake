@@ -51,6 +51,11 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
     foreach(name cp rm mkdir rmdir mv ps jobdemo pindemo)
         koraos_add_user_program(${name} "${USER_DIR}/${name}.c")
     endforeach()
+    # The console library (user/libconsole) is linked into the programs that
+    # use it, from source; the kernel builds the same files.
+    file(GLOB LIBCONSOLE_SOURCES CONFIGURE_DEPENDS "${USER_DIR}/libconsole/*.c")
+    koraos_add_user_program(condemo "${USER_DIR}/condemo.c" ${LIBCONSOLE_SOURCES}
+        FLAGS -Wextra -Werror)
     koraos_add_user_program(allocprobe "${SOURCE_ROOT}/tests/user/allocprobe.c")
     # fpprobe checks FP/SIMD registers it filled by hand, so its own C code
     # must not use them in between.
