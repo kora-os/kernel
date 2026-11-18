@@ -8,7 +8,7 @@
 // cursor movement and addressing, erase/insert/delete, scroll margins, SGR with
 // 16/256/true colour, alternate screen, save/restore cursor, tab stops, the DEC
 // line-drawing charset, status reports) plus scrollback. It knows nothing about
-// pixels: a renderer (src/video/console_fb.c) draws the rows it marks dirty.
+// pixels: a renderer (libconsole/term_render.h) draws the rows it marks dirty.
 //
 // Part of the console library, which builds into the kernel and into user
 // programs alike: what it needs from its host (memory, a way to answer status

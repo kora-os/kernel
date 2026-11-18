@@ -1,13 +1,13 @@
+// SPDX-License-Identifier: GPL-3.0-or-later
+//
+// The kernel's framebuffer console: libconsole's terminal and renderer on the
+// screen, and the screen_* calls the tty uses. See console_fb.h.
+
 #include "video/console_fb.h"
 
-#include "libconsole/font8x8.h"
 #include "mm.h"
 #include "mm/frame_alloc.h"
 #include "tty.h"
-
-#define FONT_WIDTH 8
-#define FONT_HEIGHT 8
-#define NO_CURSOR 0xFF
 
 // The terminal's buffers come from the frame allocator, and are never freed.
 static void *console_alloc(void *ctx, size_t bytes) {
@@ -25,93 +25,28 @@ static void console_reply(void *ctx, const char *bytes, size_t length) {
 
 static const term_host_t console_host = {console_alloc, console_reply, NULL};
 
-// Paint one cell into the framebuffer (32 bpp, writes only), optionally with the
-// cursor on it.
-static void draw_cell(fb_console_t *console, uint32_t row, uint32_t col,
-                      const term_cell_t *cell, uint8_t cursor) {
-    uint32_t fg = cell->fg;
-    uint32_t bg = cell->bg;
-    if (cell->attr & TERM_ATTR_REVERSE) {
-        uint32_t tmp = fg;
-        fg = bg;
-        bg = tmp;
-    }
-    if (cursor == TERM_CURSOR_BLOCK) {
-        uint32_t tmp = fg;
-        fg = bg;
-        bg = tmp;
-    }
-    const uint8_t *glyph = cell->ch < 0x80 ? font8x8_basic[cell->ch] : term_glyph(cell->ch);
-
-    uint8_t *line = console->fb.buffer + row * FONT_HEIGHT * console->fb.pitch +
-                    col * FONT_WIDTH * sizeof(uint32_t);
-    for (uint32_t y = 0; y < FONT_HEIGHT; y++) {
-        uint8_t bits = glyph[y];
-        if (cell->attr & TERM_ATTR_BOLD) {
-            bits |= bits >> 1;  // no bold font: thicken the strokes
-        }
-        if ((cell->attr & TERM_ATTR_UNDERLINE) && y == FONT_HEIGHT - 1) {
-            bits = 0xFF;
-        }
-        if ((cell->attr & TERM_ATTR_STRIKE) && y == FONT_HEIGHT / 2) {
-            bits = 0xFF;
-        }
-        if (cursor == TERM_CURSOR_UNDERLINE && y >= FONT_HEIGHT - 2) {
-            bits = 0xFF;
-        }
-        if (cursor == TERM_CURSOR_BAR) {
-            bits |= 0xC0;
-        }
-        uint32_t *px = (uint32_t *)line;
-        for (uint32_t x = 0; x < FONT_WIDTH; x++) {
-            px[x] = (bits & (1u << (7 - x))) ? fg : bg;
-        }
-        line += console->fb.pitch;
-    }
-}
-
 void fb_console_flush(fb_console_t *console) {
-    if (!console) {
-        return;
-    }
-    term_t *t = &console->term;
-
-    // Redraw the row the cursor was drawn in, which erases it.
-    if (console->cursor_drawn) {
-        t->dirty[console->cursor_row] = true;
-    }
-    for (uint32_t row = 0; row < t->rows; row++) {
-        if (!t->dirty[row]) {
-            continue;
-        }
-        for (uint32_t col = 0; col < t->cols; col++) {
-            draw_cell(console, row, col, term_view_cell(t, row, col), NO_CURSOR);
-        }
-        t->dirty[row] = false;
-    }
-
-    console->cursor_drawn = false;
-    if (term_cursor_shown(t)) {
-        draw_cell(console, t->row, t->col, term_view_cell(t, t->row, t->col),
-                  t->cursor_style);
-        console->cursor_drawn = true;
-        console->cursor_row = t->row;
+    if (console) {
+        term_render_flush(&console->render);
     }
 }
 
 int fb_console_init(fb_console_t *console, uint32_t width, uint32_t height, uint32_t depth) {
     if (!console || depth != 32) {
-        return 0;  // draw_cell writes 32 bpp pixels
+        return 0;  // the renderer writes 32 bpp pixels
     }
     if (!framebuffer_init(&console->fb, width, height, depth)) {
         return 0;
     }
-    if (!term_init(&console->term, console->fb.width / FONT_WIDTH,
-                   console->fb.height / FONT_HEIGHT, TERM_SCROLLBACK_LINES,
+    if (!term_init(&console->term, console->fb.width / TERM_CELL_WIDTH,
+                   console->fb.height / TERM_CELL_HEIGHT, TERM_SCROLLBACK_LINES,
                    &console_host)) {
         return 0;
     }
-    console->cursor_drawn = false;
+    term_surface_t screen;
+    term_surface_init(&screen, console->fb.buffer, console->fb.width, console->fb.height,
+                      console->fb.pitch);
+    term_render_init(&console->render, &console->term, &screen, 0, 0);
     framebuffer_clear(&console->fb, TERM_DEFAULT_BG);  // incl. any partial cell
     fb_console_flush(console);
     return 1;

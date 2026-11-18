@@ -1,20 +1,20 @@
 #pragma once
 
 #include "common.h"
-#include "video/framebuffer.h"
 #include "libconsole/term.h"
+#include "libconsole/term_render.h"
+#include "video/framebuffer.h"
 
-// Text console on a 32 bpp framebuffer: renders a terminal (libconsole/term.h) with
-// the 8x8 font. The terminal marks the rows that changed; flushing redraws just
-// those (writes only -- the framebuffer is uncached, so it is never read back)
-// and then the cursor. A burst of output that scrolls costs one full redraw at
-// the next flush, not one per line.
+// The kernel's text console on a 32 bpp framebuffer: a terminal of the
+// console library (libconsole/term.h), drawn over the whole screen by its
+// renderer (libconsole/term_render.h). The terminal marks the rows that
+// changed; flushing redraws just those, then the cursor. A burst of output
+// that scrolls costs one full redraw at the next flush, not one per line.
 
 typedef struct {
     framebuffer_info_t fb;
     term_t term;
-    bool cursor_drawn;    // the cursor is on screen, in row cursor_row
-    uint32_t cursor_row;
+    term_render_t render;
 } fb_console_t;
 
 int fb_console_init(fb_console_t *console, uint32_t width, uint32_t height, uint32_t depth);
