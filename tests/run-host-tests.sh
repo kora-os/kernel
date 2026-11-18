@@ -52,7 +52,10 @@ python3 "$ROOT/tests/check-console-fds.py" || failed=1
 python3 "$ROOT/tests/run-write-image-tests.py" || failed=1
 python3 "$ROOT/tests/run-ramdisk-image-tests.py" || failed=1
 run_test blkdev src/fs/blkdev.c
-run_test term src/video/term.c
+# The console library (user/libconsole), built as the kernel builds it.
+TEST_FLAGS=(-DKORAOS_KERNEL -I "$ROOT/user")
+run_test term user/libconsole/term.c
+TEST_FLAGS=()
 run_test printf src/lib/printf.c
 run_test virt src/platform/virt.c
 run_test placement src/proc/placement.c

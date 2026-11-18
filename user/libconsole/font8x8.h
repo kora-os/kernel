@@ -1,6 +1,6 @@
 #pragma once
 
-#include "common.h"
+#include "libconsole/con_base.h"
 
 // 8x8 font for ASCII 0-127 (public domain)
 static const uint8_t font8x8_basic[128][8] = {

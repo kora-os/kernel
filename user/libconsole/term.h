@@ -1,14 +1,18 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #pragma once
 
-#include "common.h"
+#include "libconsole/con_base.h"
 
 // Terminal model: a grid of character cells driven by an xterm-compatible
 // escape-sequence parser (the subset the xterm-256color terminfo entry uses:
 // cursor movement and addressing, erase/insert/delete, scroll margins, SGR with
 // 16/256/true colour, alternate screen, save/restore cursor, tab stops, the DEC
 // line-drawing charset, status reports) plus scrollback. It knows nothing about
-// pixels: a renderer (video/console_fb.c) draws the rows it marks dirty.
+// pixels: a renderer (src/video/console_fb.c) draws the rows it marks dirty.
+//
+// Part of the console library, which builds into the kernel and into user
+// programs alike: what it needs from its host (memory, a way to answer status
+// reports) comes in through term_host_t.
 
 // Cursor shapes (DECSCUSR can change it at runtime; this is the default and what
 // "CSI 0 SP q" resets to).
@@ -19,7 +23,8 @@
 #define TERM_DEFAULT_CURSOR TERM_CURSOR_BLOCK
 #endif
 
-// Lines of history kept above the screen (main screen only).
+// Lines of history the kernel's screen terminal keeps above the screen (main
+// screen only). Other terminals choose their own in term_init().
 #ifndef TERM_SCROLLBACK_LINES
 #define TERM_SCROLLBACK_LINES 1000
 #endif
@@ -82,6 +87,19 @@ typedef struct {
     uint8_t attr;     // TERM_ATTR_* plus the unrendered ones below
 } term_pen_t;
 
+// What a terminal needs from whoever runs it.
+typedef struct {
+    // Memory for the cell buffers, `bytes` long, or NULL if there is none. It
+    // need not be zeroed, and the terminal never gives it back: it lives as
+    // long as the terminal.
+    void *(*alloc)(void *ctx, size_t bytes);
+    // The terminal's answers to status requests (cursor position, device
+    // attributes, size), which a real terminal sends back as if typed. May be
+    // NULL: the answers are dropped.
+    void (*reply)(void *ctx, const char *bytes, size_t length);
+    void *ctx;  // passed to both
+} term_host_t;
+
 // State saved by DECSC / CSI s and restored by DECRC / CSI u.
 typedef struct {
     uint32_t col, row;
@@ -103,6 +121,7 @@ typedef struct {
 } term_buffer_t;
 
 typedef struct {
+    term_host_t host;
     uint32_t cols, rows;
     term_buffer_t main_buf, alt_buf;
     term_buffer_t *buf;     // the screen being shown: &main_buf or &alt_buf
@@ -145,9 +164,12 @@ typedef struct {
     uint8_t utf8_left;
 } term_t;
 
-// Size the grid and allocate its buffers (from the frame allocator). Returns 0
-// if memory is short.
-int term_init(term_t *t, uint32_t cols, uint32_t rows);
+// Size the grid, at most TERM_MAX_COLS by TERM_MAX_ROWS, with up to `history`
+// lines of scrollback, and allocate its buffers through `host->alloc`. With
+// too little memory for the scrollback the terminal gets none. Returns 0 if
+// even the screens do not fit.
+int term_init(term_t *t, uint32_t cols, uint32_t rows, uint32_t history,
+              const term_host_t *host);
 
 // Feed one byte of output.
 void term_putc(term_t *t, char c);

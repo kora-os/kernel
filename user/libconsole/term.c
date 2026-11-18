@@ -2,12 +2,7 @@
 //
 // Terminal model and xterm-compatible escape-sequence parser. See term.h.
 
-#include "video/term.h"
-
-#include "lib/string.h"
-#include "mm.h"
-#include "mm/frame_alloc.h"
-#include "tty.h"
+#include "libconsole/term.h"
 
 // Pen-only attributes: applied when a glyph's colours are resolved, not drawn.
 #define PEN_DIM 0x40
@@ -407,11 +402,15 @@ static void print_ascii(term_t *t, uint8_t c) {
     }
 }
 
-// --- Replies (status reports go back as keyboard input) -----------------------
+// --- Replies (status reports go back through the host, as if typed) ----------
 
-static void reply(const char *s) {
-    while (*s) {
-        tty_input_push(*s++);
+static void reply(term_t *t, const char *s) {
+    size_t length = 0;
+    while (s[length]) {
+        length++;
+    }
+    if (t->host.reply) {
+        t->host.reply(t->host.ctx, s, length);
     }
 }
 
@@ -429,7 +428,7 @@ static char *append_uint(char *p, uint32_t v) {
 }
 
 // Reply "ESC [ <prefix> a ; b <final>".
-static void reply_pair(const char *prefix, uint32_t a, uint32_t b, char final) {
+static void reply_pair(term_t *t, const char *prefix, uint32_t a, uint32_t b, char final) {
     char buf[40];
     char *p = buf;
     *p++ = 0x1B;
@@ -442,7 +441,7 @@ static void reply_pair(const char *prefix, uint32_t a, uint32_t b, char final) {
     p = append_uint(p, b);
     *p++ = final;
     *p = '\0';
-    reply(buf);
+    reply(t, buf);
 }
 
 // --- Modes and resets ---------------------------------------------------------
@@ -669,7 +668,7 @@ static void csi_dispatch(term_t *t, uint8_t final) {
     }
     if (t->private_marker == '>') {
         if (final == 'c') {
-            reply("\x1b[>0;0;0c");  // secondary device attributes
+            reply(t, "\x1b[>0;0;0c");  // secondary device attributes
         }
         return;
     }
@@ -809,7 +808,7 @@ static void csi_dispatch(term_t *t, uint8_t final) {
         break;
     case 'c':  // DA
         if (param(t, 0, 0) == 0) {
-            reply("\x1b[?62;22c");  // VT220 with ANSI colour
+            reply(t, "\x1b[?62;22c");  // VT220 with ANSI colour
         }
         break;
     case 'd':  // VPA
@@ -837,9 +836,9 @@ static void csi_dispatch(term_t *t, uint8_t final) {
         break;
     case 'n':  // DSR
         if (param(t, 0, 0) == 5) {
-            reply("\x1b[0n");
+            reply(t, "\x1b[0n");
         } else if (param(t, 0, 0) == 6) {
-            reply_pair("", t->row - min_row(t) + 1, t->col + 1, 'R');
+            reply_pair(t, "", t->row - min_row(t) + 1, t->col + 1, 'R');
         }
         break;
     case 'r': {  // DECSTBM
@@ -860,9 +859,9 @@ static void csi_dispatch(term_t *t, uint8_t final) {
         break;
     case 't':  // window operations: only the size reports
         if (param(t, 0, 0) == 18) {
-            reply_pair("8;", t->rows, t->cols, 't');
+            reply_pair(t, "8;", t->rows, t->cols, 't');
         } else if (param(t, 0, 0) == 14) {
-            reply_pair("4;", t->rows * 8, t->cols * 8, 't');
+            reply_pair(t, "4;", t->rows * 8, t->cols * 8, 't');
         }
         break;
     default:
@@ -1102,7 +1101,7 @@ void term_putc(term_t *t, char ch) {
 
 static int alloc_buffer(term_t *t, term_buffer_t *b, uint32_t lines) {
     size_t bytes = (size_t)lines * t->cols * sizeof(term_cell_t);
-    b->cells = frame_alloc_pages((bytes + PAGE_SIZE - 1) / PAGE_SIZE);
+    b->cells = t->host.alloc ? t->host.alloc(t->host.ctx, bytes) : NULL;
     if (b->cells == NULL) {
         return 0;
     }
@@ -1113,15 +1112,19 @@ static int alloc_buffer(term_t *t, term_buffer_t *b, uint32_t lines) {
     return 1;
 }
 
-int term_init(term_t *t, uint32_t cols, uint32_t rows) {
+int term_init(term_t *t, uint32_t cols, uint32_t rows, uint32_t history,
+              const term_host_t *host) {
     memset(t, 0, sizeof(*t));
+    if (host) {
+        t->host = *host;
+    }
     t->cols = cols < TERM_MAX_COLS ? cols : TERM_MAX_COLS;
     t->rows = rows < TERM_MAX_ROWS ? rows : TERM_MAX_ROWS;
     if (t->cols == 0 || t->rows == 0) {
         return 0;
     }
     // Scrollback is a nicety: fall back to none if memory is short.
-    if (!alloc_buffer(t, &t->main_buf, t->rows + TERM_SCROLLBACK_LINES) &&
+    if (!(history > 0 && alloc_buffer(t, &t->main_buf, t->rows + history)) &&
         !alloc_buffer(t, &t->main_buf, t->rows)) {
         return 0;
     }
@@ -1129,7 +1132,7 @@ int term_init(term_t *t, uint32_t cols, uint32_t rows) {
         return 0;
     }
     t->buf = &t->alt_buf;
-    clear_screen(t);  // fresh pages are zero, not blanks
+    clear_screen(t);  // the memory holds anything, not blanks
     full_reset(t);    // switches to and clears the main screen
     return 1;
 }

@@ -88,8 +88,13 @@ file(GLOB_RECURSE KERNEL_ASM_SOURCES "${SRC_DIR}/*.S" "${SRC_DIR}/*.s")
 list(FILTER KERNEL_CXX_SOURCES EXCLUDE REGEX "/circle/")
 file(GLOB LIB_C_SOURCES "${LIB_DIR}/*.c")
 file(GLOB LIB_ASM_SOURCES "${LIB_DIR}/*.S" "${LIB_DIR}/*.s")
+# The console library (user/libconsole) is shared with user programs: the
+# kernel builds it in for its own screen terminal (see console-plan.md).
+set(LIBCONSOLE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/user/libconsole")
+file(GLOB LIBCONSOLE_SOURCES CONFIGURE_DEPENDS "${LIBCONSOLE_DIR}/*.c")
 
-set(KERNEL_SOURCES ${KERNEL_C_SOURCES} ${KERNEL_CXX_SOURCES} ${KERNEL_ASM_SOURCES} ${LIB_C_SOURCES} ${LIB_ASM_SOURCES})
+set(KERNEL_SOURCES ${KERNEL_C_SOURCES} ${KERNEL_CXX_SOURCES} ${KERNEL_ASM_SOURCES} ${LIB_C_SOURCES}
+    ${LIB_ASM_SOURCES} ${LIBCONSOLE_SOURCES})
 
 # Canonical kernel configurations consume the already prepared immutable
 # image; only the standalone userfs project is a producer for modern builds.
@@ -249,7 +254,10 @@ function(add_kernel_variant VARIANT)
         LINK_DEPENDS ${LINKER_SCRIPT}
     )
 
-    target_include_directories(${target} PRIVATE ${INCLUDE_DIR})
+    # user/ for "libconsole/...": the library picks the kernel's types and
+    # string functions when KORAOS_KERNEL is defined (libconsole/con_base.h).
+    target_include_directories(${target} PRIVATE ${INCLUDE_DIR} "${CMAKE_CURRENT_SOURCE_DIR}/user")
+    target_compile_definitions(${target} PRIVATE KORAOS_KERNEL)
 
     target_compile_options(${target} PRIVATE
         $<$<COMPILE_LANGUAGE:C>:${C_FLAGS}>

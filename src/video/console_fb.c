@@ -1,9 +1,29 @@
 #include "video/console_fb.h"
-#include "video/font8x8.h"
+
+#include "libconsole/font8x8.h"
+#include "mm.h"
+#include "mm/frame_alloc.h"
+#include "tty.h"
 
 #define FONT_WIDTH 8
 #define FONT_HEIGHT 8
 #define NO_CURSOR 0xFF
+
+// The terminal's buffers come from the frame allocator, and are never freed.
+static void *console_alloc(void *ctx, size_t bytes) {
+    (void)ctx;
+    return frame_alloc_pages((bytes + PAGE_SIZE - 1) / PAGE_SIZE);
+}
+
+// Status reports go back to the programs reading the console, as if typed.
+static void console_reply(void *ctx, const char *bytes, size_t length) {
+    (void)ctx;
+    for (size_t i = 0; i < length; i++) {
+        tty_input_push(bytes[i]);
+    }
+}
+
+static const term_host_t console_host = {console_alloc, console_reply, NULL};
 
 // Paint one cell into the framebuffer (32 bpp, writes only), optionally with the
 // cursor on it.
@@ -87,7 +107,8 @@ int fb_console_init(fb_console_t *console, uint32_t width, uint32_t height, uint
         return 0;
     }
     if (!term_init(&console->term, console->fb.width / FONT_WIDTH,
-                   console->fb.height / FONT_HEIGHT)) {
+                   console->fb.height / FONT_HEIGHT, TERM_SCROLLBACK_LINES,
+                   &console_host)) {
         return 0;
     }
     console->cursor_drawn = false;

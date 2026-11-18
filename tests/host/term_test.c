@@ -1,43 +1,61 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Host tests for the terminal model and escape-sequence parser
-// (src/video/term.c).
+// (user/libconsole/term.c).
 
 #include "test.h"
-#include "video/term.h"
+#include "libconsole/term.h"
 
-// --- Stubs for the kernel services term.c uses -------------------------------
+// --- The host the terminal runs on -------------------------------------------
 
-// Pages come from a static arena rather than the heap, so LeakSanitizer (on by
-// default with ASan on Linux) has nothing to report: term.c never frees, just
-// like the kernel it runs in. Static storage is zeroed, as frame pages are.
-static uint8_t arena[16 * 1024 * 1024] __attribute__((aligned(4096)));
+// Memory comes from a static arena rather than the heap, so LeakSanitizer (on
+// by default with ASan on Linux) has nothing to report: a terminal never
+// frees. The arena is filled with junk first: the terminal must not rely on
+// zeroed memory.
+static uint8_t arena[16 * 1024 * 1024] __attribute__((aligned(16)));
 static size_t arena_used;
+static unsigned allocations;
+static size_t arena_limit = sizeof(arena);
 
-void *frame_alloc_pages(size_t count) {
-    size_t bytes = count * 4096;
-    if (arena_used + bytes > sizeof(arena)) {
+static void *host_alloc(void *ctx, size_t bytes) {
+    CHECK(ctx == &arena, "the host context reaches alloc");
+    bytes = (bytes + 15) & ~(size_t)15;
+    if (arena_used + bytes > arena_limit) {
         return NULL;
     }
     void *p = arena + arena_used;
+    for (size_t i = 0; i < bytes; i++) {
+        arena[arena_used + i] = 0xA5;
+    }
     arena_used += bytes;
+    allocations++;
     return p;
 }
 
-// Status replies the terminal sends back as keyboard input.
+// Status replies the terminal sends back, as if typed.
 static char replies[256];
 static int nreplies;
 
-void tty_input_push(char c) {
-    if (nreplies < (int)sizeof(replies) - 1) {
-        replies[nreplies++] = c;
-        replies[nreplies] = '\0';
+static void host_reply(void *ctx, const char *bytes, size_t length) {
+    CHECK(ctx == &arena, "the host context reaches reply");
+    for (size_t i = 0; i < length; i++) {
+        if (nreplies < (int)sizeof(replies) - 1) {
+            replies[nreplies++] = bytes[i];
+            replies[nreplies] = '\0';
+        }
     }
 }
+
+static const term_host_t host = {host_alloc, host_reply, arena};
 
 // --- Helpers ------------------------------------------------------------------
 
 static term_t t;
+
+// A fresh terminal with the kernel's scrollback.
+static void start(uint32_t cols, uint32_t rows) {
+    CHECK(term_init(&t, cols, rows, TERM_SCROLLBACK_LINES, &host), "term_init %ux%u", cols, rows);
+}
 
 static void feed(const char *s) {
     while (*s) {
@@ -71,7 +89,7 @@ static const term_cell_t *cell(unsigned row, unsigned col) {
 // --- Tests --------------------------------------------------------------------
 
 static void test_autowrap(void) {
-    term_init(&t, 10, 4);
+    start(10, 4);
     feed("abcdefghij");
     CHECK(t.col == 9 && t.wrap_pending, "pending wrap at the last column (col=%u)", t.col);
     feed("K");
@@ -80,7 +98,7 @@ static void test_autowrap(void) {
 }
 
 static void test_scrollback(void) {
-    term_init(&t, 10, 4);
+    start(10, 4);
     feed("L1\r\nL2\r\nL3\r\nL4\r\nL5\r\nL6\r\n");
     ROW(0, "L4");
     ROW(1, "L5");
@@ -103,7 +121,7 @@ static void test_scrollback(void) {
 }
 
 static void test_history_ring_wraps(void) {
-    term_init(&t, 8, 3);
+    start(8, 3);
     for (int i = 0; i < TERM_SCROLLBACK_LINES + 50; i++) {
         feed("row\r\n");
     }
@@ -115,7 +133,7 @@ static void test_history_ring_wraps(void) {
 }
 
 static void test_scroll_region(void) {
-    term_init(&t, 10, 5);
+    start(10, 5);
     feed("A\r\nB\r\nC\r\nD\r\nE");
     feed("\x1b[2;4r");  // region rows 2..4
     CHECK(t.row == 0 && t.col == 0, "DECSTBM homes the cursor");
@@ -136,7 +154,7 @@ static void test_scroll_region(void) {
 }
 
 static void test_insert_delete_erase(void) {
-    term_init(&t, 10, 4);
+    start(10, 4);
     feed("11\r\n22\r\n33\r\n44");
     feed("\x1b[2;1H\x1b[L");  // IL at row 2
     ROW(0, "11");
@@ -162,7 +180,7 @@ static void test_insert_delete_erase(void) {
 }
 
 static void test_alternate_screen(void) {
-    term_init(&t, 10, 4);
+    start(10, 4);
     feed("main\r\nsecond");
     unsigned col = t.col, row = t.row;
     feed("\x1b[?1049h");
@@ -175,7 +193,7 @@ static void test_alternate_screen(void) {
 }
 
 static void test_status_replies(void) {
-    term_init(&t, 20, 10);
+    start(20, 10);
     nreplies = 0;
     feed("\x1b[5;7H\x1b[6n");
     CHECK(strcmp(replies, "\x1b[5;7R") == 0, "CPR reply 'ESC%s'", replies + 1);
@@ -185,7 +203,7 @@ static void test_status_replies(void) {
 }
 
 static void test_colours(void) {
-    term_init(&t, 20, 4);
+    start(20, 4);
     feed("\x1b[38;5;196ma\x1b[38;2;1;2;3mb\x1b[38:2::4:5:6mc"
          "\x1b[0;1;31md\x1b[0;7;44me\x1b[0m");
     CHECK(cell(0, 0)->fg == 0xff0000, "256-colour fg %06x", cell(0, 0)->fg);
@@ -200,7 +218,7 @@ static void test_colours(void) {
 }
 
 static void test_utf8_and_line_drawing(void) {
-    term_init(&t, 20, 4);
+    start(20, 4);
     feed("\xc3\xa9x\xe2\x94\x80\x1b(0q\x1b(Bq");
     CHECK(cell(0, 0)->ch == '?', "U+00E9 shows as one '?'");
     CHECK(cell(0, 1)->ch == 'x', "then x");
@@ -210,7 +228,7 @@ static void test_utf8_and_line_drawing(void) {
 }
 
 static void test_modes_and_misc(void) {
-    term_init(&t, 20, 6);
+    start(20, 6);
     feed("\tX");
     CHECK(cell(0, 8)->ch == 'X', "tab to column 8");
 
@@ -239,6 +257,45 @@ static void test_modes_and_misc(void) {
     CHECK(t.main_buf.history == 0, "ED 3 clears the history");
 }
 
-TEST_MAIN(test_autowrap, test_scrollback, test_history_ring_wraps, test_scroll_region,
+// What term_init asks of its host, and what it does when the host has little.
+static void test_host(void) {
+    // Two buffers: the main screen with its history, then the alternate screen.
+    unsigned before = allocations;
+    start(10, 4);
+    CHECK(allocations - before == 2, "a terminal makes two allocations (%u)", allocations - before);
+    CHECK(t.main_buf.total_lines == 4 + TERM_SCROLLBACK_LINES && t.alt_buf.total_lines == 4,
+          "the main screen holds its history, the alternate one none");
+    ROW(0, "");
+    CHECK(cell(3, 9)->ch == ' ' && cell(3, 9)->bg == TERM_DEFAULT_BG && cell(3, 9)->attr == 0,
+          "junk memory still makes a blank screen");
+
+    CHECK(term_init(&t, 10, 4, 0, &host) && t.main_buf.total_lines == 4,
+          "a terminal may have no history");
+    feed("1\r\n2\r\n3\r\n4\r\n5");
+    ROW(0, "2");
+    term_scroll_view(&t, 10);
+    ROW(0, "2");
+
+    // Room for both screens but not for the history: no history.
+    arena_limit = arena_used + 3 * 10 * 4 * sizeof(term_cell_t);
+    CHECK(term_init(&t, 10, 4, 100, &host) && t.main_buf.total_lines == 4,
+          "too little memory for history gives none");
+    arena_limit = arena_used + 10 * 4 * sizeof(term_cell_t);
+    CHECK(!term_init(&t, 10, 4, 100, &host), "too little memory for both screens fails");
+    arena_limit = sizeof(arena);
+
+    term_host_t silent = {host_alloc, NULL, arena};
+    CHECK(term_init(&t, 10, 4, 0, &silent), "a host may take no replies");
+    nreplies = 0;
+    feed("\x1b[6n\x1b[c");
+    CHECK(nreplies == 0, "status requests without a reply hook are dropped");
+    term_host_t none = {NULL, NULL, NULL};
+    CHECK(!term_init(&t, 10, 4, 0, &none), "a host with no memory gets no terminal");
+    CHECK(!term_init(&t, 0, 4, 0, &host), "zero columns fail");
+    CHECK(term_init(&t, TERM_MAX_COLS + 50, TERM_MAX_ROWS + 50, 0, &host) &&
+          t.cols == TERM_MAX_COLS && t.rows == TERM_MAX_ROWS, "the grid is clamped to its maximum");
+}
+
+TEST_MAIN(test_host, test_autowrap, test_scrollback, test_history_ring_wraps, test_scroll_region,
           test_insert_delete_erase, test_alternate_screen, test_status_replies,
           test_colours, test_utf8_and_line_drawing, test_modes_and_misc)

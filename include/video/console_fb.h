@@ -2,9 +2,9 @@
 
 #include "common.h"
 #include "video/framebuffer.h"
-#include "video/term.h"
+#include "libconsole/term.h"
 
-// Text console on a 32 bpp framebuffer: renders a terminal (video/term.h) with
+// Text console on a 32 bpp framebuffer: renders a terminal (libconsole/term.h) with
 // the 8x8 font. The terminal marks the rows that changed; flushing redraws just
 // those (writes only -- the framebuffer is uncached, so it is never read back)
 // and then the cursor. A burst of output that scrolls costs one full redraw at
