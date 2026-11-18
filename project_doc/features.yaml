@@ -376,6 +376,7 @@ categories:
         name: Console library
         status: in_progress
         description: The terminal as a user-space library, with an escape parser, a cell grid and a renderer that draws into any surface.
+        prs: [100]
       - id: screen-manager
         name: Screen manager
         status: planned
