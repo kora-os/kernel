@@ -45,6 +45,7 @@ Current suites:
 | `hid_keyboard_test.c` | `src/input/hid_keyboard.c`, the USB keyboard's boot reports as key transitions: presses and releases across slots, the eight modifier keys one at a time, the order within a report, rollover reports, error codes and duplicate usages |
 | `virtio_keymap_test.c` | `src/drivers/virtio_keymap.c` with `src/input/input_tty.c`: the US layout, modifiers, Caps Lock and repeats must type the bytes the VirtIO keyboard typed before events existed; then the events themselves (HID usage of every evdev key, modifier bits, repeat flag, characters) |
 | `virtio_input_test.c` | `src/drivers/virtio_input.c` on a fake VirtIO transport: discovery, queue setup, one event posted for each key transition, receive buffers reposted, malformed completions stopping the device |
+| `port_test.c` | `src/ipc/port.c` with a stubbed scheduler: names (unique, at most 15 bytes, exact match) and generation-carrying ids that a deleted port's successor does not reuse, the port limit, FIFO order with sender pids, the in-flight rules (no message 0, a reply port of one's own, one flight at a time, 128 at most), replies and releases, `port_wait` sleeping until a put and giving up when killed or its port is deleted, a deleted port returning its messages, and process exit: ports deleted, queued messages withdrawn, held ones returned, an ended sender handed back to the scheduler only when its last held message is replied; the port lock balanced and never nested |
 | `term_render_test.c` | `user/libconsole/term_render.c`: glyphs from the 8x8 font and `term_glyph()`, SGR colours, reverse/underline/strike/bold, the three cursor shapes and the old cursor erased, a hidden cursor and none in the history view, only dirty rows redrawn, clip rectangles cutting cells, terminals at negative coordinates and past the surface's edges, row padding untouched |
 | `term_test.c` | `user/libconsole/term.c`, built as the kernel builds it: the host hooks (two allocations, junk memory still giving blank screens, no history, too little memory, no reply hook, clamped size), autowrap, scrollback and its view, scroll regions, insert/delete/erase, alternate screen, status replies, colours (16/256/24-bit, bce), UTF-8 and DEC line drawing, tabs, origin mode, cursor style/visibility, OSC, REP |
 
@@ -308,7 +309,11 @@ of the console library in windows, with the right one clipped). `--keyboard` typ
 command through a keyboard, a VirtIO one on virt and QEMU's USB keyboard
 (the Circle path of the Pi) on raspi3b: Shift/release, an arrow, Backspace,
 Enter and scrollback, all of it travelling through the kernel's input event
-queue. UART observes output. `--repeat N` runs `allocprobe` N times: page runs, a `malloc`
+queue. UART observes output. `portprobe` passes messages between processes:
+100 round trips and a pipeline, a sender that ends while its message is held
+(it stays in `sysinfo().procs` until the reply, and every page comes back),
+a receiver that ends holding a message (it comes back `PORT_RETURNED`), and a
+program killed while it sleeps in `port_wait`. `--repeat N` runs `allocprobe` N times: page runs, a `malloc`
 heap grown to about 1.5 MiB with churn and `realloc`, a nested child while it is
 live, and deliberate leaks. The kernel heap's live count and the free page count
 must be the same after the last run as after the first, so everything a reaped

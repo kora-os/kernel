@@ -109,7 +109,7 @@ categories:
         prs: [13]
       - id: message-ports
         name: Message ports
-        status: planned
+        status: in_progress
         description: Queues that carry a pointer and a wake-up between tasks, so a write to a console reaches the task that draws it.
       - id: boot-log
         name: Boot log ring
