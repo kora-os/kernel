@@ -15,6 +15,7 @@
 #define main condemo_main
 #include "../condemo.c"
 #undef main
+#include "libconsole/font8x8.h"
 
 #define FB_WIDTH 1024
 #define FB_HEIGHT 768
@@ -24,10 +25,71 @@ static unsigned framebuffer[FB_HEIGHT * FB_STRIDE];
 static unsigned fb_width, fb_bpp;
 static int have_framebuffer;
 
+// `condemo <program>`: the program it runs is played here. Its packets are
+// queued on condemo's port from the start; it ends once condemo has taken
+// them all.
+#define HANDLER_PORT 7
+#define CHILD_PID 42
+static struct con_packet child_packets[3];
+static unsigned child_count, child_taken, child_replied, polls;
+static struct std_handle child_std[3];
+static int child_spawned, port_deleted;
+
+static void child_writes(const char *a, const char *b) {
+    child_packets[0] = (struct con_packet){CON_WRITE, -1, (void *)a, strlen(a)};
+    child_packets[1] = (struct con_packet){CON_WRITE, -1, (void *)b, strlen(b)};
+    child_packets[2] = (struct con_packet){CON_READ, 99, NULL, 4};
+    child_count = 3;
+}
+
 static long kernel(long number, long a0, long a1, long a2, long a3) {
-    (void)a1;
     (void)a2;
     (void)a3;
+    switch (number) {
+    case SYS_STD_HANDLES:
+        memset((void *)a0, 0, 3 * sizeof(struct std_handle));  // the console
+        return 0;
+    case SYS_PORT_CREATE:
+        return HANDLER_PORT;
+    case SYS_PORT_DELETE:
+        port_deleted = a0 == HANDLER_PORT;
+        return 0;
+    case SYS_SPAWN_STD: {
+        const struct spawn_request *r = (const struct spawn_request *)a0;
+        if (strcmp(r->name, "nosuch") == 0) {
+            return -1;
+        }
+        CHECK(r->flags == SPAWN_NOWAIT && strcmp(r->argv[0], r->name) == 0,
+              "the program runs in the background, with its own argv");
+        memcpy(child_std, r->std, sizeof child_std);
+        child_spawned = 1;
+        return CHILD_PID;
+    }
+    case SYS_PORT_GET: {
+        struct port_message *out = (struct port_message *)a1;
+        CHECK(a0 == HANDLER_PORT, "condemo serves its own port");
+        if (child_taken == child_count) {
+            return 0;
+        }
+        *out = (struct port_message){&child_packets[child_taken++], PORT_MESSAGE, CHILD_PID};
+        return 1;
+    }
+    case SYS_PORT_REPLY:
+        child_replied++;
+        return 0;
+    case SYS_WAITPID:
+        polls++;
+        CHECK(a0 == CHILD_PID && a2 == WNOHANG, "condemo polls for the end of its program");
+        if (child_replied < child_count) {
+            return 0;
+        }
+        *(int *)a1 = 0;
+        return CHILD_PID;
+    case SYS_MSLEEP:
+        return 0;
+    default:
+        break;
+    }
     if (number == SYS_FB_INFO) {
         if (!have_framebuffer) {
             return -1;
@@ -54,10 +116,21 @@ static void reset(void) {
     have_framebuffer = 1;
     fb_width = FB_WIDTH;
     fb_bpp = 32;
+    child_count = child_taken = child_replied = polls = 0;
+    child_spawned = port_deleted = 0;
+    memset(child_std, 0, sizeof child_std);
 }
 
 static int run(void) {
-    int status = condemo_main();
+    char *argv[] = {"condemo", NULL};
+    int status = condemo_main(1, argv);
+    fflush(stdout);
+    return status;
+}
+
+static int run_program(char *program) {
+    char *argv[] = {"condemo", program, "words", NULL};
+    int status = condemo_main(3, argv);
     fflush(stdout);
     return status;
 }
@@ -174,4 +247,52 @@ static void test_two_consoles(void) {
     CHECK(padding, "the row padding past the width is left alone");
 }
 
-TEST_MAIN(test_failures_reported, test_two_consoles)
+// condemo as a console handler: an 80 by 16 window, centred, two cell rows
+// above the bottom of a 1024x768 screen.
+#define RUN_X 192
+#define RUN_TOP 624
+
+static unsigned run_cell(unsigned row, unsigned col, unsigned dx, unsigned dy) {
+    return pixel(RUN_X + col * 8 + dx, RUN_TOP + row * 8 + dy);
+}
+
+// Whether cell (row, col) of the window shows `c` from the font, white on blue.
+static int shows(unsigned row, unsigned col, char c) {
+    for (unsigned y = 0; y < 8; y++) {
+        for (unsigned x = 0; x < 8; x++) {
+            unsigned want = (font8x8_basic[(int)c][y] & (0x80 >> x)) ? WHITE : BLUE;
+            if (run_cell(row, col, x, y) != want) {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+static void test_console_handler(void) {
+    reset();
+    child_writes("hi\n", "next");
+    CHECK(run_program("echo") == 0 &&
+              printed("condemo: echo exited with 0; 7 bytes in its window\n", ""),
+          "condemo reports how its program ended and what it showed (%s)", fake_output(1, NULL));
+    CHECK(child_spawned && child_std[0].kind == STD_CONSOLE &&
+              child_std[1].kind == STD_PORT && child_std[1].value == HANDLER_PORT &&
+              child_std[2].kind == STD_PORT && child_std[2].value == HANDLER_PORT,
+          "the program gets condemo's stdin and its port for stdout and stderr");
+    CHECK(child_packets[0].result == 3 && child_packets[1].result == 4,
+          "a write packet is answered with its length");
+    CHECK(child_packets[2].result == -1, "a read packet is refused");
+    CHECK(child_replied == 3 && port_deleted, "every packet is replied, then the port deleted");
+    CHECK(shows(0, 0, 'h') && shows(0, 1, 'i') && shows(1, 0, 'n') && shows(1, 3, 't'),
+          "the program's text is in the window, its newline starting a new line");
+    CHECK(run_cell(15, 79, 7, 7) == BLUE && run_cell(0, 2, 0, 0) == BLUE,
+          "the rest of the window is blue");
+    CHECK(pixel(RUN_X - 1, RUN_TOP) == BORDER_COLOUR && pixel(RUN_X - BORDER - 1, RUN_TOP) == UNTOUCHED,
+          "it is framed like the others");
+
+    reset();
+    CHECK(run_program("nosuch") == 1 && printed("", "condemo: cannot run nosuch\n") && port_deleted,
+          "a program that cannot start is reported, and the port deleted");
+}
+
+TEST_MAIN(test_failures_reported, test_two_consoles, test_console_handler)

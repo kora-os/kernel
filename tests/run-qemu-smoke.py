@@ -1113,6 +1113,31 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
             raise Failure("%d red pixels right of the right window: not clipped" % spill)
     yield "condemo: two library consoles in clipped windows", condemo
 
+    def console_handler():
+        # condemo runs echo with its stdout in a library console: the words
+        # go to condemo's window through message ports, not to the kernel's
+        # console (and so not to the serial line).
+        q.send("condemo echo hello from a handler\r")
+        # echo exits with its argument count.
+        m = q.expect(rb"^condemo: echo exited with 4; (\d+) bytes in its window\r?$")
+        q.expect(PROMPT)
+        if m.group(1) != b"21":
+            raise Failure("condemo showed %s bytes of echo's output, want 21" % m.group(1).decode())
+        with open(os.path.join(q.outdir, "serial.log"), "rb") as log:
+            serial = log.read()
+        if re.search(rb"^hello from a handler\r?$", serial, re.M):
+            raise Failure("echo's output reached the kernel console")
+        shot = q.screendump("condemo-handler")
+        width, height, _ = shot
+        left, top = (width - 640) // 2, height - 128 - 16
+        if not near(pixel(shot, left + 639, top + 127), (0, 0, 0xee)):
+            raise Failure("condemo's window is not blue: %s" % (pixel(shot, left + 639, top + 127),))
+        white = sum(near(pixel(shot, x, y), (0xff, 0xff, 0xff))
+                    for y in range(top, top + 8) for x in range(left, left + 20 * 8))
+        if white < 40:
+            raise Failure("no text in condemo's window (%d white pixels in its first line)" % white)
+    yield "condemo as a console handler: a program's stdout in a library console", console_handler
+
     def gfxdemo():
         q.send("gfxdemo\r")
         q.expect(rb"gfxdemo: painted (\d+)x(\d+)")
