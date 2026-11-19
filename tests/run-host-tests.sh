@@ -76,6 +76,7 @@ TEST_FLAGS=(-DKORAOS_HOST_TEST -DSPINLOCK_PORTABLE -pthread -I "$ROOT/tests/host
     "$ROOT/tests/host/spinlock_test.c" "$ROOT/src/arch/spinlock.c" && "$OUT/spinlock_portable_test" || failed=1
 TEST_FLAGS=()
 run_test user_mem src/proc/user_mem.c
+run_test port src/ipc/port.c
 "$ROOT/tests/run-user-tests.sh" || failed=1
 "$ROOT/tests/run-filesystem-tests.sh" || failed=1
 "$ROOT/tests/run-fat-write-tests.sh" || failed=1

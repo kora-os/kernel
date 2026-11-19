@@ -95,6 +95,8 @@ struct process {
     struct user_run *runs;            // pages from alloc_pages (proc/user_mem.h)
     fs_cwd_t cwd;                     // inherited filesystem location
     open_file_t files[MAX_OPEN_FILES];  // fd table (indexed fd - FD_BASE)
+    unsigned msgs_out;                // its messages receivers hold (ipc/port.h)
+    bool draining;                    // reaped, but kept until msgs_out is 0
 };
 
 typedef struct task {
