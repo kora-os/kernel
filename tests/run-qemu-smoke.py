@@ -449,6 +449,36 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
             q.expect(PROMPT)
         yield "libc file streams: write, read back, append, update, seek, rename, remove", libc_files
 
+        def redirection():
+            # The shell gives a program files for its stdin and stdout; the
+            # program's libc finds out at startup (fully buffered, not a tty).
+            def run(command, status=0):
+                q.send(command + "\r")
+                q.expect(rb"exited with %d\r?$" % status)
+                q.expect(PROMPT)
+
+            def file_is(path, lines):
+                q.send("cat %s\r" % path)
+                for line in lines:
+                    q.expect(rb"^" + re.escape(line) + rb"\r?$")
+                q.expect(rb"exited with 0\r?$")
+                q.expect(PROMPT)
+
+            run("echo redirected words > RD.TXT", 2)  # echo exits with its argument count
+            file_is("RD.TXT", [b"redirected words"])
+            run("echo appended >>RD.TXT", 1)
+            file_is("RD.TXT", [b"redirected words", b"appended"])
+            q.send("libcprobe handles\r")
+            q.expect(rb"^libcprobe: isatty 1 1 1, stdin EOF\r?$")
+            q.expect(rb"^inherited\r?$")
+            q.expect(rb"exited with 0\r?$")
+            q.expect(PROMPT)
+            # Its child echo inherits the file, after the parent's line.
+            run("libcprobe handles < RD.TXT > HANDLES.TXT")
+            file_is("HANDLES.TXT", [b"libcprobe: isatty 0 0 1, stdin redirected words", b"inherited"])
+            run("rm RD.TXT HANDLES.TXT")
+        yield "shell redirection: > and >> to a file, < from one, isatty, inherited by a child", redirection
+
     def debug_console():
         q.send("\x14")  # Ctrl-T
         q.expect(rb"\[serial -> kernel console")

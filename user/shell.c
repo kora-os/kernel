@@ -112,9 +112,12 @@ static void help(void) {
           "  <program> [args...]  run a program from c:\n"
           "  <program> [args...] &  run it in the background\n"
           "  <program> [args...] @N  run it on core N (with & too: ... @N &)\n"
+          "  <program> [args...] < in > out  read stdin from a file, write stdout\n"
+          "                  to one (>> appends); the shell's console otherwise\n"
           "  ps              list tasks and the core each runs on\n"
           "  kill <pid>      end a program (a background job)\n"
-          "programs in /bin: hello, echo, gfxdemo, termdemo, jobdemo, pindemo, ls, cat\n"
+          "programs in /bin: hello, echo, gfxdemo, termdemo, condemo, jobdemo, pindemo,\n"
+          "  ls, cat\n"
           "  (try 'ls /bin')\n",
           stdout);
 }
@@ -238,6 +241,65 @@ static int take_core(int *argc, char **argv) {
     return core;
 }
 
+// "< path", "> path" and ">> path" (or the operator glued to the path:
+// ">out.txt") give the program a file for its stdin or stdout. Takes them out
+// of argv. A quoted or escaped operator is an ordinary argument. Returns 0, or
+// -1 after saying what is wrong.
+struct redirections {
+    const char *in;
+    const char *out;
+    int append;
+};
+
+static int take_redirections(int *argc, char **argv, struct redirections *r) {
+    int kept = 1;  // argv[0] is the program
+    for (int i = 1; i < *argc; i++) {
+        char *token = argv[i];
+        int length = 0;  // of the operator
+        if (!literal_tokens[i]) {
+            length = token[0] == '>' && token[1] == '>' ? 2 : token[0] == '>' || token[0] == '<';
+        }
+        if (length == 0) {
+            literal_tokens[kept] = literal_tokens[i];
+            argv[kept++] = token;
+            continue;
+        }
+        const char *path = token + length;
+        if (*path == '\0') {
+            if (i + 1 == *argc) {
+                fprintf(stderr, "shell: %.*s needs a file\n", length, token);
+                return -1;
+            }
+            path = argv[++i];
+        }
+        const char **slot = token[0] == '<' ? &r->in : &r->out;
+        if (*slot != NULL) {
+            fprintf(stderr, "shell: more than one %s redirection\n", token[0] == '<' ? "input" : "output");
+            return -1;
+        }
+        *slot = path;
+        if (token[0] == '>') {
+            r->append = length == 2;
+        }
+    }
+    *argc = kept;
+    return 0;
+}
+
+// Open a redirection's file: an fd, or -1 after saying why not.
+static int open_redirection(const char *path, int flags) {
+    struct stat st;
+    if (stat(path, &st) == 0 && st.is_dir) {
+        fprintf(stderr, "shell: %s is a directory\n", path);
+        return -1;
+    }
+    int fd = open(path, flags);
+    if (fd < 0) {
+        fprintf(stderr, "shell: cannot open %s\n", path);
+    }
+    return fd;
+}
+
 int main(void) {
     fputs("\nKoraOS shell. Type 'help'.\n", stdout);
 
@@ -324,13 +386,53 @@ int main(void) {
         if (argc == 0) {
             continue;
         }
+        struct redirections redirect = {NULL, NULL, 0};
+        if (take_redirections(&argc, argv, &redirect) < 0) {
+            continue;
+        }
         int core = take_core(&argc, argv);
         if (core == -2) {
             fputs("shell: @N needs a core number, e.g. @1\n", stderr);
             continue;
         }
         int flags = (background ? SPAWN_NOWAIT : 0) | (core >= 0 ? SPAWN_CORE(core) : 0);
-        int pid = spawn_flags(argv[0], argc, argv, flags);
+        int pid;
+        if (redirect.in != NULL || redirect.out != NULL) {
+            // The child gets the shell's own handles but for the files named;
+            // the shell closes its copies once the child has them.
+            struct std_handle std[3];
+            if (std_handles(std) < 0) {
+                fputs("shell: no standard handles\n", stderr);
+                continue;
+            }
+            int in = -1, out = -1;
+            if (redirect.in != NULL && (in = open_redirection(redirect.in, O_RDONLY)) < 0) {
+                continue;
+            }
+            if (redirect.out != NULL &&
+                (out = open_redirection(redirect.out, O_WRONLY | O_CREAT |
+                                                      (redirect.append ? O_APPEND : O_TRUNC))) < 0) {
+                if (in >= 0) {
+                    close(in);
+                }
+                continue;
+            }
+            if (in >= 0) {
+                std[0] = (struct std_handle){STD_FILE, in};
+            }
+            if (out >= 0) {
+                std[1] = (struct std_handle){STD_FILE, out};
+            }
+            pid = spawn_std(argv[0], argc, argv, flags, std);
+            if (in >= 0) {
+                close(in);
+            }
+            if (out >= 0) {
+                close(out);
+            }
+        } else {
+            pid = spawn_flags(argv[0], argc, argv, flags);
+        }
         if (pid < 0) {
             if (core >= 0) {
                 fprintf(stderr, "shell: cannot run %s on cpu %d (no such program, or no such core)\n",
