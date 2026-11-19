@@ -46,6 +46,13 @@ SYSCALL sync,        SYS_SYNC
 SYSCALL unlink,      SYS_UNLINK
 SYSCALL mkdir,       SYS_MKDIR
 SYSCALL rmdir,       SYS_RMDIR
+SYSCALL port_create, SYS_PORT_CREATE
+SYSCALL port_delete, SYS_PORT_DELETE
+SYSCALL port_find,   SYS_PORT_FIND
+SYSCALL port_put,    SYS_PORT_PUT
+SYSCALL port_get,    SYS_PORT_GET
+SYSCALL port_wait,   SYS_PORT_WAIT
+SYSCALL port_reply,  SYS_PORT_REPLY
 
 // exit(), rename() and the program entry point come from the libc (user/libc).
 

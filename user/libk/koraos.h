@@ -96,6 +96,48 @@ int mkdir(const char *path);
 int rmdir(const char *path);
 int rename(const char *old_path, const char *new_path);
 
+/* Message ports, as in AmigaOS Exec. A port is a queue of messages owned by
+ * one program; a message is a block of the sender's own memory, which the
+ * kernel queues by address and never reads or writes. The receiver handles it
+ * and gives it back with port_reply(); it then goes to the reply port the
+ * sender named, or nowhere. Neither side may touch a message while the other
+ * has it, and a message is in flight once at a time.
+ *
+ *   port_create(name)  a new port, public under `name` (up to 15 bytes) or
+ *                      anonymous for NULL or "": its id (> 0), or -1
+ *   port_delete(port)  delete one of this program's ports: 0 or -1
+ *   port_find(name)    the id of the port named `name`, or -1
+ *   port_put(port, msg, reply_port)
+ *                      queue msg on any port; reply_port is one of this
+ *                      program's ports, or 0 for none: 0 or -1
+ *   port_get(port, out)   take the oldest message on one of this program's
+ *                      ports: 1, 0 if there is none, or -1
+ *   port_wait(port, out)  the same, sleeping until there is one: 1, or -1
+ *                      (also when the port is deleted or the program killed)
+ *   port_reply(msg)    give back a PORT_MESSAGE received: 0 or -1
+ *
+ * When a program ends, its ports are deleted and the messages queued on them
+ * go back to their senders as PORT_RETURNED; so do the messages it had taken
+ * and not replied. Its own messages that a receiver holds keep its memory
+ * alive until they are replied. */
+#define PORT_MESSAGE 1   /* someone's message: handle it, then port_reply() */
+#define PORT_REPLY 2     /* one of ours, back from its receiver */
+#define PORT_RETURNED 3  /* one of ours, back unhandled */
+
+struct port_message {
+    void *msg;
+    int kind;     /* PORT_MESSAGE, PORT_REPLY or PORT_RETURNED */
+    int sender;   /* pid of the program that sent it */
+};
+
+int port_create(const char *name);
+int port_delete(int port);
+int port_find(const char *name);
+int port_put(int port, void *msg, int reply_port);
+int port_get(int port, struct port_message *out);
+int port_wait(int port, struct port_message *out);
+int port_reply(void *msg);
+
 // Change cwd, or copy its volume-qualified canonical spelling (including NUL).
 // Both return 0 on success and -1 on failure; failed chdir preserves cwd.
 int chdir(const char *path);

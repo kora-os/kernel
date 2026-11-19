@@ -43,6 +43,14 @@
 #define SYS_mkdir       39
 #define SYS_rmdir       40
 #define SYS_rename      41
+// Message ports (ipc/port.h).
+#define SYS_port_create  48
+#define SYS_port_delete  49
+#define SYS_port_find    50
+#define SYS_port_put     51
+#define SYS_port_get     52
+#define SYS_port_wait    53
+#define SYS_port_reply   54
 
 // Dispatch a syscall described by a trap frame from EL0. The return value is
 // written back into the frame's x0.

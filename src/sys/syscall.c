@@ -4,6 +4,7 @@
 #include "arch/trapframe.h"
 #include "common.h"
 #include "fs/fat32.h"
+#include "ipc/port.h"
 #include "lib/string.h"
 #include "proc/task.h"
 #include "proc/user_mem.h"
@@ -47,6 +48,8 @@ struct kassign_info {
 
 _Static_assert(sizeof(struct kvolume_info) == 24, "volume info ABI");
 _Static_assert(sizeof(struct kassign_info) == 4164, "assign info ABI");
+
+_Static_assert(sizeof(struct port_received) == 16, "port message ABI");
 
 // Kernel-side mirror of the userland struct sysinfo (user/libk/koraos.h).
 struct ksysinfo {
@@ -450,6 +453,55 @@ static long sys_sysinfo(struct ksysinfo *out) {
     return 0;
 }
 
+// Message ports (ipc/port.h). A port name is copied in whole, NUL included,
+// or not at all: one too long for a port is refused.
+static bool copy_port_name(const char *name, char out[PORT_NAME_MAX]) {
+    for (unsigned i = 0; i < PORT_NAME_MAX; i++) {
+        if (!uptr_ok((uint64_t)name + i, 1)) {
+            return false;
+        }
+        out[i] = name[i];
+        if (out[i] == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
+static long sys_port_create(const char *name) {
+    char copy[PORT_NAME_MAX];
+    if (name != NULL && !copy_port_name(name, copy)) {
+        return -1;
+    }
+    return port_create(proc_current(), name != NULL ? copy : NULL);
+}
+
+static long sys_port_find(const char *name) {
+    char copy[PORT_NAME_MAX];
+    return copy_port_name(name, copy) ? port_find(copy) : -1;
+}
+
+static long sys_port_put(int port, uint64_t msg, int reply) {
+    // The kernel never reads the message: its address must only be one a
+    // program could use.
+    if (!uptr_ok(msg, 1)) {
+        return -1;
+    }
+    return port_put(proc_current(), port, msg, reply);
+}
+
+static long sys_port_get(int port, struct port_received *out, bool wait) {
+    if (!uptr_ok((uint64_t)out, sizeof(*out))) {
+        return -1;
+    }
+    struct port_received got;
+    int rc = wait ? port_wait(proc_current(), port, &got) : port_get(proc_current(), port, &got);
+    if (rc == 1) {
+        *out = got;
+    }
+    return rc;
+}
+
 void syscall_handle(struct trapframe *tf) {
     uint64_t num = tf->regs[8];
     uint64_t a0 = tf->regs[0];
@@ -566,6 +618,27 @@ void syscall_handle(struct trapframe *tf) {
         break;
     case SYS_rename:
         ret = sys_rename((const char *)a0, (const char *)a1);
+        break;
+    case SYS_port_create:
+        ret = sys_port_create((const char *)a0);
+        break;
+    case SYS_port_delete:
+        ret = port_delete(proc_current(), (int)a0);
+        break;
+    case SYS_port_find:
+        ret = sys_port_find((const char *)a0);
+        break;
+    case SYS_port_put:
+        ret = sys_port_put((int)a0, a1, (int)a2);
+        break;
+    case SYS_port_get:
+        ret = sys_port_get((int)a0, (struct port_received *)a1, false);
+        break;
+    case SYS_port_wait:
+        ret = sys_port_get((int)a0, (struct port_received *)a1, true);
+        break;
+    case SYS_port_reply:
+        ret = port_reply(proc_current(), a0);
         break;
     default:
         ret = -1;

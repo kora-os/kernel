@@ -144,3 +144,31 @@ int mkdir(const char *path) {
 int rmdir(const char *path) {
     return (int)CALL(SYS_RMDIR, path, 0, 0, 0);
 }
+
+int port_create(const char *name) {
+    return (int)CALL(SYS_PORT_CREATE, name, 0, 0, 0);
+}
+
+int port_delete(int port) {
+    return (int)CALL(SYS_PORT_DELETE, port, 0, 0, 0);
+}
+
+int port_find(const char *name) {
+    return (int)CALL(SYS_PORT_FIND, name, 0, 0, 0);
+}
+
+int port_put(int port, void *msg, int reply_port) {
+    return (int)CALL(SYS_PORT_PUT, port, msg, reply_port, 0);
+}
+
+int port_get(int port, struct port_message *out) {
+    return (int)CALL(SYS_PORT_GET, port, out, 0, 0);
+}
+
+int port_wait(int port, struct port_message *out) {
+    return (int)CALL(SYS_PORT_WAIT, port, out, 0, 0);
+}
+
+int port_reply(void *msg) {
+    return (int)CALL(SYS_PORT_REPLY, msg, 0, 0, 0);
+}
