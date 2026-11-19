@@ -200,6 +200,7 @@ categories:
         name: Console handles
         status: in_progress
         description: A program's stdin and stdout are handles to a console instead of fixed file descriptors.
+        prs: [102]
 
   - id: shell
     name: Shell
@@ -234,6 +235,7 @@ categories:
         name: Redirection
         status: in_progress
         description: Programs read stdin from a file and write stdout to one, with <, > and >>.
+        prs: [102]
       - id: job-control
         name: Background jobs and pinning
         status: completed
