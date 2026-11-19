@@ -53,6 +53,8 @@ SYSCALL port_put,    SYS_PORT_PUT
 SYSCALL port_get,    SYS_PORT_GET
 SYSCALL port_wait,   SYS_PORT_WAIT
 SYSCALL port_reply,  SYS_PORT_REPLY
+SYSCALL std_handles, SYS_STD_HANDLES
+SYSCALL libk_spawn_std, SYS_SPAWN_STD  // spawn_std() in koraos.h flushes stdout first
 
 // exit(), rename() and the program entry point come from the libc (user/libc).
 

@@ -198,6 +198,10 @@ int port_delete(struct process *me, int id) {
     return 0;
 }
 
+bool port_exists(int id) {
+    return lookup(id) != NULL;
+}
+
 int port_find(const char *name) {
     if (!name || !name[0]) {
         return -1;

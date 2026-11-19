@@ -55,6 +55,8 @@
 #define SYS_PORT_GET     52
 #define SYS_PORT_WAIT    53
 #define SYS_PORT_REPLY   54
+#define SYS_STD_HANDLES  55
+#define SYS_SPAWN_STD    56
 
 /* open() flags, as the FAT32 layer defines them (checked too). */
 #define KORA_O_RDONLY 0

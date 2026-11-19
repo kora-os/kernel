@@ -92,6 +92,8 @@ static void test_names_and_ids(void) {
     int named = port_create(&b, "CON");
     CHECK(anon > 0 && empty > 0 && named > 0 && anon != empty, "ports get positive, distinct ids");
     CHECK(port_find("CON") == named, "a named port is found by name");
+    CHECK(port_exists(anon) && port_exists(named) && !port_exists(0) && !port_exists(named + 64),
+          "port_exists knows live ids only");
     CHECK(port_find("con") == -1 && port_find("") == -1 && port_find(NULL) == -1,
           "names match exactly, and the empty name finds nothing");
     CHECK(port_create(&c, "CON") == -1, "a name is unique");

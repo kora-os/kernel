@@ -11,6 +11,7 @@
 
 #include "abi.h"
 
+#include <_libc/console.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -201,6 +202,34 @@ int libk_spawn_flags(const char *name, int argc, char *const argv[], int flags);
 static inline int spawn_flags(const char *name, int argc, char *const argv[], int flags) {
     fflush(stdout);
     return libk_spawn_flags(name, argc, argv, flags);
+}
+
+/* Standard handles. A program's stdin, stdout and stderr are each the kernel
+ * console (STD_CONSOLE), one of its open files (STD_FILE, value = the fd) or
+ * a console handler's message port (STD_PORT, value = the port id); see
+ * <_libc/console.h>, also for the packets a handler serves. A child gets its
+ * parent's, files duplicated with their cursors, unless spawn_std() names
+ * others: this program's own fds and ports. std_handles() fills out[0..2]
+ * (0, or -1); the libc reads them itself, so programs rarely need it. */
+int std_handles(struct std_handle out[3]);
+
+struct spawn_request {
+    const char *name;
+    int argc;
+    int flags;            /* as for spawn_flags() */
+    char *const *argv;
+    struct std_handle std[3];
+};
+int libk_spawn_std(const struct spawn_request *request); /* raw */
+
+/* spawn_flags() with the child's standard handles: pid, or -1 (also for a file
+ * or port this program does not have). */
+static inline int spawn_std(const char *name, int argc, char *const argv[], int flags,
+                            const struct std_handle std[3]) {
+    struct spawn_request request = {name, argc, flags, argv,
+                                    {std[0], std[1], std[2]}};
+    fflush(stdout);
+    return libk_spawn_std(&request);
 }
 
 int waitpid(int pid, int *code, int flags);

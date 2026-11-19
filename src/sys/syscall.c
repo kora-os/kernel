@@ -380,10 +380,11 @@ static long sys_free_pages(uint64_t base) {
     return user_pages_free(p, (void *)(uintptr_t)base);
 }
 
-// spawn(name, argc, argv): load and run an embedded program with arguments.
 // spawn(name, argc, argv, flags): load a program and run it as a child; with
-// SPAWN_NOWAIT return at once (a background job), otherwise once it exits.
-static long sys_spawn(const char *name, int argc, char *const argv[], uint64_t flags) {
+// SPAWN_NOWAIT return at once (a background job), otherwise once it exits. The
+// child's standard handles are `std`, or for NULL the caller's.
+static long sys_spawn(const char *name, int argc, char *const argv[], uint64_t flags,
+                      const struct std_handle *std) {
     if (!uptr_ok((uint64_t)name, 1) ||
         (flags & ~(uint64_t)(SPAWN_NOWAIT | SPAWN_CORE_MASK)) != 0) {
         return -1;
@@ -398,9 +399,42 @@ static long sys_spawn(const char *name, int argc, char *const argv[], uint64_t f
     if (copy == NULL) {
         return -1;
     }
-    int pid = task_spawn(copy, argc, argv, (int)flags);
+    int pid = task_spawn(copy, argc, argv, (int)flags, std);
     kfree(copy);
     return pid;
+}
+
+// Kernel-side mirror of the userland struct spawn_request (user/libk/koraos.h).
+struct kspawn_request {
+    uint64_t name;
+    int32_t argc;
+    int32_t flags;
+    uint64_t argv;
+    struct std_handle std[3];
+};
+_Static_assert(sizeof(struct kspawn_request) == 48, "spawn request ABI");
+_Static_assert(sizeof(struct std_handle) == 8, "standard handle ABI");
+
+// spawn_std(request): spawn with the standard handles the request names.
+static long sys_spawn_std(const struct kspawn_request *request) {
+    if (!uptr_ok((uint64_t)request, sizeof(*request))) {
+        return -1;
+    }
+    struct kspawn_request r = *request;
+    return sys_spawn((const char *)r.name, r.argc, (char *const *)r.argv, (uint64_t)(uint32_t)r.flags,
+                     r.std);
+}
+
+// std_handles(out): the caller's standard handles, out[0..2].
+static long sys_std_handles(struct std_handle *out) {
+    struct process *p = proc_current();
+    if (p == NULL || !uptr_ok((uint64_t)out, 3 * sizeof(*out))) {
+        return -1;
+    }
+    for (int i = 0; i < 3; i++) {
+        out[i] = p->std[i];
+    }
+    return 0;
 }
 
 // wait(pid, code, flags): reap an exited child (pid, or any for -1). Returns
@@ -521,7 +555,7 @@ void syscall_handle(struct trapframe *tf) {
         ret = sys_read((int)a0, (char *)a1, a2);
         break;
     case SYS_spawn_flags:
-        ret = sys_spawn((const char *)a0, (int)a1, (char *const *)a2, a3);
+        ret = sys_spawn((const char *)a0, (int)a1, (char *const *)a2, a3, NULL);
         break;
     case SYS_waitpid:
         ret = sys_wait((int)a0, (int *)a1, a2);
@@ -639,6 +673,12 @@ void syscall_handle(struct trapframe *tf) {
         break;
     case SYS_port_reply:
         ret = port_reply(proc_current(), a0);
+        break;
+    case SYS_std_handles:
+        ret = sys_std_handles((struct std_handle *)a0);
+        break;
+    case SYS_spawn_std:
+        ret = sys_spawn_std((const struct kspawn_request *)a0);
         break;
     default:
         ret = -1;

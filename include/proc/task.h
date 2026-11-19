@@ -43,6 +43,19 @@
 #define FD_BASE 3            // fds 0/1/2 are the console; real files start here
 #define TASK_NAME_MAX 16
 
+// A program's standard input, output and error (std[0], [1], [2] of struct
+// process), as in AmigaOS's pr_CIS and pr_COS: the kernel console, one of its
+// open files, or a message port that a console handler serves. Zeroed means
+// the console. The userland struct std_handle (user/libc/includes/_libc/
+// console.h) has the same layout.
+#define STD_CONSOLE 0
+#define STD_FILE 1   // value: an fd of the program's own table
+#define STD_PORT 2   // value: a port id (ipc/port.h)
+struct std_handle {
+    uint32_t kind;
+    int32_t value;
+};
+
 // One open file or directory handle in a task's descriptor table. The FAT32
 // handle is a plain value cursor (no external resource), so closing just frees
 // the slot.
@@ -95,6 +108,7 @@ struct process {
     struct user_run *runs;            // pages from alloc_pages (proc/user_mem.h)
     fs_cwd_t cwd;                     // inherited filesystem location
     open_file_t files[MAX_OPEN_FILES];  // fd table (indexed fd - FD_BASE)
+    struct std_handle std[3];         // stdin, stdout, stderr
     unsigned msgs_out;                // its messages receivers hold (ipc/port.h)
     bool draining;                    // reaped, but kept until msgs_out is 0
 };
@@ -128,9 +142,13 @@ typedef struct task {
 // thread: argv holds argc string pointers (readable in the caller's address
 // space), copied onto the child's stack and delivered as main(argc, argv). The
 // thread runs on `core` for life, or for -1 on the online core with the fewest
-// tasks. Returns the new process, or NULL (also for a core that does not exist
-// or is offline).
-struct process *task_create(const char *name, int argc, char *const argv[], int core);
+// tasks. Its standard handles are `std` (the caller's own fds and ports), or
+// for NULL the caller's (the console for the kernel's children); files among
+// them are duplicated into the new process's table. Returns the new process,
+// or NULL (also for a core that does not exist or is offline, or a standard
+// handle the caller does not have).
+struct process *task_create(const char *name, int argc, char *const argv[], int core,
+                            const struct std_handle *std);
 
 #define SPAWN_NOWAIT 1  // return as soon as the child exists (a background job)
 // Run the child on core n (0..MAX_CPUS-1); without it the kernel picks the
@@ -142,7 +160,8 @@ struct process *task_create(const char *name, int argc, char *const argv[], int 
 // Create a process and, unless SPAWN_NOWAIT, block until it finishes. Returns
 // the child's pid, or -1 on failure. The child stays an unreaped zombie until
 // its parent collects it with task_wait_ex().
-int task_spawn(const char *name, int argc, char *const argv[], int flags);
+int task_spawn(const char *name, int argc, char *const argv[], int flags,
+               const struct std_handle *std);
 
 #define WAIT_NOHANG 1  // do not block if no matching child has exited
 

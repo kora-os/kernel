@@ -174,7 +174,7 @@ void kernel_main(uintptr_t dtb) {
   // Start /bin/init as the first (and only) user program the kernel launches.
   // init owns userland policy from here: it spawns the shell, which spawns
   // further programs -- all loaded from the filesystem.
-  int pid = task_spawn("init", 0, 0, 0);
+  int pid = task_spawn("init", 0, 0, 0, NULL);  // the console for its standard handles
   if (pid < 0) {
     printf("kernel: failed to load /bin/init\n");
   } else {

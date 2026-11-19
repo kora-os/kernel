@@ -47,6 +47,7 @@
 #define port_get libk_port_get
 #define port_wait libk_port_wait
 #define port_reply libk_port_reply
+#define std_handles libk_std_handles
 #define wait libk_wait
 
 #endif // LIBK_HOST_RENAME_H
