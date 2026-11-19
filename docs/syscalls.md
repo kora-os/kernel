@@ -61,14 +61,17 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
 | 52 | `port_get` | `int port_get(int port, struct port_message *out)` | `1` message, `0` none, `-1` error |
 | 53 | `port_wait` | `int port_wait(int port, struct port_message *out)` | `1` message, or `-1` |
 | 54 | `port_reply` | `int port_reply(void *msg)` | `0`, or `-1` |
+| 55 | `std_handles` | `int std_handles(struct std_handle out[3])` | `0`, or `-1` |
+| 56 | `spawn_std` | `int spawn_std(const char *name, int argc, char *const argv[], int flags, const struct std_handle std[3])` | child pid, or `-1` |
 
 ## Notes per call
 
-- **`write`**: fd 1 (stdout) and 2 (stderr) go to the console. A writable file
+- **`write`**: fd 1 and 2 go to the kernel console, whatever the program's
+  standard handles are (the libc writes to those itself; see below). A writable file
   descriptor at fd 3 or above writes at its cursor; append selects current EOF
   for every call. Returns accepted bytes, possibly a short write on exhaustion,
   or `-1`. `sync` reports durable completion.
-- **`read`**: `fd` 0 reads raw console bytes: it blocks until at least one
+- **`read`**: `fd` 0 reads raw bytes from the kernel console: it blocks until at least one
   arrives, then returns those already queued, up to `len`. Nothing is echoed,
   buffered into lines or translated (Enter arrives as `\r`, cursor keys as VT
   escape sequences). libk's `kgetline` reads an echoed line with backspace, as
@@ -238,6 +241,32 @@ which the kernel queues by address and never reads or writes.
   program counts in `sysinfo().procs` but cannot be found, waited for or
   killed.
 
+### Standard handles (55 and 56)
+
+A program's stdin, stdout and stderr are handles, as AmigaOS's `pr_CIS` and
+`pr_COS`: each is the kernel console (`STD_CONSOLE`), one of the program's open
+files (`STD_FILE`, value = its fd) or a message port that a console handler
+serves (`STD_PORT`, value = the port id). The structs and the handler protocol
+are in [`<_libc/console.h>`](../user/libc/includes/_libc/console.h), which
+`koraos.h` includes.
+
+- **`std_handles`** fills `out[0..2]` with the caller's handles.
+- **`spawn_std`** is `spawn` with the child's handles, which must be the
+  caller's own fds and ports (libk's wrapper flushes `stdout` first and packs
+  the arguments into a `struct spawn_request`, the call's one argument). A
+  plain `spawn` passes the caller's own handles on. Files are duplicated into
+  the child with their cursors, so either side may close its copy; one file for
+  several handles is one fd in the child. It fails for a file the caller has
+  not open (or a directory), or a port that does not exist. The kernel gives
+  its own children (`init`) the console.
+- **The libc** asks for the handles on its first I/O. A console's stream
+  behaves as before; a file's stdout is fully buffered; a handler's stream
+  sends it one `struct con_packet` per read or write (`CON_READ`, `CON_WRITE`,
+  a buffer, a length) on a reply port of its own, and takes the `result` the
+  handler fills in before replying, as AmigaOS DOS packets. `isatty(0..2)`
+  (libk) says whether a standard stream is a console, the kernel's or a
+  handler's. Raw `read(0)` and `write(1)` still reach the kernel console.
+
 ## Structs and constants
 
 From [`user/libk/koraos.h`](../user/libk/koraos.h) (mirrored kernel-side in
@@ -288,6 +317,33 @@ struct assign_info {
 #define PORT_MESSAGE 1     /* someone's message: handle it, then port_reply() */
 #define PORT_REPLY 2       /* one of ours, back from its receiver */
 #define PORT_RETURNED 3    /* one of ours, back unhandled */
+
+#define STD_CONSOLE 0      /* <_libc/console.h> */
+#define STD_FILE 1         /* value: an open fd */
+#define STD_PORT 2         /* value: a console handler's port */
+
+struct std_handle {
+    int kind;
+    int value;
+};
+
+struct spawn_request {     /* spawn_std()'s one argument */
+    const char *name;
+    int argc;
+    int flags;
+    char *const *argv;
+    struct std_handle std[3];
+};
+
+#define CON_WRITE 1
+#define CON_READ 2
+
+struct con_packet {        /* the libc to a console handler */
+    int op;                /* CON_WRITE or CON_READ */
+    long result;           /* the handler's answer: bytes, 0 at end, or -1 */
+    void *buf;
+    unsigned long length;
+};
 
 struct port_message {      /* filled by port_get() and port_wait() */
     void *msg;

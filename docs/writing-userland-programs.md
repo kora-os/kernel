@@ -63,6 +63,9 @@ A program runs in EL0 with a deliberately small runtime:
   core get 10 ms time slices in turn. `ps` lists them. `spawn` runs a child to completion before returning (then `wait` reaps
   it); `spawn_flags(..., SPAWN_NOWAIT)` starts it in the background, and
   `waitpid(-1, &code, WNOHANG)` collects finished children without blocking.
+  `spawn_std` also sets the child's stdin, stdout and stderr (a file of
+  yours, or a console handler's port: see `condemo`); `isatty(1)` tells
+  whether your stdout is a console.
   `msleep(ms)` sleeps; `uptime_us()` reads a microsecond clock without a
   syscall. `forbid()`/`permit()` keep the CPU and the kernel to yourself while
   you poke at kernel structures (see [locking.md](locking.md)). `kill(pid)`

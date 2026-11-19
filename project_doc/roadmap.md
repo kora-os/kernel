@@ -344,7 +344,8 @@ The design, its five steps and its open decisions are in `console-plan.md`.
 Step 1 is done: keyboards post key events to a kernel queue, and a temporary
 adapter turns them back into the bytes the terminal reads. Step 2 is done:
 the terminal is the console library `user/libconsole`, built into the kernel
-and linked by user programs. Step 3a is done: message ports.
+and linked by user programs. Step 3 is done: message ports (3a), and
+standard handles with shell redirection (3b).
 
 ## QEMU virt development platform
 

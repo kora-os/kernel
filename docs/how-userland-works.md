@@ -99,7 +99,9 @@ pointer) saved by `cpu_switch` when it is switched out
   nothing runnable the core waits for an interrupt (`wfi`).
 - `spawn` is create plus wait: it creates the child and, unless asked for a
   background job (`SPAWN_NOWAIT`, the shell's `cmd &`), blocks the caller until
-  the child has exited.
+  the child has exited. The child gets the caller's standard handles (stdin,
+  stdout, stderr: the console, a file or a console handler's port), or those
+  `spawn_std` names, as the shell's `cmd < in > out` does.
 - A program lives until its **last thread** ends. `exit()` from any thread,
   or `kill`, marks the other threads killed; each dies on its own core, on its
   next syscall or on its way back to EL0 (a blocked one is woken to give up
