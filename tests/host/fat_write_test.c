@@ -150,6 +150,15 @@ static void integrity(const char *output, unsigned info_mode) {
     CHECK(fat32_write(&f, b, 1400) == 1400, "append extends across clusters");
     CHECK(fat32_size(&second) == 2100 && second.pos == 700, "size shared, offsets independent");
     CHECK(fat32_read(&second, b, 1400) == 1400, "old reader sees new tail");
+    fat32_file_t copy = {0};
+    CHECK(fat32_seek(&second, 700, 0) == 700, "rewind the reader");
+    fat32_dup(&second, &copy);
+    CHECK(copy.pos == 700 && copy.flags == second.flags, "a duplicate starts at its original's cursor");
+    fat32_close(&second);
+    CHECK(fat32_unmount(v) == FS_ERR_BUSY, "a duplicate counts as a live handle");
+    CHECK(fat32_read(&copy, b, 1400) == 1400 && b[0] == 'A' && b[1399] == 'A',
+          "a duplicate outlives its original and reads the shared file");
+    second = copy;
     CHECK(fat32_read(&f, b, 1) == FS_ERR_INVAL, "write-only handle rejects read");
     CHECK(fat32_seek(&f, 2101, 0) < 0, "seek cannot create holes");
     CHECK(fat32_seek(&f, -4294967295L, 99) == FS_ERR_INVAL, "invalid seek whence rejected before wide offset arithmetic");
