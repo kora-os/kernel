@@ -1031,6 +1031,41 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
                           "found only %d distinct colours" % len(colours))
     yield "termdemo renders colours on the screen", termdemo
 
+    def condemo():
+        # Two consoles of the console library, run by a user program in
+        # windows on the framebuffer: the left one blue with a line-drawing
+        # box, the right one red, larger than its window and clipped to it.
+        q.send("condemo\r")
+        # Up to the end of the line: the last number may still be on its way.
+        m = q.expect(rb"condemo: windows (\d+)x(\d+) at (\d+),(\d+) and (\d+),(\d+); "
+                     rb"left console cursor at (\d+);(\d+)\r?\n")
+        q.expect(PROMPT)
+        width, height, left, top, right, _, row, col = (int(g) for g in m.groups())
+        shot = q.screendump("condemo")
+        if (row, col) != (9, 21):
+            raise Failure("the left console reported its cursor at %d;%d, want 9;21" % (row, col))
+        checks = (
+            ((left + width - 1, top + height - 1), (0, 0, 0xee), "left console background"),
+            ((left + 5 * 8 + 2, top + 2 * 8 + 3), (0xff, 0xff, 0xff), "left console's box line"),
+            ((left - 1, top), (0x80, 0x80, 0x80), "left window frame"),
+            ((right + width, top + height), (0x80, 0x80, 0x80), "right window frame"),
+        )
+        for (x, y), expected, what in checks:
+            if not near(pixel(shot, x, y), expected):
+                raise Failure("%s: pixel (%d,%d) = %s, expected %s"
+                              % (what, x, y, pixel(shot, x, y), expected))
+        red = sum(near(pixel(shot, x, y), (0xcd, 0, 0))
+                  for y in range(top, top + height, 2) for x in range(right, right + width, 2))
+        if red < width * height // 8:
+            raise Failure("the right console's window is not red (%d of %d samples)"
+                          % (red, width * height // 4))
+        # Unclipped, the right console would run 64 pixels past its window.
+        spill = sum(near(pixel(shot, x, y), (0xcd, 0, 0))
+                    for y in range(top, top + height) for x in range(right + width + 4, right + width + 64))
+        if spill:
+            raise Failure("%d red pixels right of the right window: not clipped" % spill)
+    yield "condemo: two library consoles in clipped windows", condemo
+
     def gfxdemo():
         q.send("gfxdemo\r")
         q.expect(rb"gfxdemo: painted (\d+)x(\d+)")

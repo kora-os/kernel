@@ -1,6 +1,6 @@
 # Console and screen plan (handover)
 
-Status: **step 1 of 5 done.** It is the outcome of a design discussion on
+Status: **steps 1 and 2 of 5 done.** It is the outcome of a design discussion on
 2026-11-12 and is the "terminal design" that `libc-plan.md` defers to koracli.
 No milestone number has been assigned yet.
 
@@ -9,7 +9,7 @@ https://claude.ai/artifact/QXgrsw5YDAKwu67d5rLjhX. The Mermaid block below
 carries the same content, so the link is not needed to follow the plan.
 
 Code references were read from `lazzelor/koraos-kernel` at `ee4225f`
-(2026-11-11), and "Today" was brought up to date with step 1. Check them
+(2026-11-11), and "Today" was brought up to date with steps 1 and 2. Check them
 against the working tree before relying on them.
 
 ## Decision
@@ -40,9 +40,12 @@ to pretend to be one.
 
 ## Today
 
-- `src/video/term.c` + `include/video/term.h`: xterm-compatible parser, cell
-  grid, scrollback, alternate screen. Already pixel-free; `console_fb.c` is
-  the renderer, with the embedded 8x8 font (`font8x8.h`).
+- The console library, `user/libconsole` (step 2): `term.c` + `term.h`, the
+  xterm-compatible parser, cell grid, scrollback and alternate screen, and
+  `term_render.c`, which draws a terminal into any surface with the embedded
+  8x8 font (`font8x8.h`). The kernel builds it in for its screen terminal
+  (`src/video/console_fb.c` is the glue); user programs link it from source
+  (`condemo` runs two consoles in windows).
 - `src/tty.c`: input ring of **bytes**, `tty_read` / `tty_write`, ONLCR, the
   serial route switch (Ctrl-T) and scrollback requests. Its readers are the
   one consumer of the input event queue, for now.
@@ -52,8 +55,8 @@ to pretend to be one.
   a `struct input_event` (`include/input/event.h`) to the kernel queue in
   `src/input/input.c`. They still become bytes inside the kernel, in the
   temporary adapter `src/input/input_tty.c`, which the tasks reading the tty
-  run. Serial input and terminal status replies (`term.c`) are bytes already
-  and call `tty_input_push`.
+  run. Serial input is bytes already and calls `tty_input_push`; so do the
+  kernel terminal's status replies, through the host hook the library calls.
 - Line editing is in user space: `kgetline` in `user/libk/koraos.h`.
 - The kernel log is UART-only (`kernel.c`). Programs can already draw straight
   into the framebuffer through `fb_info` (`gfxdemo`).
@@ -138,7 +141,7 @@ flowchart TB
 
 - [x] 1. Keyboard to an event queue. Keep the current byte path as a
       temporary adapter so nothing else changes.
-- [ ] 2. Lift `term.c` into a library that builds for kernel and user space.
+- [x] 2. Lift `term.c` into a library that builds for kernel and user space.
 - [ ] 3. Message ports and handle-based stdin/stdout.
 - [ ] 4. Screen manager on top of the library. The kernel terminal becomes
       the boot and panic fallback only.
@@ -167,6 +170,27 @@ flowchart TB
   (they were dropped), and Alt+key types the key (it typed nothing). Step 4
   removes the adapter, the byte ring's keyboard half and
   `input_consumer_wake()` with it: the screen manager reads the events.
+
+## Step 2 as built
+
+- **One copy of the source, built twice.** `user/libconsole` sits beside
+  libc and libk. The kernel compiles it with `KORAOS_KERNEL` defined, which
+  makes `con_base.h` take the kernel's types and string functions; user
+  programs get the libc's ISO headers. A program links the sources it needs
+  (`cmake/userfs.cmake`), as the plan allowed: no shared library yet.
+- **The host hooks.** A terminal asks its host for memory (`alloc`, never
+  freed) and hands it the answers to status requests (`reply`), through
+  `term_host_t`. The kernel's host gives frame pages and `tty_input_push`;
+  `condemo`'s gives `malloc` and a buffer. The scrollback length is an
+  argument of `term_init`.
+- **Surfaces.** `term_render.c` is what `console_fb.c` drew with, made to
+  draw a terminal anywhere on a surface (pixels, size, pitch, clip
+  rectangle), partly off it or clipped by it. Several consoles can share a
+  screen.
+- **Left for the fonts feature**: the glyph provider and cells wider than a
+  byte. The renderer still takes glyphs from the 8x8 font and `term_glyph()`.
+- **Left for step 4**: the kernel terminal still serves programs; nothing in
+  user space reads keys for a library console yet, so `condemo` only draws.
 
 ## Safety net
 
