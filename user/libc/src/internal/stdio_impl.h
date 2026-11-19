@@ -35,6 +35,9 @@ struct __libc_file {
     int ungot;           // a byte pushed back by ungetc, or EOF for none
     lock_t lock;
     struct __libc_file *next;  // open streams other than the standard three
+    int port;            // a standard stream served by a console handler: its
+                         // port (_libc/console.h), or 0
+    int reply;           // the port its packets come back to, made on first use
 };
 
 // exit() calls this, once stdio has been used, to flush every stream.
@@ -56,6 +59,20 @@ int __stdio_end_read(FILE *f);
 // Flushes pending output, closes the fd and frees the stream (unless it is
 // one of the standard three). 0, or EOF if flushing or closing failed.
 int __fclose_unlocked(FILE *f);
+
+// The standard streams take the program's standard handles (the console, a
+// file or a console handler's port) the first time any stream does I/O or is
+// set up: call before looking at a standard stream's fd, port or mode.
+void __stdio_std_init(void);
+// 1 once the kernel was asked. The host tests set it back to 0, with the
+// standard streams' fd, port, reply and mode, to try other handles.
+extern int __stdio_std_ready;
+// Reads or writes the stream's handle once: its fd, or a packet to its
+// console handler. Bytes moved, 0 at end of input, or -1.
+long __stdio_read_raw(FILE *f, void *buf, size_t n);
+long __stdio_write_raw(FILE *f, const void *buf, size_t n);
+// The standard stream 0, 1 or 2.
+FILE *__stdio_standard(int i);
 
 // Streams opened with fopen, for fflush(NULL) and exit.
 void __stdio_link(FILE *f);

@@ -22,6 +22,8 @@
 #define tolower kora_tolower
 #define toupper kora_toupper
 
+#define isatty kora_isatty
+
 #define atof kora_atof
 #define atoi kora_atoi
 #define atol kora_atol

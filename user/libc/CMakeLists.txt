@@ -217,7 +217,7 @@ if(KORAOS_HOST_CC)
     libc_host_test(stdlib_misc SOURCES src/stdlib/integer.c src/stdlib/rand.c src/stdlib/getenv.c)
     libc_host_test(stdio_snprintf SOURCES src/stdio/snprintf.c src/stdio/format.c
                    src/stdio/format_float.c src/string/string.c src/errno/errno.c FLAGS -Wno-format)
-    set(LIBC_STDIO_SOURCES src/stdio/file.c src/stdio/fwrite.c src/stdio/printf.c
+    set(LIBC_STDIO_SOURCES src/stdio/file.c src/stdio/handle.c src/stdio/fwrite.c src/stdio/printf.c
         src/stdio/fopen.c src/stdio/fread.c src/stdio/fseek.c src/stdio/remove.c
         src/stdio/scan.c src/stdio/scanf.c src/stdio/sscanf.c src/stdlib/strtod.c
         src/ctype/ctype.c
@@ -226,6 +226,7 @@ if(KORAOS_HOST_CC)
         src/stdlib/malloc.c ${LIBC_FAKE_KERNEL})
     libc_host_test(stdio_write SOURCES ${LIBC_STDIO_SOURCES} FLAGS -pthread -Wno-format)
     libc_host_test(stdio_file SOURCES ${LIBC_STDIO_SOURCES})
+    libc_host_test(stdio_handles SOURCES ${LIBC_STDIO_SOURCES})
     libc_host_test(stdio_scanf SOURCES ${LIBC_STDIO_SOURCES} src/stdlib/convert.c
                    FLAGS -Wno-format)
     libc_host_test(stdlib_strtod SOURCES src/stdlib/strtod.c src/ctype/ctype.c src/string/string.c

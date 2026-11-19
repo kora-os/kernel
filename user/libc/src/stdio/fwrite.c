@@ -15,7 +15,7 @@
 static size_t write_direct(FILE *f, const unsigned char *p, size_t n) {
     size_t done = 0;
     while (done < n) {
-        long r = __syscall3(SYS_WRITE, f->fd, (long)(p + done), (long)(n - done));
+        long r = __stdio_write_raw(f, p + done, n - done);
         if (r <= 0) {
             f->flags |= F_ERR;
             errno = EIO;
@@ -28,6 +28,7 @@ static size_t write_direct(FILE *f, const unsigned char *p, size_t n) {
 
 size_t __fwrite_unlocked(const void *data, size_t n, FILE *f) {
     const unsigned char *p = data;
+    __stdio_std_init();
     if (!(f->flags & F_WRITE)) {
         f->flags |= F_ERR;
         errno = EBADF;

@@ -232,6 +232,10 @@ static inline int spawn_std(const char *name, int argc, char *const argv[], int 
     return libk_spawn_std(&request);
 }
 
+/* Whether stdin (0), stdout (1) or stderr (2) is a console: the kernel's or a
+ * console handler's, not a file. From the libc; any other number is not. */
+int isatty(int fd);
+
 int waitpid(int pid, int *code, int flags);
 int getpid(void);  /* the program's pid, the same in all its threads */
 void yield(void);

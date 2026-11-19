@@ -18,6 +18,7 @@
 // Refills the read-ahead. 1 if there is data, 0 at end of file or error
 // (with the indicator set).
 static int fill(FILE *f) {
+    __stdio_std_init();
     if (!(f->flags & F_READ)) {
         f->flags |= F_ERR;
         errno = EBADF;
@@ -33,7 +34,7 @@ static int fill(FILE *f) {
     unsigned char one;
     unsigned char *dest = f->buf != NULL ? f->buf : &one;
     size_t want = f->mode == _IOFBF && f->buf != NULL ? f->size : 1;
-    long r = __syscall3(SYS_READ, f->fd, (long)dest, (long)want);
+    long r = __stdio_read_raw(f, dest, want);
     if (r < 0) {
         f->flags |= F_ERR;
         errno = EIO;
@@ -140,7 +141,7 @@ size_t fread(void *restrict ptr, size_t size, size_t nmemb, FILE *restrict strea
         if (stream->mode == _IOFBF && total - done >= stream->size && stream->size > 0 &&
             (stream->flags & F_READ) && stream->wlen == 0) {
             // Large reads go straight into the caller's memory.
-            long r = __syscall3(SYS_READ, stream->fd, (long)(p + done), (long)(total - done));
+            long r = __stdio_read_raw(stream, p + done, total - done);
             if (r <= 0) {
                 stream->flags |= r < 0 ? F_ERR : F_EOF;
                 if (r < 0) {

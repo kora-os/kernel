@@ -118,7 +118,7 @@ that needs it.
 
 | Console step | libc change |
 |---|---|
-| 3. Handles | The standard streams take their handles at startup instead of the fixed fds 0, 1 and 2 in `src/stdio/file.c`. With `isatty`, `stdout` is fully buffered when it is not a console. |
+| 3. Handles | Done (console step 3b): the standard streams take their handles on first use (`src/stdio/handle.c`), a handler's in packets; `isatty`; `stdout` fully buffered when it is a file. |
 | 4. Screen manager | In cooked mode `stdin` may read a whole line per call instead of one byte, and `fgets(stdin)` replaces `kgetline`. |
 | 4. Ctrl+C | Nothing while a break is a plain `kill`: the program loses at most its unflushed output. A break a program can catch (MicroPython's `KeyboardInterrupt`) needs the break word described under "Rest of the ISO library". |
 | Fonts | Nothing for bitmap fonts. FreeType would need `<setjmp.h>` and part of `<math.h>`. |
@@ -207,8 +207,8 @@ Two things need the kernel, and wait for it:
 - Syscalls return `-1` with no error code, so libc picks the most likely
   `errno` for a failed call.
 - No per-thread `TPIDR_EL0`: `errno` is shared by a program's threads.
-- No wall clock (`time()`), no `fstat`/`isatty` on an fd, no environment
-  passed at spawn (`getenv` returns `NULL`).
+- No wall clock (`time()`), no `fstat`, no environment passed at spawn
+  (`getenv` returns `NULL`). `isatty` answers for the standard streams only.
 - The console is raw: `stdin` gets no echo and Enter arrives as `'\r'`, so
   line input needs the program's own editing (libk's `kgetline`). The
   terminal design is in `console-plan.md`.
