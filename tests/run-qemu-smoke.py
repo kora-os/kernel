@@ -910,6 +910,22 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
             raise Failure("threadprobe tasks outlived kill: %s" % left)
     yield "kill ends a multi-threaded background job on every core", kill_job
 
+    def message_ports():
+        # portprobe runs children of its own and passes messages between them
+        # (ipc/port.h); each case prints a line, any failure a FAIL line.
+        q.send("portprobe\r")
+        for case in (rb"\d+ round trips and \d+ pipelined requests",
+                     rb"an ended sender lasts until its held message is replied",
+                     rb"a receiver that ends returns what it held",
+                     rb"a waiter can be killed",
+                     rb"all passed"):
+            m = q.expect(rb"^portprobe: (?:(" + case + rb")|FAIL ([^\r\n]*))\r?\n", timeout=60)
+            if m.group(2) is not None:
+                raise Failure("portprobe: %s" % m.group(2).decode(errors="replace"))
+        q.expect(rb"\] exited with 0")
+        q.expect(PROMPT)
+    yield "message ports between processes: round trips, ended senders and receivers, kill", message_ports
+
     def jobdemo():
         # One job, then one per core: the renderings must agree (the demo
         # checks), and with several cores the jobs must run in parallel. The
@@ -970,9 +986,10 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
     if stress:
         def stress_rounds():
             for _ in range(stress):
-                for check in (threads, thread_lifetime, kill_job, jobdemo, pindemo):
+                for check in (threads, thread_lifetime, kill_job, message_ports, jobdemo, pindemo):
                     check()
-        yield "stress: %d rounds of threads, process lifetime, kill and both demos" % stress, stress_rounds
+        yield ("stress: %d rounds of threads, process lifetime, kill, message ports and both demos"
+               % stress), stress_rounds
 
     if repeat:
         def allocation_lifetime():

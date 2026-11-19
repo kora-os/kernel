@@ -1,6 +1,6 @@
 # Console and screen plan (handover)
 
-Status: **steps 1 and 2 of 5 done.** It is the outcome of a design discussion on
+Status: **steps 1, 2 and 3a done** (step 3 is two PRs). It is the outcome of a design discussion on
 2026-11-12 and is the "terminal design" that `libc-plan.md` defers to koracli.
 No milestone number has been assigned yet.
 
@@ -142,7 +142,11 @@ flowchart TB
 - [x] 1. Keyboard to an event queue. Keep the current byte path as a
       temporary adapter so nothing else changes.
 - [x] 2. Lift `term.c` into a library that builds for kernel and user space.
-- [ ] 3. Message ports and handle-based stdin/stdout.
+- [ ] 3. Message ports and handle-based stdin/stdout, as two PRs:
+  - [x] 3a. Message ports.
+  - [ ] 3b. stdin, stdout and stderr as handles: the kernel console, a file
+        or a console handler's port, inherited at spawn; the libc takes them
+        at startup and gains `isatty`.
 - [ ] 4. Screen manager on top of the library. The kernel terminal becomes
       the boot and panic fallback only.
 - [ ] 5. Mouse events, then the graphics layer.
@@ -191,6 +195,26 @@ flowchart TB
   byte. The renderer still takes glyphs from the 8x8 font and `term_glyph()`.
 - **Left for step 4**: the kernel terminal still serves programs; nothing in
   user space reads keys for a library console yet, so `condemo` only draws.
+
+## Step 3a as built
+
+- **Decisions** (2026-11-19): ports have ids, and optionally public names
+  (`port_find`, as `AddPort`/`FindPort`); a message is a pointer to the
+  sender's memory, as in Exec.
+- **The kernel never touches a message.** It queues the address in a record
+  of its own (128 in flight at most) and hands out the address, the kind
+  (`PORT_MESSAGE`, `PORT_REPLY`, `PORT_RETURNED`) and the sender's pid. Ids
+  carry a generation, so a stale id fails. Replies go to a port of the
+  sender's own.
+- **No memory protection, so the kernel guards lifetimes instead.** An ended
+  program's ports are deleted and their queued messages returned; its queued
+  messages are withdrawn; the messages it held are returned to their senders.
+  A program whose messages a receiver still holds keeps its memory and slot
+  ("draining") until the last one is replied.
+- **Syscalls 48 to 54**: `port_create`, `port_delete`, `port_find`,
+  `port_put`, `port_get`, `port_wait`, `port_reply` (`docs/syscalls.md`).
+- **Not yet**: waiting on several ports at once, or on a port and the input
+  queue together. The screen manager (step 4) will need one of them.
 
 ## Safety net
 

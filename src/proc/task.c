@@ -25,6 +25,7 @@
 #include "arch/systick.h"
 #include "user/elf.h"
 #include "fs/fat32.h"
+#include "ipc/port.h"
 #include "mm.h"
 #include "mm/frame_alloc.h"
 #include "mm/kmalloc.h"
@@ -207,7 +208,7 @@ static struct process *proc_alloc(void) {
 
 static struct process *proc_find(int pid) {
     for (int i = 0; i < MAX_PROCS; i++) {
-        if (pid > 0 && procs[i].pid == pid) {
+        if (pid > 0 && procs[i].pid == pid && !procs[i].draining) {
             return &procs[i];
         }
     }
@@ -243,8 +244,14 @@ static void task_free(task_t *t) {
 }
 
 // Release a process: whatever threads it still has (all exited, or never
-// started), its files, cwd and memory, and its slot.
+// started), its files, cwd and memory, and its slot. A process whose messages
+// receivers still hold (ipc/port.h) keeps all of it, out of sight ("draining"),
+// until the last one comes back: proc_messages_back() frees it then.
 static void proc_free(struct process *p) {
+    if (port_messages_out(p) > 0) {
+        p->draining = true;
+        return;
+    }
     for (int i = 0; i < MAX_TASKS; i++) {
         if (tasks[i].pid != 0 && tasks[i].proc == p) {
             task_free(&tasks[i]);
@@ -263,6 +270,10 @@ static void proc_free(struct process *p) {
     }
     user_pages_release_all(p);
     p->pid = 0;
+}
+
+void proc_messages_back(struct process *p) {
+    proc_free(p);
 }
 
 // Scheduling ---------------------------------------------------------------
@@ -782,7 +793,8 @@ int task_wait_ex(int pid, int *code, int flags) {
         struct process *match = NULL;
         for (int i = 0; i < MAX_PROCS; i++) {
             struct process *p = &procs[i];
-            if (p->pid == 0 || p->parent != me || p->orphan || (pid != -1 && p->pid != pid)) {
+            if (p->pid == 0 || p->draining || p->parent != me || p->orphan ||
+                (pid != -1 && p->pid != pid)) {
                 continue;
             }
             if (match == NULL || (!match->zombie && p->zombie)) {
@@ -896,6 +908,9 @@ static void thread_die(long value) {
     me->exit_value = value;
     bool last = --p->threads == 0;
     if (last) {
+        // Its ports go, its queued messages are withdrawn, those it holds go
+        // back to their senders.
+        port_process_exit(p);
         // Children outlive us as orphans: reaped as soon as they are zombies.
         for (int i = 0; i < MAX_PROCS; i++) {
             struct process *child = &procs[i];

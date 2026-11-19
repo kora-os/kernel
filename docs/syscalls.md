@@ -54,6 +54,13 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
 | 39 | `mkdir` | `int mkdir(const char *path)` | `0`, or `-1` |
 | 40 | `rmdir` | `int rmdir(const char *path)` | `0`, or `-1` |
 | 41 | `rename` | `int rename(const char *old_path, const char *new_path)` | `0`, or `-1` |
+| 48 | `port_create` | `int port_create(const char *name)` | port id (> 0), or `-1` |
+| 49 | `port_delete` | `int port_delete(int port)` | `0`, or `-1` |
+| 50 | `port_find` | `int port_find(const char *name)` | port id, or `-1` |
+| 51 | `port_put` | `int port_put(int port, void *msg, int reply_port)` | `0`, or `-1` |
+| 52 | `port_get` | `int port_get(int port, struct port_message *out)` | `1` message, `0` none, `-1` error |
+| 53 | `port_wait` | `int port_wait(int port, struct port_message *out)` | `1` message, or `-1` |
+| 54 | `port_reply` | `int port_reply(void *msg)` | `0`, or `-1` |
 
 ## Notes per call
 
@@ -198,7 +205,38 @@ return `-1`. The kernel API retains detailed errors; user syscalls map them to
 
 File paths for `open`, `stat`, `chdir` and explicit `spawn` paths use the same
 namespace rules; `/` selects the current volume's root. Syscall numbers 14 to
-31 belong to the scheduler/memory track; filesystem additions use 32 to 47.
+31 belong to the scheduler/memory track; filesystem additions use 32 to 47;
+message ports and the console work use 48 and up.
+
+### Message ports (48 to 54)
+
+Ports follow AmigaOS Exec (`src/ipc/port.c`, `include/ipc/port.h`). A port is
+a queue owned by one program; a message is a block of the sender's own memory,
+which the kernel queues by address and never reads or writes.
+
+- **`port_create`** makes a port owned by the calling program. With a name (up
+  to 15 bytes, unique, case-sensitive) others can find it; `NULL` or `""` makes
+  an anonymous one, such as a reply port. At most 32 ports exist at a time.
+- **`port_find`** returns the id of a named port. An id carries a generation:
+  once its port is deleted, the id names nothing, even when the slot is reused.
+- **`port_put`** queues `msg` on any port. `reply_port` must be one of the
+  sender's own ports, or `0` for no reply. The same message cannot be in flight
+  twice; at most 128 messages are in flight system-wide.
+- **`port_get`** and **`port_wait`** take the oldest message from one of the
+  caller's ports into `struct port_message`: the message, its kind and the
+  sender's pid. `port_wait` sleeps until there is one; it returns `-1` if the
+  port is deleted meanwhile or the program is killed.
+- **`port_reply`** hands back a `PORT_MESSAGE` the caller took. It goes to its
+  reply port as a `PORT_REPLY`, or is simply released. Until then the receiver
+  may read and write the message; after that, neither it nor anyone else but
+  the sender may touch it.
+- **When a program ends** its ports are deleted, and the messages queued on
+  them go back to their senders as `PORT_RETURNED`; so do the messages it had
+  taken and not replied. Its own messages still queued elsewhere are withdrawn.
+  Those a receiver holds keep the program's memory, and its process slot,
+  until they are replied: a receiver never touches freed memory. Meanwhile the
+  program counts in `sysinfo().procs` but cannot be found, waited for or
+  killed.
 
 ## Structs and constants
 
@@ -245,6 +283,16 @@ struct assign_info {
     char name[32];          /* assign name without colon */
     char target[KORA_PATH_MAX];
     unsigned int flags;
+};
+
+#define PORT_MESSAGE 1     /* someone's message: handle it, then port_reply() */
+#define PORT_REPLY 2       /* one of ours, back from its receiver */
+#define PORT_RETURNED 3    /* one of ours, back unhandled */
+
+struct port_message {      /* filled by port_get() and port_wait() */
+    void *msg;
+    int   kind;            /* PORT_MESSAGE, PORT_REPLY or PORT_RETURNED */
+    int   sender;          /* pid of the program that sent it */
 };
 
 struct fb_info {           /* filled by fb_info() */

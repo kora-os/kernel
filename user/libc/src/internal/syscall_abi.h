@@ -48,6 +48,13 @@
 #define SYS_MKDIR       39
 #define SYS_RMDIR       40
 #define SYS_RENAME      41
+#define SYS_PORT_CREATE  48
+#define SYS_PORT_DELETE  49
+#define SYS_PORT_FIND    50
+#define SYS_PORT_PUT     51
+#define SYS_PORT_GET     52
+#define SYS_PORT_WAIT    53
+#define SYS_PORT_REPLY   54
 
 /* open() flags, as the FAT32 layer defines them (checked too). */
 #define KORA_O_RDONLY 0

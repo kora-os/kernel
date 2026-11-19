@@ -82,15 +82,17 @@ Take locks only in this order (a lock may be skipped, never taken backwards):
 5. `input events` (`src/input/input.c`): the input event queue. A leaf:
    keyboard drivers post under their own locks and readers poll under
    `tty input`, and the queue releases it before it wakes the readers
-6. `sched` (`src/proc/task.c`): task states, wait queues, sleep deadlines;
+6. `ports` (`src/ipc/port.c`): only hands a task waiting on a message port
+   over to the scheduler; the ports and messages themselves are BKL-protected
+7. `sched` (`src/proc/task.c`): task states, wait queues, sleep deadlines;
    held across a context switch and released by the task switched to
-7. `heap` (`src/mm/kmalloc.c`), then `frames` (`src/mm/frame_alloc.c`)
-8. `irq table` (`src/arch/irq.c`): handler registration against dispatch
-9. `printf` (`src/lib/panic.c`): whole writes to the serial line (`printf`
+8. `heap` (`src/mm/kmalloc.c`), then `frames` (`src/mm/frame_alloc.c`)
+9. `irq table` (`src/arch/irq.c`): handler registration against dispatch
+10. `printf` (`src/lib/panic.c`): whole writes to the serial line (`printf`
    calls, `uart_puts`, the debug console's prompt and echo, and the screen
    terminal's serial copy of each `write`), so lines from different cores
    never mix mid-line; bypassed while panicking
-10. `circle timers` (`src/circle/timer.cpp`): Circle's kernel timers, started
+11. `circle timers` (`src/circle/timer.cpp`): Circle's kernel timers, started
    on any core and fired by core 0's tick (see Circle below)
 
 A task blocks by marking itself blocked under `sched` before it drops the BKL,

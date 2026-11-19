@@ -40,6 +40,13 @@
 #define unlink libk_unlink
 #define mkdir libk_mkdir
 #define rmdir libk_rmdir
+#define port_create libk_port_create
+#define port_delete libk_port_delete
+#define port_find libk_port_find
+#define port_put libk_port_put
+#define port_get libk_port_get
+#define port_wait libk_port_wait
+#define port_reply libk_port_reply
 #define wait libk_wait
 
 #endif // LIBK_HOST_RENAME_H

@@ -51,6 +51,9 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
   `user/libconsole`: one source built into the kernel (`KORAOS_KERNEL`, glue in
   `src/video/console_fb.c`) and linked by user programs (`condemo`). Keep it
   free of kernel calls; what it needs comes through `term_host_t`.
+- Message ports (`src/ipc/port.c`, syscalls 48 to 54) carry pointers to the
+  sender's memory; the kernel never touches a message and keeps an ended
+  sender's memory until its held messages are replied (`docs/syscalls.md`).
 - Keyboards post key events to the input event queue (`src/input`,
   `include/input/input.h`); only input that is bytes already (serial, the
   terminal's status replies) calls `tty_input_push`. The adapter that turns
