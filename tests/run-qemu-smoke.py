@@ -956,6 +956,22 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         q.expect(PROMPT)
     yield "message ports between processes: round trips, ended senders and receivers, kill", message_ports
 
+    def signals():
+        # sigprobe: signal bits alone, between threads, from a port and a
+        # child's end (one wait for both, as a console handler waits), kill.
+        q.send("sigprobe\r")
+        for case in (rb"allocation, set, clear and wait",
+                     rb"a thread wakes another",
+                     rb"\d+ messages and a child's end on two signals",
+                     rb"a waiter can be killed",
+                     rb"all passed"):
+            m = q.expect(rb"^sigprobe: (?:(" + case + rb")|FAIL ([^\r\n]*))\r?\n", timeout=60)
+            if m.group(2) is not None:
+                raise Failure("sigprobe: %s" % m.group(2).decode(errors="replace"))
+        q.expect(rb"\] exited with 0")
+        q.expect(PROMPT)
+    yield "signals: bits, threads, a port and a child's end in one wait, kill", signals
+
     def jobdemo():
         # One job, then one per core: the renderings must agree (the demo
         # checks), and with several cores the jobs must run in parallel. The
@@ -1016,9 +1032,11 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
     if stress:
         def stress_rounds():
             for _ in range(stress):
-                for check in (threads, thread_lifetime, kill_job, message_ports, jobdemo, pindemo):
+                for check in (threads, thread_lifetime, kill_job, message_ports, signals, jobdemo,
+                              pindemo):
                     check()
-        yield ("stress: %d rounds of threads, process lifetime, kill, message ports and both demos"
+        yield ("stress: %d rounds of threads, process lifetime, kill, message ports, signals and "
+               "both demos"
                % stress), stress_rounds
 
     if repeat:
