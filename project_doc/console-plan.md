@@ -1,6 +1,7 @@
 # Console and screen plan (handover)
 
-Status: **steps 1 to 3 done** (step 3 as two PRs, 3a and 3b). It is the outcome of a design discussion on
+Status: **steps 1 to 3 done** (step 3 as two PRs, 3a and 3b); **step 4 in
+progress** as three PRs, 4a (signals) done. It is the outcome of a design discussion on
 2026-11-12 and is the "terminal design" that `libc-plan.md` defers to koracli.
 No milestone number has been assigned yet.
 
@@ -22,8 +23,12 @@ system process):
   small boot and panic fallback.
 - A reusable **console library** in user space holds the terminal: escape
   parser, cell grid, renderer, fonts.
-- A **screen manager task** owns the screen and the input queue, and hosts
-  console instances that programs use as stdin and stdout.
+- A **screen manager task** owns the screen and the input queue. Programs
+  open full-size screens on it, Amiga style, and it sends the keys to the
+  owner of the screen in front.
+- **Console clients** open a screen and host the console instances that
+  programs use as stdin and stdout (they are their `CON:` handlers): the
+  shell first, koracli later, and a GUI's terminal windows.
 
 No ptys. In this design the terminal is not a kernel object, so nothing needs
 to pretend to be one.
@@ -62,6 +67,9 @@ to pretend to be one.
   kernel terminal's status replies, through the host hook the library calls.
 - Line editing is in user space: `kgetline` in `user/libk/koraos.h`, on
   `stdin` and `stdout`.
+- Signals (step 4a): a thread waits on several sources at once, its ports,
+  its children's ends and other threads (`sig_wait`). `condemo <program>`
+  waits on its port and its program that way.
 - The kernel log is UART-only (`kernel.c`). Programs can already draw straight
   into the framebuffer through `fb_info` (`gfxdemo`).
 
@@ -75,11 +83,15 @@ flowchart TB
     tools["Ported tools: xterm escapes, SGR mouse"]
     gui["GUI app (later): hosts consoles in windows"]
   end
-  subgraph M["Screen manager task (the CON: handler)"]
-    inst["Console instances: one per window = stdin/stdout"]
+  subgraph C["Console clients: the shell, koracli later, a GUI's windows"]
+    inst["Console instances (CON: handler): one per window = stdin/stdout"]
     edit["Line editing: raw / cooked, history"]
-    bar["Status bar + menu, mouse-driven"]
+    bar["koracli: status bar + menu, mouse-driven"]
     brk["Ctrl+C and isatty: break to foreground task"]
+  end
+  subgraph M["Screen manager task"]
+    screens["Screens: one per client, full size; Meta+M brings the next to front"]
+    focus["Input to the front screen's owner"]
   end
   subgraph L["Console library (like console.device)"]
     parser["Escape parser: today's term.c, lifted"]
@@ -95,8 +107,10 @@ flowchart TB
   end
   shell -- "stdout / stdin" --> inst
   inst --> parser
-  render --> fb
-  inst -. "key + mouse events, upward" .- events
+  render -- "into the client's screen" --> screens
+  screens -- "changed rectangles of the front screen" --> fb
+  events -. "key + mouse events" .-> focus
+  focus -. "to the front client" .-> inst
 ```
 
 ### Kernel
@@ -125,12 +139,31 @@ flowchart TB
 
 ### Screen manager
 
-- Owns the screen and the input queue; draws the status bar and the menu.
-- Hosts one or more console instances. A program's stdin and stdout are
-  handles to an instance (like AmigaOS `pr_CIS` / `pr_COS`), not fixed fds.
-- Line editing and history live here, with a raw/cooked switch, so `kgetline`
-  goes away. This also enables a C64-style screen editor: move the cursor
-  anywhere, press Return, submit that line.
+- A small task of its own, as Intuition's screens on AmigaOS: it owns the
+  framebuffer and the input queue and knows no text and no windows.
+- **Screens.** A client opens a screen: a full-size pixel buffer in memory it
+  can reach (there is no memory protection), which it draws into and whose
+  changed rectangles it reports. The manager copies the front screen's changes
+  to the framebuffer. Drawing to a buffer, not straight to the framebuffer, is
+  what lets screens switch, later slide down to show the one behind as on the
+  Amiga, and survive a client that crashes.
+- **Meta+M** (the GUI key: Command on Apple keyboards, the Windows key on PC
+  ones) brings the next screen to the front, as Left-Amiga+M did.
+- **Input** goes to the owner of the front screen. Focus between the windows
+  of one screen is the client's own business (a GUI's event manager).
+- Several clients run at once, each full screen: the shell, a GUI, a game.
+
+### Console clients
+
+- A client opens a screen and hosts one or more console instances. A
+  program's stdin and stdout are handles to an instance (like AmigaOS
+  `pr_CIS` / `pr_COS`), not fixed fds. The first client is the shell itself
+  (`user/shell.c`, converted in step 4c); koracli comes later, and a GUI's
+  terminal windows are consoles too.
+- Line editing and history live in the client, with a raw/cooked switch, so
+  `kgetline` goes away (to be confirmed in step 4c). This also enables a
+  C64-style screen editor: move the cursor anywhere, press Return, submit
+  that line.
 - Two interfaces to a console:
   1. Byte stream with xterm escapes, for `printf` and ported tools. Mouse
      through xterm SGR mouse mode (`ESC[?1006h`).
@@ -151,8 +184,17 @@ flowchart TB
   - [x] 3b. stdin, stdout and stderr as handles: the kernel console, a file
         or a console handler's port, inherited at spawn; the libc takes them
         at startup and gains `isatty`.
-- [ ] 4. Screen manager on top of the library. The kernel terminal becomes
-      the boot and panic fallback only.
+- [ ] 4. Screen manager on top of the library, as three PRs:
+  - [x] 4a. Signals: one thread waits on several ports, its children and
+        other threads at once.
+  - [ ] 4b. The screen manager: the framebuffer handed to it and reclaimed
+        on a crash, screens with changed rectangles, Meta+M, input to the
+        front screen's owner. The kernel terminal becomes the boot and panic
+        fallback only.
+  - [ ] 4c. The shell as the first console client: a screen, the `CON:`
+        handler with cooked and raw modes, line editing and history out of
+        `kgetline`, Ctrl+C to the foreground program.
+  - Screens sliding down to show the one behind can follow, as 4d or later.
 - [ ] 5. Mouse events, then the graphics layer.
 
 ## Step 1 as built
@@ -240,6 +282,34 @@ flowchart TB
   end (`waitpid` with `WNOHANG`) between packets: there is no way yet to wait
   for a message and a child at once. It serves no reads.
 
+## Step 4 decisions (2026-11-20)
+
+- **The screen manager is not koracli.** It is a task of its own that owns
+  screens, Amiga style; the CLI, a GUI and other full-screen programs are its
+  clients and run side by side.
+- **The first console client is the shell** (`user/shell.c`), converted to
+  open a screen and serve its programs' consoles. koracli is later work.
+- **Meta+M** switches screens.
+- **Signals, as in Exec**, are how a server waits on several sources, rather
+  than one port per server that every source posts to.
+
+## Step 4a as built
+
+- **Signals** (`src/proc/task.c`, `include/proc/task.h`): 32 bits per
+  thread, of which 8 to 31 are allocated with `sig_alloc` and 0 to 7 are kept
+  for the system. `sig_wait(mask)` sleeps until one is set and returns and
+  clears those; `sig_set` looks and changes; `sig_send` sets another thread's.
+  The bits are under the scheduler's lock, so an interrupt handler may
+  signal: 4b's input can.
+- **Sources**: `port_signal(port, bit)` ties a port to a bit, set by every
+  arrival (at once if a message waits). `SPAWN_SIGNAL(bit)` sets one when the
+  child ends. `sig_free` unties the ports of a bit.
+- **Syscalls 57 to 62** (`docs/syscalls.md`).
+- **`condemo <program>`** waits on its port and its program's end with one
+  `sig_wait`; its 5 ms poll is gone.
+- **Not yet**: the input queue setting a signal. It has one consumer, the
+  kernel's tty adapter, until the screen manager takes it over in 4b.
+
 ## Safety net
 
 If the screen manager crashes, the screen is lost. The kernel reclaims the
@@ -250,10 +320,7 @@ is today.
 
 - Font format for the first glyph provider (PSF2 or BDF), and whether
   FreeType is added at all.
-- Whether the screen manager **is** koracli or a separate task underneath it.
-- Port API: names, anonymous versus named ports, message ownership.
 - How the library is shared once static linking is not enough.
-- What happens to stderr (fd 2): same console, or its own stream.
 - Whether boot text stays on screen in the long run or only the log ring.
 - Milestone number. `roadmap.md` has an unnumbered section and
   `features.yaml` has the entries, as planned features without a milestone.

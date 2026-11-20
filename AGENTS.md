@@ -54,6 +54,10 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
 - Message ports (`src/ipc/port.c`, syscalls 48 to 54) carry pointers to the
   sender's memory; the kernel never touches a message and keeps an ended
   sender's memory until its held messages are replied (`docs/syscalls.md`).
+- Signals (`src/proc/task.c`, syscalls 57 to 62) are Exec's: 32 bits per
+  thread (8 to 31 allocatable), set by other threads, a port's arrivals
+  (`port_signal`) and a child's end (`SPAWN_SIGNAL`), waited for together
+  with `sig_wait`. A server waits that way, never by polling.
 - stdin, stdout and stderr are per-process handles (`struct std_handle` in
   `proc/task.h`, `<_libc/console.h>`): the kernel console, a file or a console
   handler's port, set at spawn (`spawn_std`). The libc reads them on first
