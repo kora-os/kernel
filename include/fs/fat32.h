@@ -112,6 +112,10 @@ int fat32_stat(fat32_volume_t *volume, const char *path, fat32_stat_t *out);
 int fat32_open_flags(fat32_volume_t *volume, const char *path, uint32_t flags,
                      fat32_file_t *out);
 void fat32_close(fat32_file_t *file);
+// A second handle on the same open file or directory, with its own cursor
+// (starting where `file`'s is) and its own reference: either may be closed
+// first. For a program's standard handles, passed on to a child.
+void fat32_dup(const fat32_file_t *file, fat32_file_t *out);
 uint32_t fat32_size(const fat32_file_t *file);
 long fat32_seek(fat32_file_t *file, long offset, int whence);
 long fat32_write(fat32_file_t *file, const void *buf, uint32_t len);

@@ -35,7 +35,13 @@ static int kernel_assign(const char *name, const char *target) {
                               strlen(target) == KORA_PATH_MAX - 1;
     return 0;
 }
-// A child prints straight to the console, as a real one does.
+// The standard handles the last child got (console unless spawn_std named
+// others), and how many children got any.
+static struct std_handle last_std[3];
+static unsigned std_spawns;
+
+// A child prints its name on its stdout, as a real one would: the console, or
+// the file it was given.
 static int kernel_spawn(const char *name, int argc, char *const argv[], int flags) {
     spawn_calls++;
     last_argc = argc;
@@ -44,9 +50,10 @@ static int kernel_spawn(const char *name, int argc, char *const argv[], int flag
     if ((flags & 0xf00) == SPAWN_CORE(9) || strcmp(name, "nosuch") == 0) {
         return -1;  // no such core, or no such program
     }
-    write(1, "<", 1);
-    write(1, name, strlen(name));
-    write(1, ">\n", 2);
+    int out = last_std[1].kind == STD_FILE ? last_std[1].value : 1;
+    write(out, "<", 1);
+    write(out, name, strlen(name));
+    write(out, ">\n", 2);
     if (flags & SPAWN_NOWAIT) {
         background_job_live = true;
         return 124;
@@ -70,7 +77,17 @@ static int kernel_waitpid(int pid, int *code, int flags) {
 static long kernel(long number, long a0, long a1, long a2, long a3) {
     switch (number) {
     case SYS_SPAWN_FLAGS:
+        memset(last_std, 0, sizeof last_std);
         return kernel_spawn((const char *)a0, (int)a1, (char *const *)a2, (int)a3);
+    case SYS_SPAWN_STD: {
+        const struct spawn_request *r = (const struct spawn_request *)a0;
+        memcpy(last_std, r->std, sizeof last_std);
+        std_spawns++;
+        return kernel_spawn(r->name, r->argc, r->argv, r->flags);
+    }
+    case SYS_STD_HANDLES:
+        memset((void *)a0, 0, 3 * sizeof(struct std_handle));  // the console
+        return 0;
     case SYS_WAITPID:
         return kernel_waitpid((int)a0, (int *)a1, (int)a2);
     case SYS_GETCWD:
@@ -109,7 +126,8 @@ static void reset(void) {
     fake_reset_files();
     fake_set_handler(kernel);
     input_size = read_chunk = 0;
-    spawn_calls = assign_calls = background_reaps = 0;
+    spawn_calls = assign_calls = background_reaps = std_spawns = 0;
+    memset(last_std, 0, sizeof last_std);
     last_argc = last_spawn_flags = 0;
     background_job_live = false;
     last_argument_terminated = maximal_assign_received = false;
@@ -283,6 +301,59 @@ static void core_pinning(void) {
           error_contains("shell: cannot run echo on cpu 9"), "spawn failure on a pinned core reported");
 }
 
+static bool file_is(const char *path, const char *text) {
+    size_t len = 0;
+    const char *data = fake_file_data(path, &len);
+    return data != NULL && len == strlen(text) && memcmp(data, text, len) == 0;
+}
+
+static void redirection(void) {
+    reset();
+    append("echo a > out.txt\nexit\n");
+    CHECK(shell_test_main() == 0 && std_spawns == 1 && last_argc == 2 && last_argument_terminated,
+          "> takes the file out of argv");
+    CHECK(last_std[0].kind == STD_CONSOLE && last_std[1].kind == STD_FILE && last_std[2].kind == STD_CONSOLE,
+          "only stdout is the file");
+    CHECK(file_is("out.txt", "<echo>\n") && !output_contains("<echo>"), "the child's output lands in it");
+    CHECK(fake_open_fds() == 0, "the shell closes its copy");
+    CHECK(output_contains("[123] exited with 0"), "and reports the job as usual");
+
+    reset();
+    fake_put_file("out.txt", "old\n", 4);
+    append("echo a >out.txt\necho a >> out.txt\necho a >>out.txt\nexit\n");
+    CHECK(shell_test_main() == 0 && std_spawns == 3, "glued and separate operators");
+    CHECK(file_is("out.txt", "<echo>\n<echo>\n<echo>\n"), "> truncates, >> appends");
+
+    reset();
+    fake_put_file("in.txt", "data\n", 5);
+    append("cat < in.txt > out.txt &\nexit\n");
+    CHECK(shell_test_main() == 0 && std_spawns == 1 && last_argc == 1 &&
+          last_spawn_flags == SPAWN_NOWAIT, "input and output together, in the background");
+    CHECK(last_std[0].kind == STD_FILE && last_std[1].kind == STD_FILE &&
+          last_std[0].value != last_std[1].value && fake_open_fds() == 0,
+          "two files, both closed by the shell");
+
+    reset();
+    append("echo a > out.txt @2\nexit\n");
+    CHECK(shell_test_main() == 0 && std_spawns == 1 && last_argc == 2 &&
+          last_spawn_flags == SPAWN_CORE(2), "redirection combines with @N");
+
+    reset();
+    append("echo '>' a\necho \\> a\nexit\n");
+    CHECK(shell_test_main() == 0 && spawn_calls == 2 && std_spawns == 0 && last_argc == 3,
+          "quoted and escaped > are arguments");
+
+    reset();
+    fake_mkdir("dir");
+    append("echo a < missing\necho a >\necho a > x > y\necho a < x < y\necho a > dir\nexit\n");
+    CHECK(shell_test_main() == 0 && spawn_calls == 0, "nothing runs with a bad redirection");
+    CHECK(error_contains("shell: cannot open missing") && error_contains("shell: > needs a file") &&
+          error_contains("shell: more than one output redirection") &&
+          error_contains("shell: more than one input redirection") &&
+          error_contains("shell: dir is a directory"), "each mistake is reported");
+    CHECK(fake_open_fds() == 0, "and leaves no file open");
+}
+
 // What the screen shows for a short session: the echo of what was typed, the
 // child's own output, and the shell's lines, in that order.
 static void session_transcript(void) {
@@ -363,4 +434,4 @@ static void builtin_errors(void) {
 
 TEST_MAIN(fragmented_reads, line_boundaries, drained_line_not_dispatched,
           argument_boundaries, maximal_assign_line, quoted_tokens, background_jobs, core_pinning,
-          session_transcript, builtins, builtin_errors)
+          redirection, session_transcript, builtins, builtin_errors)

@@ -198,8 +198,9 @@ categories:
         prs: [88, 89, 90, 91, 92, 93]
       - id: console-handles
         name: Console handles
-        status: planned
+        status: in_progress
         description: A program's stdin and stdout are handles to a console instead of fixed file descriptors.
+        prs: [102]
 
   - id: shell
     name: Shell
@@ -230,6 +231,11 @@ categories:
         milestone: 8
         completed: 2026-10-04
         prs: [47, 49]
+      - id: redirection
+        name: Redirection
+        status: in_progress
+        description: Programs read stdin from a file and write stdout to one, with <, > and >>.
+        prs: [102]
       - id: job-control
         name: Background jobs and pinning
         status: completed

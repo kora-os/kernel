@@ -20,6 +20,11 @@
 // `libcprobe files` instead checks the file streams on a writable current
 // directory: write, read back, append, update in place, positioning, rename
 // and remove, through the real FAT32 layer, then sync.
+//
+// `libcprobe handles` reports the standard handles it was given, as
+// "libcprobe: isatty <0|1> <0|1> <0|1>, stdin <first line, or EOF>", on
+// stdout, then runs `echo inherited`, which writes wherever this program's
+// stdout goes: the smoke test runs it with redirections.
 #include "../../user/libk/koraos.h"
 
 #include <errno.h>
@@ -488,7 +493,24 @@ static void at_exit_handler(void) {
     puts("libcprobe: atexit ran");
 }
 
+static int test_handles(void) {
+    char line[64] = "EOF";
+    if (!isatty(0)) {  // from the console it would wait for typing
+        if (fgets(line, sizeof line, stdin) == NULL) {
+            strcpy(line, "EOF");
+        }
+        line[strcspn(line, "\n")] = '\0';
+    }
+    printf("libcprobe: isatty %d %d %d, stdin %s\n", isatty(0), isatty(1), isatty(2), line);
+    char *argv[] = {"echo", "inherited"};
+    int pid = spawn("echo", 2, argv);  // flushes the line above first
+    return pid > 0 && wait(pid) == 1 ? 0 : 1;
+}
+
 int main(int argc, char **argv) {
+    if (argc > 1 && strcmp(argv[1], "handles") == 0) {
+        return test_handles();
+    }
     if (argc > 1 && strcmp(argv[1], "files") == 0) {
         test_files();
         if (!failed) {

@@ -1,8 +1,10 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // The standard streams, buffering and flushing (C11 7.21.3, 7.21.5): stdout
-// is line buffered (it is the console), stderr unbuffered, and stdin line
-// buffered, which for input means one byte per read (see fread.c).
+// is line buffered when it is a console and fully buffered when it is a file,
+// stderr unbuffered, and stdin line buffered, which for input means one byte
+// per read (see fread.c), or fully buffered from a file. Which they are is
+// learnt from the kernel on first use (handle.c).
 // The first buffered write installs __stdio_exit as exit()'s hook, so every
 // stream is flushed when the program exits, and programs that never use
 // stdio do not link it.
@@ -18,9 +20,9 @@ static unsigned char stdout_buffer[BUFSIZ];
 static unsigned char stdin_buffer[BUFSIZ];
 
 static FILE standard[3] = {
-    {0, F_READ, _IOLBF, stdin_buffer, sizeof stdin_buffer, 0, 0, 0, EOF, LOCK_INIT, NULL},
-    {1, F_WRITE, _IOLBF, stdout_buffer, sizeof stdout_buffer, 0, 0, 0, EOF, LOCK_INIT, NULL},
-    {2, F_WRITE, _IONBF, NULL, 0, 0, 0, 0, EOF, LOCK_INIT, NULL},
+    {0, F_READ, _IOLBF, stdin_buffer, sizeof stdin_buffer, 0, 0, 0, EOF, LOCK_INIT, NULL, 0, 0},
+    {1, F_WRITE, _IOLBF, stdout_buffer, sizeof stdout_buffer, 0, 0, 0, EOF, LOCK_INIT, NULL, 0, 0},
+    {2, F_WRITE, _IONBF, NULL, 0, 0, 0, 0, EOF, LOCK_INIT, NULL, 0, 0},
 };
 
 FILE *stdin = &standard[0];
@@ -59,7 +61,12 @@ void __stdio_each(void (*fn)(FILE *)) {
     __unlock(&list_lock);
 }
 
+FILE *__stdio_standard(int i) {
+    return &standard[i];
+}
+
 void __stdio_setup_buffer(FILE *f) {
+    __stdio_std_init();
     if (f->buf == NULL && f->mode != _IONBF) {
         f->buf = malloc(BUFSIZ);
         if (f->buf == NULL) {
@@ -74,7 +81,7 @@ void __stdio_setup_buffer(FILE *f) {
 int __fflush_unlocked(FILE *f) {
     size_t done = 0;
     while (done < f->wlen) {
-        long r = __syscall3(SYS_WRITE, f->fd, (long)(f->buf + done), (long)(f->wlen - done));
+        long r = __stdio_write_raw(f, f->buf + done, f->wlen - done);
         if (r <= 0) {
             // The kernel gives no reason: report an I/O error and drop the
             // rest, so a broken stream does not retry forever.
@@ -159,6 +166,7 @@ int setvbuf(FILE *restrict stream, char *restrict buf, int mode, size_t size) {
     if (mode != _IOFBF && mode != _IOLBF && mode != _IONBF) {
         return -1;
     }
+    __stdio_std_init();  // the standard default first, then the caller's
     __lock(&stream->lock);
     if (stream->wlen > 0) {
         __fflush_unlocked(stream);

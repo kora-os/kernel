@@ -172,3 +172,11 @@ int port_wait(int port, struct port_message *out) {
 int port_reply(void *msg) {
     return (int)CALL(SYS_PORT_REPLY, msg, 0, 0, 0);
 }
+
+int std_handles(struct std_handle out[3]) {
+    return (int)CALL(SYS_STD_HANDLES, out, 0, 0, 0);
+}
+
+int libk_spawn_std(const struct spawn_request *request) {
+    return (int)CALL(SYS_SPAWN_STD, request, 0, 0, 0);
+}

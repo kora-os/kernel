@@ -1,6 +1,6 @@
 # Console and screen plan (handover)
 
-Status: **steps 1, 2 and 3a done** (step 3 is two PRs). It is the outcome of a design discussion on
+Status: **steps 1 to 3 done** (step 3 as two PRs, 3a and 3b). It is the outcome of a design discussion on
 2026-11-12 and is the "terminal design" that `libc-plan.md` defers to koracli.
 No milestone number has been assigned yet.
 
@@ -49,15 +49,19 @@ to pretend to be one.
 - `src/tty.c`: input ring of **bytes**, `tty_read` / `tty_write`, ONLCR, the
   serial route switch (Ctrl-T) and scrollback requests. Its readers are the
   one consumer of the input event queue, for now.
-- `src/sys/syscall.c`: fd 0 is hard-wired to `tty_read`, fd 1 and 2 to
-  `tty_write`. Other fds are FAT32 files.
+- Standard handles (step 3b): each process has stdin, stdout and stderr
+  handles, the kernel console, one of its files or a console handler's port,
+  inherited at spawn or given by `spawn_std`. The libc reads them at startup
+  and talks to a handler in packets. Raw fds 0, 1 and 2 still reach
+  `tty_read` and `tty_write` in `src/sys/syscall.c`.
 - Keys are events (step 1): `virtio_input.c` and `circle/circle_env.cpp` post
   a `struct input_event` (`include/input/event.h`) to the kernel queue in
   `src/input/input.c`. They still become bytes inside the kernel, in the
   temporary adapter `src/input/input_tty.c`, which the tasks reading the tty
   run. Serial input is bytes already and calls `tty_input_push`; so do the
   kernel terminal's status replies, through the host hook the library calls.
-- Line editing is in user space: `kgetline` in `user/libk/koraos.h`.
+- Line editing is in user space: `kgetline` in `user/libk/koraos.h`, on
+  `stdin` and `stdout`.
 - The kernel log is UART-only (`kernel.c`). Programs can already draw straight
   into the framebuffer through `fb_info` (`gfxdemo`).
 
@@ -142,9 +146,9 @@ flowchart TB
 - [x] 1. Keyboard to an event queue. Keep the current byte path as a
       temporary adapter so nothing else changes.
 - [x] 2. Lift `term.c` into a library that builds for kernel and user space.
-- [ ] 3. Message ports and handle-based stdin/stdout, as two PRs:
+- [x] 3. Message ports and handle-based stdin/stdout, as two PRs:
   - [x] 3a. Message ports.
-  - [ ] 3b. stdin, stdout and stderr as handles: the kernel console, a file
+  - [x] 3b. stdin, stdout and stderr as handles: the kernel console, a file
         or a console handler's port, inherited at spawn; the libc takes them
         at startup and gains `isatty`.
 - [ ] 4. Screen manager on top of the library. The kernel terminal becomes
@@ -215,6 +219,26 @@ flowchart TB
   `port_put`, `port_get`, `port_wait`, `port_reply` (`docs/syscalls.md`).
 - **Not yet**: waiting on several ports at once, or on a port and the input
   queue together. The screen manager (step 4) will need one of them.
+
+## Step 3b as built
+
+- **Decisions** (2026-11-19): three standard handles per process (not fd
+  slots), the libc speaking to handlers (not the kernel), and shell
+  redirection in the same step.
+- **Kernel**: `struct std_handle std[3]` in `struct process`; syscalls 55
+  (`std_handles`) and 56 (`spawn_std`). Files are duplicated into the child
+  (`fat32_dup`), ports are checked to exist.
+- **libc**: `src/stdio/handle.c` asks once, on the first I/O; a file's stdout
+  is fully buffered, a handler's streams send `struct con_packet`s on a reply
+  port each; `isatty(0..2)`. The protocol is `<_libc/console.h>`.
+- **libk**: `spawn_std`, `std_handles`; `kgetline` reads `stdin` and echoes
+  on `stdout`, so no program uses a literal console fd any more (but
+  `fpprobe` and `threadprobe`, which test the kernel).
+- **Shell**: `< in`, `> out`, `>> out` (or glued: `>out`).
+- **First console handler**: `condemo <program> [args]` runs the program
+  with stdout and stderr in a library console window. It polls the program's
+  end (`waitpid` with `WNOHANG`) between packets: there is no way yet to wait
+  for a message and a child at once. It serves no reads.
 
 ## Safety net
 

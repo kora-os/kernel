@@ -54,6 +54,10 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
 - Message ports (`src/ipc/port.c`, syscalls 48 to 54) carry pointers to the
   sender's memory; the kernel never touches a message and keeps an ended
   sender's memory until its held messages are replied (`docs/syscalls.md`).
+- stdin, stdout and stderr are per-process handles (`struct std_handle` in
+  `proc/task.h`, `<_libc/console.h>`): the kernel console, a file or a console
+  handler's port, set at spawn (`spawn_std`). The libc reads them on first
+  I/O (`user/libc/src/stdio/handle.c`); raw fds 0/1/2 stay the kernel console.
 - Keyboards post key events to the input event queue (`src/input`,
   `include/input/input.h`); only input that is bytes already (serial, the
   terminal's status replies) calls `tty_input_push`. The adapter that turns

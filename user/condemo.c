@@ -1,12 +1,22 @@
-/* condemo: two consoles of the console library (user/libconsole) in windows
- * on the framebuffer, side by side. Each is a terminal with its own escape
- * parser, grid and scrollback, drawn by the library's renderer into a
- * rectangle of the screen; the right one is larger than its window and is
- * clipped to it. The program's own output still goes to the kernel's screen
- * terminal, through stdout.
+/* condemo: consoles of the console library (user/libconsole) in windows on
+ * the framebuffer.
  *
- * It prints where it drew and what the left console answered to a cursor
- * position request, which the smoke test checks against a screenshot.
+ *   condemo                  two consoles side by side. Each is a terminal
+ *                            with its own escape parser, grid and scrollback,
+ *                            drawn by the library's renderer into a rectangle
+ *                            of the screen; the right one is larger than its
+ *                            window and is clipped to it. It prints where it
+ *                            drew and what the left console answered to a
+ *                            cursor position request.
+ *   condemo <program> [args] runs the program with its stdout and stderr in a
+ *                            console window: condemo is their console
+ *                            handler, serving the packets the program's libc
+ *                            sends to its port (<_libc/console.h>). stdin
+ *                            stays condemo's own. It prints how the program
+ *                            ended and how many bytes it showed.
+ *
+ * condemo's own output still goes to its stdout: the kernel's screen terminal.
+ * The smoke test checks both against screenshots.
  */
 #include "libk/koraos.h"
 #include "libconsole/term.h"
@@ -58,11 +68,101 @@ static void frame(const struct fb_info *fb, int x, int y, int width, int height)
     }
 }
 
-int main(void) {
+/* The window of `condemo <program>`: one console, 80 columns wide. */
+#define RUN_COLS 80
+#define RUN_ROWS 16
+
+/* What a WRITE packet's bytes do to the console: the program's '\n' starts a
+ * new line, as the kernel's console does it (ONLCR). Reads are refused: the
+ * program's stdin is not this console. */
+static long serve(term_t *t, struct con_packet *packet) {
+    if (packet->op != CON_WRITE) {
+        return -1;
+    }
+    const char *bytes = packet->buf;
+    for (unsigned long i = 0; i < packet->length; i++) {
+        if (bytes[i] == '\n') {
+            term_putc(t, '\r');
+        }
+        term_putc(t, bytes[i]);
+    }
+    return (long)packet->length;
+}
+
+static int run_in_window(const struct fb_info *fb, int argc, char **argv) {
+    int width = RUN_COLS * TERM_CELL_WIDTH;
+    int height = RUN_ROWS * TERM_CELL_HEIGHT;
+    int x = ((int)fb->width - width) / 2;
+    int y = (int)fb->height - height - 2 * TERM_CELL_HEIGHT;
+    if (x < BORDER || y < BORDER) {
+        fputs("condemo: the screen is too small\n", stderr);
+        return 1;
+    }
+    static term_t console;
+    if (!term_init(&console, RUN_COLS, RUN_ROWS, 100, &host)) {
+        fputs("condemo: out of memory\n", stderr);
+        return 1;
+    }
+    feed(&console, "\x1b[44m\x1b[2J\x1b[H");  /* a blue window */
+
+    /* The program gets condemo's own stdin, and this console for the rest. */
+    struct std_handle std[3];
+    int port = port_create(NULL);
+    if (port < 0 || std_handles(std) < 0) {
+        fputs("condemo: no port\n", stderr);
+        return 1;
+    }
+    std[1] = std[2] = (struct std_handle){STD_PORT, port};
+    int pid = spawn_std(argv[0], argc, argv, SPAWN_NOWAIT, std);
+    if (pid < 0) {
+        fprintf(stderr, "condemo: cannot run %s\n", argv[0]);
+        port_delete(port);
+        return 1;
+    }
+
+    term_surface_t screen;
+    term_surface_init(&screen, (void *)fb->addr, fb->width, fb->height, fb->pitch);
+    frame(fb, x, y, width, height);
+    term_render_t view;
+    term_render_init(&view, &console, &screen, x, y);
+    term_render_all(&view);
+
+    /* Serve its packets until it has ended. Each write waits for its reply,
+     * so once the program is gone nothing of it is left to serve. */
+    unsigned long shown = 0;
+    int code = -1;
+    for (;;) {
+        struct port_message got;
+        while (port_get(port, &got) == 1) {
+            if (got.kind != PORT_MESSAGE) {
+                continue;
+            }
+            struct con_packet *packet = got.msg;
+            packet->result = serve(&console, packet);
+            if (packet->result > 0) {
+                shown += (unsigned long)packet->result;
+            }
+            port_reply(packet);
+        }
+        term_render_flush(&view);
+        if (waitpid(pid, &code, WNOHANG) == pid) {
+            break;
+        }
+        msleep(5);
+    }
+    port_delete(port);
+    printf("condemo: %s exited with %d; %lu bytes in its window\n", argv[0], code, shown);
+    return 0;
+}
+
+int main(int argc, char **argv) {
     struct fb_info fb;
     if (fb_info(&fb) != 0 || fb.bpp != 32) {
         fputs("condemo: no 32-bit framebuffer\n", stderr);
         return 1;
+    }
+    if (argc > 1) {
+        return run_in_window(&fb, argc - 1, argv + 1);
     }
     int width = COLS * TERM_CELL_WIDTH;
     int height = ROWS * TERM_CELL_HEIGHT;

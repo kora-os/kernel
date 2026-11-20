@@ -801,6 +801,13 @@ void fat32_close(fat32_file_t *file) {
     memset(file, 0, sizeof(*file));
 }
 
+void fat32_dup(const fat32_file_t *file, fat32_file_t *out) {
+    *out = *file;
+    if (out->inode) {
+        out->inode->refs++;
+    }
+}
+
 uint32_t fat32_size(const fat32_file_t *file) {
     return file->inode ? file->inode->size : file->size;
 }

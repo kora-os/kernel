@@ -449,6 +449,36 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
             q.expect(PROMPT)
         yield "libc file streams: write, read back, append, update, seek, rename, remove", libc_files
 
+        def redirection():
+            # The shell gives a program files for its stdin and stdout; the
+            # program's libc finds out at startup (fully buffered, not a tty).
+            def run(command, status=0):
+                q.send(command + "\r")
+                q.expect(rb"exited with %d\r?$" % status)
+                q.expect(PROMPT)
+
+            def file_is(path, lines):
+                q.send("cat %s\r" % path)
+                for line in lines:
+                    q.expect(rb"^" + re.escape(line) + rb"\r?$")
+                q.expect(rb"exited with 0\r?$")
+                q.expect(PROMPT)
+
+            run("echo redirected words > RD.TXT", 2)  # echo exits with its argument count
+            file_is("RD.TXT", [b"redirected words"])
+            run("echo appended >>RD.TXT", 1)
+            file_is("RD.TXT", [b"redirected words", b"appended"])
+            q.send("libcprobe handles\r")
+            q.expect(rb"^libcprobe: isatty 1 1 1, stdin EOF\r?$")
+            q.expect(rb"^inherited\r?$")
+            q.expect(rb"exited with 0\r?$")
+            q.expect(PROMPT)
+            # Its child echo inherits the file, after the parent's line.
+            run("libcprobe handles < RD.TXT > HANDLES.TXT")
+            file_is("HANDLES.TXT", [b"libcprobe: isatty 0 0 1, stdin redirected words", b"inherited"])
+            run("rm RD.TXT HANDLES.TXT")
+        yield "shell redirection: > and >> to a file, < from one, isatty, inherited by a child", redirection
+
     def debug_console():
         q.send("\x14")  # Ctrl-T
         q.expect(rb"\[serial -> kernel console")
@@ -1082,6 +1112,31 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         if spill:
             raise Failure("%d red pixels right of the right window: not clipped" % spill)
     yield "condemo: two library consoles in clipped windows", condemo
+
+    def console_handler():
+        # condemo runs echo with its stdout in a library console: the words
+        # go to condemo's window through message ports, not to the kernel's
+        # console (and so not to the serial line).
+        q.send("condemo echo hello from a handler\r")
+        # echo exits with its argument count.
+        m = q.expect(rb"^condemo: echo exited with 4; (\d+) bytes in its window\r?$")
+        q.expect(PROMPT)
+        if m.group(1) != b"21":
+            raise Failure("condemo showed %s bytes of echo's output, want 21" % m.group(1).decode())
+        with open(os.path.join(q.outdir, "serial.log"), "rb") as log:
+            serial = log.read()
+        if re.search(rb"^hello from a handler\r?$", serial, re.M):
+            raise Failure("echo's output reached the kernel console")
+        shot = q.screendump("condemo-handler")
+        width, height, _ = shot
+        left, top = (width - 640) // 2, height - 128 - 16
+        if not near(pixel(shot, left + 639, top + 127), (0, 0, 0xee)):
+            raise Failure("condemo's window is not blue: %s" % (pixel(shot, left + 639, top + 127),))
+        white = sum(near(pixel(shot, x, y), (0xff, 0xff, 0xff))
+                    for y in range(top, top + 8) for x in range(left, left + 20 * 8))
+        if white < 40:
+            raise Failure("no text in condemo's window (%d white pixels in its first line)" % white)
+    yield "condemo as a console handler: a program's stdout in a library console", console_handler
 
     def gfxdemo():
         q.send("gfxdemo\r")

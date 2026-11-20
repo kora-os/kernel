@@ -715,7 +715,71 @@ static task_t *thread_alloc(struct process *p, unsigned core, size_t stack_pages
     return t;
 }
 
-struct process *task_create(const char *name, int argc, char *const argv[], int core) {
+// Give the new process `p` its standard handles: `want`, or its parent's.
+// Returns 0, or -1 for a file the parent has not open (or a directory), a port
+// that does not exist, or a full descriptor table.
+static int std_setup(struct process *p, const struct std_handle *want) {
+    struct process *parent = p->parent;
+    struct std_handle from[3] = {{STD_CONSOLE, 0}, {STD_CONSOLE, 0}, {STD_CONSOLE, 0}};
+    for (int i = 0; i < 3; i++) {
+        if (want != NULL) {
+            from[i] = want[i];
+        } else if (parent != NULL) {
+            from[i] = parent->std[i];
+        }
+    }
+    for (int i = 0; i < 3; i++) {
+        switch (from[i].kind) {
+        case STD_CONSOLE:
+            p->std[i] = (struct std_handle){STD_CONSOLE, 0};
+            break;
+        case STD_PORT:
+            if (!port_exists(from[i].value)) {
+                return -1;
+            }
+            p->std[i] = from[i];
+            break;
+        case STD_FILE: {
+            int slot = from[i].value - FD_BASE;
+            if (parent == NULL || slot < 0 || slot >= MAX_OPEN_FILES || !parent->files[slot].used ||
+                parent->files[slot].file.is_dir) {
+                return -1;
+            }
+            // The same file for several handles (stdout and stderr, say) is
+            // one descriptor in the child too.
+            int shared = -1;
+            for (int j = 0; j < i; j++) {
+                if (from[j].kind == STD_FILE && from[j].value == from[i].value) {
+                    shared = j;
+                }
+            }
+            if (shared >= 0) {
+                p->std[i] = p->std[shared];
+                break;
+            }
+            int free_slot = -1;
+            for (int f = 0; f < MAX_OPEN_FILES && free_slot < 0; f++) {
+                if (!p->files[f].used) {
+                    free_slot = f;
+                }
+            }
+            if (free_slot < 0) {
+                return -1;
+            }
+            fat32_dup(&parent->files[slot].file, &p->files[free_slot].file);
+            p->files[free_slot].used = true;
+            p->std[i] = (struct std_handle){STD_FILE, FD_BASE + free_slot};
+            break;
+        }
+        default:
+            return -1;
+        }
+    }
+    return 0;
+}
+
+struct process *task_create(const char *name, int argc, char *const argv[], int core,
+                            const struct std_handle *std) {
     core = choose_core(core);
     if (core < 0) {
         return NULL;  // a requested core that does not exist or is offline
@@ -747,7 +811,7 @@ struct process *task_create(const char *name, int argc, char *const argv[], int 
 
     int cwd_rc = p->parent != NULL ? fs_cwd_copy(&p->cwd, &p->parent->cwd)
                                    : fs_boot_cwd(&p->cwd);
-    if (cwd_rc != 0) {
+    if (cwd_rc != 0 || std_setup(p, std) != 0) {
         proc_free(p);
         return NULL;
     }
@@ -772,8 +836,9 @@ struct process *task_create(const char *name, int argc, char *const argv[], int 
     return p;
 }
 
-int task_spawn(const char *name, int argc, char *const argv[], int flags) {
-    struct process *child = task_create(name, argc, argv, SPAWN_CORE_OF(flags));
+int task_spawn(const char *name, int argc, char *const argv[], int flags,
+               const struct std_handle *std) {
+    struct process *child = task_create(name, argc, argv, SPAWN_CORE_OF(flags), std);
     if (child == NULL) {
         return -1;
     }

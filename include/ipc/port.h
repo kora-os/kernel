@@ -58,6 +58,9 @@ int port_delete(struct process *me, int id);
 // The id of the port named `name`, or -1.
 int port_find(const char *name);
 
+// Whether `id` names a port.
+bool port_exists(int id);
+
 // Queue `msg` on port `id`, from `me`. `reply` is the port it should come back
 // to: one of `me`'s, another's, or 0 for none. Returns 0, or -1: no such port
 // (or reply port), msg is 0 or already in flight from `me`, or too many

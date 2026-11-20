@@ -106,6 +106,10 @@ int __fclose_unlocked(FILE *f) {
     f->ungot = EOF;
     f->flags = 0;  // no longer readable or writable
     f->fd = -1;
+    if (f->reply != 0) {
+        __syscall1(SYS_PORT_DELETE, f->reply);
+    }
+    f->port = f->reply = 0;  // a console handler's stream lets go of it
     return result;
 }
 
@@ -130,6 +134,7 @@ int fclose(FILE *stream) {
 // supported: EINVAL), keeping the FILE object, so stdin and stdout can be
 // redirected to files.
 FILE *freopen(const char *restrict filename, const char *restrict mode, FILE *restrict stream) {
+    __stdio_std_init();  // a standard stream's handle, learnt later, must not undo this
     __lock(&stream->lock);
     __fclose_unlocked(stream);
     if (filename == NULL) {

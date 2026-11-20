@@ -51,6 +51,9 @@
 #define SYS_port_get     52
 #define SYS_port_wait    53
 #define SYS_port_reply   54
+// Standard handles (proc/task.h).
+#define SYS_std_handles  55
+#define SYS_spawn_std    56
 
 // Dispatch a syscall described by a trap frame from EL0. The return value is
 // written back into the frame's x0.

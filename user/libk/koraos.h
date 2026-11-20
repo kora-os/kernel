@@ -11,6 +11,7 @@
 
 #include "abi.h"
 
+#include <_libc/console.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -203,6 +204,38 @@ static inline int spawn_flags(const char *name, int argc, char *const argv[], in
     return libk_spawn_flags(name, argc, argv, flags);
 }
 
+/* Standard handles. A program's stdin, stdout and stderr are each the kernel
+ * console (STD_CONSOLE), one of its open files (STD_FILE, value = the fd) or
+ * a console handler's message port (STD_PORT, value = the port id); see
+ * <_libc/console.h>, also for the packets a handler serves. A child gets its
+ * parent's, files duplicated with their cursors, unless spawn_std() names
+ * others: this program's own fds and ports. std_handles() fills out[0..2]
+ * (0, or -1); the libc reads them itself, so programs rarely need it. */
+int std_handles(struct std_handle out[3]);
+
+struct spawn_request {
+    const char *name;
+    int argc;
+    int flags;            /* as for spawn_flags() */
+    char *const *argv;
+    struct std_handle std[3];
+};
+int libk_spawn_std(const struct spawn_request *request); /* raw */
+
+/* spawn_flags() with the child's standard handles: pid, or -1 (also for a file
+ * or port this program does not have). */
+static inline int spawn_std(const char *name, int argc, char *const argv[], int flags,
+                            const struct std_handle std[3]) {
+    struct spawn_request request = {name, argc, flags, argv,
+                                    {std[0], std[1], std[2]}};
+    fflush(stdout);
+    return libk_spawn_std(&request);
+}
+
+/* Whether stdin (0), stdout (1) or stderr (2) is a console: the kernel's or a
+ * console handler's, not a file. From the libc; any other number is not. */
+int isatty(int fd);
+
 int waitpid(int pid, int *code, int flags);
 int getpid(void);  /* the program's pid, the same in all its threads */
 void yield(void);
@@ -353,25 +386,27 @@ static inline unsigned long uptime_us(void) {
 /* Graphics */
 int fb_info(struct fb_info *out);
 
-/* Read a line from the console: read(0) hands over raw bytes, so this does the
- * editing. It echoes as it goes, honours backspace and turns CR into '\n';
- * other control bytes are dropped and escape sequences (cursor keys, the
+/* Read a line from stdin: a console hands over raw bytes, so this does the
+ * editing. It echoes on stdout as it goes, honours backspace and turns CR into
+ * '\n'; other control bytes are dropped and escape sequences (cursor keys, the
  * terminal's status replies) are swallowed whole. Returns at a newline or when
- * the buffer fills, with no NUL added: the byte count, or what read returned
- * (0 or -1) if nothing was read. One byte per read, so typed-ahead lines stay
- * queued for the next call. It reads and echoes on the console directly, past
- * stdin and stdout, so it flushes stdout first: a prompt printed without a
- * newline is on screen before the line is read. */
+ * the buffer fills, with no NUL added: the byte count, 0 at the end of input,
+ * or -1 on an error, if nothing was read. A console's stdin reads one byte at
+ * a time, so typed-ahead lines stay queued for the next call. stdout is
+ * flushed first, so a prompt printed without a newline is shown before the
+ * line is read, and after each echo. */
 static inline ssize_t kgetline(char *buf, size_t len) {
     size_t i = 0;
     fflush(stdout);
     enum { ESC_NONE, ESC_START, ESC_BODY } esc = ESC_NONE;
     while (i < len) {
-        char c;
-        ssize_t n = read(0, &c, 1);
-        if (n <= 0) {
-            return i > 0 ? (ssize_t)i : n;
+        int ch = getc(stdin);
+        if (ch == EOF) {
+            ssize_t end = ferror(stdin) ? -1 : 0;
+            clearerr(stdin);  /* a console may have more later */
+            return i > 0 ? (ssize_t)i : end;
         }
+        char c = (char)ch;
         if (c == 0x1b) {
             esc = ESC_START;
             continue;
@@ -393,14 +428,16 @@ static inline ssize_t kgetline(char *buf, size_t len) {
         if (c == 0x7f || c == '\b') { /* delete / backspace */
             if (i > 0) {
                 i--;
-                write(1, "\b \b", 3);
+                fputs("\b \b", stdout);
+                fflush(stdout);
             }
             continue;
         }
         if (c != '\n' && (c < 0x20 || c > 0x7e)) {
             continue;
         }
-        write(1, &c, 1); /* echo */
+        putc(c, stdout); /* echo */
+        fflush(stdout);
         buf[i++] = c;
         if (c == '\n') {
             break;
