@@ -41,6 +41,8 @@ struct port {
     char name[PORT_NAME_MAX];  // "" for an anonymous port
     struct port_msg *head, *tail;
     struct wait_queue waiters;  // the owner's threads in port_wait
+    int sig_tid;                // the owner's thread to signal on arrival (0: none)
+    int sig_bit;
 };
 
 static struct port ports[MAX_PORTS];
@@ -84,6 +86,9 @@ static void enqueue(struct port *p, struct port_msg *m) {
     }
     p->tail = m;
     wake(p);
+    if (p->sig_tid != 0) {
+        task_signal(p->sig_tid, 1u << p->sig_bit);
+    }
 }
 
 // Take `m` off the queue it is on.
@@ -161,6 +166,7 @@ int port_create(struct process *me, const char *name) {
                 p->name[c] = c < length ? name[c] : '\0';
             }
             p->head = p->tail = NULL;
+            p->sig_tid = 0;
             return port_id(p);
         }
     }
@@ -184,6 +190,7 @@ static void destroy(struct port *p) {
     }
     p->used = false;
     p->owner = NULL;
+    p->sig_tid = 0;
     p->name[0] = '\0';
     p->gen = (p->gen + 1) & GEN_MASK;
     wake(p);  // waiters find the port gone
@@ -286,6 +293,27 @@ int port_wait(struct process *me, int id, struct port_received *out) {
         uint64_t flags = spin_lock_irqsave(&port_lock);
         wait_queue_sleep(&p->waiters, &port_lock);
         spin_unlock_irqrestore(&port_lock, flags);
+    }
+}
+
+int port_set_signal(struct process *me, int id, int tid, int bit) {
+    struct port *p = lookup(id);
+    if (!p || p->owner != me) {
+        return -1;
+    }
+    p->sig_tid = bit >= 0 ? tid : 0;
+    p->sig_bit = bit;
+    if (p->sig_tid != 0 && p->head) {
+        task_signal(p->sig_tid, 1u << bit);  // nothing queued may go unnoticed
+    }
+    return 0;
+}
+
+void port_signal_freed(int tid, int bit) {
+    for (int i = 0; i < MAX_PORTS; i++) {
+        if (ports[i].used && ports[i].sig_tid == tid && ports[i].sig_bit == bit) {
+            ports[i].sig_tid = 0;
+        }
     }
 }
 

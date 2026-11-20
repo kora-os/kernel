@@ -58,6 +58,14 @@
 #define SYS_STD_HANDLES  55
 #define SYS_SPAWN_STD    56
 
+/* Signals. */
+#define SYS_SIG_ALLOC    57
+#define SYS_SIG_FREE     58
+#define SYS_SIG_WAIT     59
+#define SYS_SIG_SET      60
+#define SYS_SIG_SEND     61
+#define SYS_PORT_SIGNAL  62
+
 /* open() flags, as the FAT32 layer defines them (checked too). */
 #define KORA_O_RDONLY 0
 #define KORA_O_WRONLY 1

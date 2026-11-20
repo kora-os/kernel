@@ -84,8 +84,11 @@ Take locks only in this order (a lock may be skipped, never taken backwards):
    `tty input`, and the queue releases it before it wakes the readers
 6. `ports` (`src/ipc/port.c`): only hands a task waiting on a message port
    over to the scheduler; the ports and messages themselves are BKL-protected
-7. `sched` (`src/proc/task.c`): task states, wait queues, sleep deadlines;
-   held across a context switch and released by the task switched to
+7. `sched` (`src/proc/task.c`): task states, wait queues, sleep deadlines
+   and signals (a thread's received bits and the ones it waits for, set from
+   any context, interrupts included); held across a context switch and
+   released by the task switched to. Ports set signals after releasing
+   `ports`
 8. `heap` (`src/mm/kmalloc.c`), then `frames` (`src/mm/frame_alloc.c`)
 9. `irq table` (`src/arch/irq.c`): handler registration against dispatch
 10. `printf` (`src/lib/panic.c`): whole writes to the serial line (`printf`

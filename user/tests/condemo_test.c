@@ -31,9 +31,14 @@ static int have_framebuffer;
 #define HANDLER_PORT 7
 #define CHILD_PID 42
 static struct con_packet child_packets[3];
-static unsigned child_count, child_taken, child_replied, polls;
+// Its signals: condemo allocates two, ties the first to its port and asks for
+// the second when the program ends.
+#define PORT_BIT 31
+#define END_BIT 30
+static unsigned child_count, child_taken, child_replied, waits, reaps;
 static struct std_handle child_std[3];
-static int child_spawned, port_deleted;
+static int child_spawned, port_deleted, port_signalled;
+static unsigned allocated, freed;
 
 static void child_writes(const char *a, const char *b) {
     child_packets[0] = (struct con_packet){CON_WRITE, -1, (void *)a, strlen(a)};
@@ -59,8 +64,8 @@ static long kernel(long number, long a0, long a1, long a2, long a3) {
         if (strcmp(r->name, "nosuch") == 0) {
             return -1;
         }
-        CHECK(r->flags == SPAWN_NOWAIT && strcmp(r->argv[0], r->name) == 0,
-              "the program runs in the background, with its own argv");
+        CHECK(r->flags == (SPAWN_NOWAIT | SPAWN_SIGNAL(END_BIT)) && strcmp(r->argv[0], r->name) == 0,
+              "the program runs in the background, with its own argv, and signals its end");
         memcpy(child_std, r->std, sizeof child_std);
         child_spawned = 1;
         return CHILD_PID;
@@ -77,16 +82,27 @@ static long kernel(long number, long a0, long a1, long a2, long a3) {
     case SYS_PORT_REPLY:
         child_replied++;
         return 0;
+    case SYS_SIG_ALLOC:
+        CHECK(a0 == -1, "condemo takes any free signal");
+        allocated++;
+        return allocated == 1 ? PORT_BIT : END_BIT;
+    case SYS_SIG_FREE:
+        freed |= 1u << a0;
+        return 0;
+    case SYS_PORT_SIGNAL:
+        port_signalled = a0 == HANDLER_PORT && a1 == PORT_BIT;
+        return 0;
+    case SYS_SIG_WAIT:
+        // The packets arrive first, then the program ends.
+        waits++;
+        CHECK(a0 == (long)(SIG_MASK(PORT_BIT) | SIG_MASK(END_BIT)), "condemo waits on its port and its program");
+        return child_taken < child_count ? SIG_MASK(PORT_BIT) : SIG_MASK(END_BIT);
     case SYS_WAITPID:
-        polls++;
-        CHECK(a0 == CHILD_PID && a2 == WNOHANG, "condemo polls for the end of its program");
-        if (child_replied < child_count) {
-            return 0;
-        }
+        reaps++;
+        CHECK(a0 == CHILD_PID && a2 == WNOHANG, "condemo reaps its program");
+        CHECK(child_replied == child_count, "only after its end signal");
         *(int *)a1 = 0;
         return CHILD_PID;
-    case SYS_MSLEEP:
-        return 0;
     default:
         break;
     }
@@ -116,8 +132,9 @@ static void reset(void) {
     have_framebuffer = 1;
     fb_width = FB_WIDTH;
     fb_bpp = 32;
-    child_count = child_taken = child_replied = polls = 0;
-    child_spawned = port_deleted = 0;
+    child_count = child_taken = child_replied = waits = reaps = 0;
+    child_spawned = port_deleted = port_signalled = 0;
+    allocated = freed = 0;
     memset(child_std, 0, sizeof child_std);
 }
 
@@ -283,6 +300,9 @@ static void test_console_handler(void) {
           "a write packet is answered with its length");
     CHECK(child_packets[2].result == -1, "a read packet is refused");
     CHECK(child_replied == 3 && port_deleted, "every packet is replied, then the port deleted");
+    CHECK(port_signalled && waits == 2 && reaps == 1,
+          "it sleeps on its port's signal and its program's, and reaps it once it ended");
+    CHECK(freed == (SIG_MASK(PORT_BIT) | SIG_MASK(END_BIT)), "and frees both signals");
     CHECK(shows(0, 0, 'h') && shows(0, 1, 'i') && shows(1, 0, 'n') && shows(1, 3, 't'),
           "the program's text is in the window, its newline starting a new line");
     CHECK(run_cell(15, 79, 7, 7) == BLUE && run_cell(0, 2, 0, 0) == BLUE,

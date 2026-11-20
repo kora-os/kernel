@@ -65,7 +65,10 @@ A program runs in EL0 with a deliberately small runtime:
   `waitpid(-1, &code, WNOHANG)` collects finished children without blocking.
   `spawn_std` also sets the child's stdin, stdout and stderr (a file of
   yours, or a console handler's port: see `condemo`); `isatty(1)` tells
-  whether your stdout is a console.
+  whether your stdout is a console. To wait for several things at once (your
+  ports, a child's end, another thread), give each a signal bit and sleep in
+  `sig_wait` (`port_signal`, `SPAWN_SIGNAL`, `sig_send`); `condemo` serves
+  its program's packets and notices its end that way.
   `msleep(ms)` sleeps; `uptime_us()` reads a microsecond clock without a
   syscall. `forbid()`/`permit()` keep the CPU and the kernel to yourself while
   you poke at kernel structures (see [locking.md](locking.md)). `kill(pid)`

@@ -48,6 +48,12 @@
 #define port_wait libk_port_wait
 #define port_reply libk_port_reply
 #define std_handles libk_std_handles
+#define sig_alloc libk_sig_alloc
+#define sig_free libk_sig_free
+#define sig_wait libk_sig_wait
+#define sig_set libk_sig_set
+#define sig_send libk_sig_send
+#define port_signal libk_port_signal
 #define wait libk_wait
 
 #endif // LIBK_HOST_RENAME_H

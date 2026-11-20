@@ -318,7 +318,10 @@ console. `portprobe` passes messages between processes:
 100 round trips and a pipeline, a sender that ends while its message is held
 (it stays in `sysinfo().procs` until the reply, and every page comes back),
 a receiver that ends holding a message (it comes back `PORT_RETURNED`), and a
-program killed while it sleeps in `port_wait`. `--repeat N` runs `allocprobe` N times: page runs, a `malloc`
+program killed while it sleeps in `port_wait`. `sigprobe` checks signals:
+allocation, set, clear and wait, a thread waking another (on another core
+when there is one), 50 messages and a child's end served from one
+`sig_wait`, as a console handler does, and a program killed in `sig_wait`. `--repeat N` runs `allocprobe` N times: page runs, a `malloc`
 heap grown to about 1.5 MiB with churn and `realloc`, a nested child while it is
 live, and deliberate leaks. The kernel heap's live count and the free page count
 must be the same after the last run as after the first, so everything a reaped
