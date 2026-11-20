@@ -51,6 +51,17 @@ void wait_queue_wake_all(struct wait_queue *wq) {
     CHECK(lock_depth == 1, "wake-ups happen under the port lock");
     wakes++;
 }
+// Signals set: the last thread and mask, and how many.
+static int signal_tid;
+static uint32_t signal_mask;
+static unsigned signals;
+int task_signal(int tid, uint32_t mask) {
+    CHECK(lock_depth == 0, "a port signals outside the port lock");
+    signal_tid = tid;
+    signal_mask = mask;
+    signals++;
+    return 0;
+}
 void proc_messages_back(struct process *p) {
     CHECK(p->draining && p->msgs_out == 0, "a process comes back only when drained");
     if (nfreed < 8) {
@@ -76,6 +87,9 @@ static void reset(void) {
     meanwhile = NULL;
     nfreed = 0;
     sleeps = wakes = 0;
+    signals = 0;
+    signal_tid = 0;
+    signal_mask = 0;
 }
 
 static struct port_received got;
@@ -164,6 +178,49 @@ static void test_capacity(void) {
           "a held message is still in flight");
     CHECK(port_reply(&a, M(0)) == 0 && port_put(&b, server, M(sent), 0) == 0,
           "a released one makes room");
+}
+
+static bool signalled(int tid, int bit, unsigned count) {
+    return signals == count && signal_tid == tid && signal_mask == 1u << bit;
+}
+
+static void test_signals(void) {
+    reset();
+    int server = port_create(&a, NULL);
+    int replies = port_create(&b, NULL);
+    CHECK(port_put(&b, server, M(0), replies) == 0 && signals == 0, "a port signals nobody by default");
+    CHECK(port_set_signal(&b, server, 11, 20) == -1, "only the owner ties a port to a signal");
+    CHECK(port_set_signal(&a, server, 11, 20) == 0 && signalled(11, 20, 1),
+          "a port with a message waiting signals as soon as it is tied");
+    CHECK(port_set_signal(&a, replies, 11, 20) == -1, "nor another's port");
+    CHECK(port_put(&c, server, M(1), 0) == 0 && signalled(11, 20, 2), "each arrival signals");
+    CHECK(received(&a, server, M(0), PORT_MESSAGE, 20) && received(&a, server, M(1), PORT_MESSAGE, 30) &&
+              signals == 2, "taking messages signals nothing");
+
+    CHECK(port_set_signal(&b, replies, 21, 9) == 0 && signals == 2, "an empty port signals when tied, not before");
+    CHECK(port_reply(&a, M(0)) == 0 && signalled(21, 9, 3), "a reply arriving signals its port's thread");
+    CHECK(received(&b, replies, M(0), PORT_REPLY, 20), "and is there to take");
+
+    CHECK(port_set_signal(&a, server, 12, 25) == 0 && port_put(&b, server, M(2), 0) == 0 &&
+              signalled(12, 25, 4), "tying it again replaces the signal");
+    CHECK(received(&a, server, M(2), PORT_MESSAGE, 20) && port_reply(&a, M(2)) == 0, "taken");
+    CHECK(port_set_signal(&a, server, 12, -1) == 0 && port_put(&b, server, M(3), replies) == 0 && signals == 4,
+          "bit -1 unties it");
+
+    CHECK(port_set_signal(&a, server, 12, 25) == 0 && signals == 5, "tied again, with M(3) waiting");
+    port_signal_freed(12, 24);
+    CHECK(port_put(&c, server, M(4), 0) == 0 && signals == 6, "freeing another bit leaves it tied");
+    port_signal_freed(13, 25);
+    CHECK(port_put(&c, server, M(5), 0) == 0 && signals == 7, "so does another thread's bit");
+    port_signal_freed(12, 25);
+    CHECK(port_put(&c, server, M(6), 0) == 0 && signals == 7, "freeing its bit unties it");
+
+    CHECK(port_set_signal(&a, server, 12, 25) == 0 && signals == 8, "tied once more");
+    CHECK(port_delete(&a, server) == 0 && signalled(21, 9, 9),
+          "a message returned by a deleted port signals its sender's reply port");
+    CHECK(received(&b, replies, M(3), PORT_RETURNED, 20), "and is there to take");
+    int fresh = port_create(&a, NULL);
+    CHECK(port_put(&b, fresh, M(7), 0) == 0 && signals == 9, "a deleted port's signal does not stay with its slot");
 }
 
 // What the stubbed sleep runs while a waiter sleeps.
@@ -269,5 +326,5 @@ static void test_process_exit(void) {
     CHECK(lock_depth == 0, "the port lock is released");
 }
 
-TEST_MAIN(test_names_and_ids, test_put_get_reply, test_capacity, test_wait, test_delete_returns,
-          test_process_exit)
+TEST_MAIN(test_names_and_ids, test_put_get_reply, test_capacity, test_signals, test_wait,
+          test_delete_returns, test_process_exit)

@@ -386,7 +386,7 @@ static long sys_free_pages(uint64_t base) {
 static long sys_spawn(const char *name, int argc, char *const argv[], uint64_t flags,
                       const struct std_handle *std) {
     if (!uptr_ok((uint64_t)name, 1) ||
-        (flags & ~(uint64_t)(SPAWN_NOWAIT | SPAWN_CORE_MASK)) != 0) {
+        (flags & ~(uint64_t)(SPAWN_NOWAIT | SPAWN_CORE_MASK | SPAWN_SIGNAL_MASK)) != 0) {
         return -1;
     }
     if (argc < 0) {
@@ -423,6 +423,15 @@ static long sys_spawn_std(const struct kspawn_request *request) {
     struct kspawn_request r = *request;
     return sys_spawn((const char *)r.name, r.argc, (char *const *)r.argv, (uint64_t)(uint32_t)r.flags,
                      r.std);
+}
+
+// port_signal(port, bit): signal `bit` of the calling thread, which allocated
+// it, when a message arrives on one of its program's ports; -1 stops it.
+static long sys_port_signal(int port, int bit) {
+    if (bit != -1 && !task_sig_allocated(bit)) {
+        return -1;
+    }
+    return port_set_signal(proc_current(), port, task_current()->pid, bit);
 }
 
 // std_handles(out): the caller's standard handles, out[0..2].
@@ -679,6 +688,24 @@ void syscall_handle(struct trapframe *tf) {
         break;
     case SYS_spawn_std:
         ret = sys_spawn_std((const struct kspawn_request *)a0);
+        break;
+    case SYS_sig_alloc:
+        ret = task_sig_alloc((int)a0);
+        break;
+    case SYS_sig_free:
+        ret = task_sig_free((int)a0);
+        break;
+    case SYS_sig_wait:
+        ret = task_sig_wait((uint32_t)a0);
+        break;
+    case SYS_sig_set:
+        ret = task_sig_set((uint32_t)a0, (uint32_t)a1);
+        break;
+    case SYS_sig_send:
+        ret = task_signal((int)a0, (uint32_t)a1);
+        break;
+    case SYS_port_signal:
+        ret = sys_port_signal((int)a0, (int)a1);
         break;
     default:
         ret = -1;

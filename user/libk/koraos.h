@@ -139,6 +139,41 @@ int port_get(int port, struct port_message *out);
 int port_wait(int port, struct port_message *out);
 int port_reply(void *msg);
 
+/* Signals, as in AmigaOS Exec: each thread has 32 signal bits, which say that
+ * something happened, and a thread can sleep until any of several is set.
+ * That is how one thread waits on several ports, its children and other
+ * threads at once: give each source a bit, then wait for all of them.
+ *
+ *   sig_alloc(bit)     allocate signal `bit` (8..31) of this thread, or for -1
+ *                      its highest free one, and clear it: the bit, or -1.
+ *                      Bits 0 to 7 are kept for the system.
+ *   sig_free(bit)      free it; ports that set it stop: 0 or -1
+ *   sig_wait(mask)     sleep until any signal in `mask` is set, then clear
+ *                      those and return them (SIG_MASK(bit) makes a mask).
+ *                      Returns at once with those already set; 0 for 0.
+ *   sig_set(values, mask)  set the signals in `mask` to those of `values` and
+ *                      return what all of them were: sig_set(0, 0) only looks,
+ *                      sig_set(0, m) clears m
+ *   sig_send(tid, mask)    set signals of any thread (a thread id, which is
+ *                      the pid for a main thread): 0, or -1 for none such
+ *   port_signal(port, bit) set this thread's signal `bit` whenever a message
+ *                      arrives on one of this program's ports (at once if one
+ *                      is waiting), or -1 to stop: 0 or -1
+ *
+ * A child's end sets a signal too: spawn it with SPAWN_SIGNAL(bit), below.
+ *
+ * A signal counts once however often it was set before the wait: after a
+ * port's signal, take every message on the port (port_get until it returns
+ * 0), and be ready to find none. */
+#define SIG_MASK(bit) (1u << (bit))
+
+int sig_alloc(int bit);
+int sig_free(int bit);
+unsigned sig_wait(unsigned mask);
+unsigned sig_set(unsigned values, unsigned mask);
+int sig_send(int tid, unsigned mask);
+int port_signal(int port, int bit);
+
 // Change cwd, or copy its volume-qualified canonical spelling (including NUL).
 // Both return 0 on success and -1 on failure; failed chdir preserves cwd.
 int chdir(const char *path);
@@ -190,6 +225,9 @@ void kheap_info(struct kheap_info *out);
 /* Run the child on core n (0..3); without it the kernel picks the online core
  * with the fewest tasks. A task stays on its core for life. */
 #define SPAWN_CORE(n) ((((n) + 1) & 0xf) << 8)
+/* Set signal `bit` of the spawning thread (one it allocated) when the child
+ * ends; it still has to be reaped with waitpid(). */
+#define SPAWN_SIGNAL(bit) ((((bit) + 1) & 0x3f) << 12)
 #define WNOHANG 1
 
 /* exit() (<stdlib.h>) ends the whole program, from any of its threads

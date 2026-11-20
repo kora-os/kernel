@@ -180,3 +180,27 @@ int std_handles(struct std_handle out[3]) {
 int libk_spawn_std(const struct spawn_request *request) {
     return (int)CALL(SYS_SPAWN_STD, request, 0, 0, 0);
 }
+
+int sig_alloc(int bit) {
+    return (int)CALL(SYS_SIG_ALLOC, bit, 0, 0, 0);
+}
+
+int sig_free(int bit) {
+    return (int)CALL(SYS_SIG_FREE, bit, 0, 0, 0);
+}
+
+unsigned sig_wait(unsigned mask) {
+    return (unsigned)CALL(SYS_SIG_WAIT, mask, 0, 0, 0);
+}
+
+unsigned sig_set(unsigned values, unsigned mask) {
+    return (unsigned)CALL(SYS_SIG_SET, values, mask, 0, 0);
+}
+
+int sig_send(int tid, unsigned mask) {
+    return (int)CALL(SYS_SIG_SEND, tid, mask, 0, 0);
+}
+
+int port_signal(int port, int bit) {
+    return (int)CALL(SYS_PORT_SIGNAL, port, bit, 0, 0);
+}
