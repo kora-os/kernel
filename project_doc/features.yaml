@@ -116,6 +116,7 @@ categories:
         name: Signals
         status: in_progress
         description: Exec-style signal bits per thread, so one task waits on several ports, its children and other threads at once.
+        prs: [103]
       - id: boot-log
         name: Boot log ring
         status: planned
