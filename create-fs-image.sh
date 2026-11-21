@@ -13,8 +13,11 @@
 #     apt-get install mtools     # Debian/Ubuntu
 #
 # mformat with -F forces a FAT32 BPB even for small volumes (the FAT32 >=65525
-# cluster rule is a host-tool convention; the KoraOS driver only reads the BPB),
-# so a 2 MiB image keeps kernel bloat negligible.
+# cluster rule is a host-tool convention; the KoraOS driver only reads the BPB).
+# The kernel does not embed this image: its ramdisk is rebuilt from the files
+# at the ramdisk's own size (create-ramdisk-image.py), so the size here only
+# sets the free space of the disks made from it (a virt --disk, the SD card
+# and USB drive fixtures, whose write tests copy 300 KiB onto them).
 
 set -euo pipefail
 
@@ -25,7 +28,7 @@ Usage: ./create-fs-image.sh [options]
 Options:
   -r, --fsroot DIR   Source tree copied into the image (default: fsroot)
   -o, --output FILE  Output image path (default: build/fs/koraos.img)
-  --size SIZE_MB     Image size in MiB (default: 2)
+  --size SIZE_MB     Image size in MiB (default: 4)
   --volume LABEL     FAT32 volume label (default: KORAOS)
   --bindir DIR       Install DIR/*.elf into /bin (suffix stripped)
   --programs-file FILE  Install only the ELF paths listed in FILE, one per line
@@ -37,7 +40,7 @@ script_dir=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 
 fsroot_dir="$script_dir/fsroot"
 image_path="$script_dir/build/fs/koraos.img"
-size_mb=2
+size_mb=4
 volume_label="KORAOS"
 bindir=""
 programs_file=""

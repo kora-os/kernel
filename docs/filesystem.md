@@ -114,7 +114,7 @@ Each layer has a clean seam:
 - **8.3 short names** are an OEM code page, which the driver does not decode:
   non-ASCII short-name bytes become `?`. Names that genuinely need non-ASCII
   characters carry an LFN, which is decoded fully.
-- **`mformat -F`** forces a FAT32 BPB even for a small volume (the 2 MiB
+- **`mformat -F`** forces a FAT32 BPB even for a small volume (the 4 MiB
   shared userfs, a 16 MiB ramdisk), below the usual 65525-cluster minimum. The
   driver only reads the BPB, so this is fine.
 
