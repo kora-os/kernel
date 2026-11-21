@@ -34,6 +34,10 @@ void irq_disconnect(unsigned irq) {
     handler = NULL;
     disconnected++;
 }
+unsigned input_source_register(const char *name) {
+    (void)name;
+    return 3;
+}
 void input_post(const struct input_event *event) {
     CHECK(output_length < sizeof(output) / sizeof(output[0]), "output test capture fits");
     if (output_length < sizeof(output) / sizeof(output[0])) output[output_length++] = *event;
@@ -43,7 +47,7 @@ static bool posted_key(unsigned index, uint8_t type, uint8_t flags, uint16_t mod
     const struct input_event *event = &output[index];
     return index < output_length && event->type == type && event->flags == flags &&
            event->modifiers == modifiers && event->keycode == keycode &&
-           event->codepoint == codepoint;
+           event->codepoint == codepoint && event->source == 3;
 }
 void *coherent_page(unsigned slot) {
     CHECK(slot == VIRTIO_INPUT_BUFFER_SLOT, "receive events use dedicated coherent page");
