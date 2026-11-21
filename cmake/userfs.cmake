@@ -45,7 +45,7 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
         -nostdlib -fuse-ld=lld -Wl,-pie -Wl,-e,_start -Wl,--pack-dyn-relocs=none
         -Wl,-z,norelro -Wl,-z,noexecstack -Wl,-z,max-page-size=4096)
     set(USER_PROGRAM_ELVES "")
-    foreach(name hello init shell echo gfxdemo termdemo ls cat)
+    foreach(name hello init shell echo termdemo ls cat)
         koraos_add_user_program(${name} "${USER_DIR}/${name}.c")
     endforeach()
     foreach(name cp rm mkdir rmdir mv ps jobdemo pindemo)
@@ -54,8 +54,13 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
     # The console library (user/libconsole) is linked into the programs that
     # use it, from source; the kernel builds the same files.
     file(GLOB LIBCONSOLE_SOURCES CONFIGURE_DEPENDS "${USER_DIR}/libconsole/*.c")
+    # The screen manager (screens) and the client side of its protocol
+    # (user/libscreen), linked by the programs that open screens.
+    set(LIBSCREEN_SOURCES "${USER_DIR}/libscreen/screen.c")
+    koraos_add_user_program(screens "${USER_DIR}/screens.c" FLAGS -Wextra -Werror)
+    koraos_add_user_program(gfxdemo "${USER_DIR}/gfxdemo.c" ${LIBSCREEN_SOURCES})
     koraos_add_user_program(condemo "${USER_DIR}/condemo.c" ${LIBCONSOLE_SOURCES}
-        FLAGS -Wextra -Werror)
+        ${LIBSCREEN_SOURCES} FLAGS -Wextra -Werror)
     koraos_add_user_program(allocprobe "${SOURCE_ROOT}/tests/user/allocprobe.c")
     # fpprobe checks FP/SIMD registers it filled by hand, so its own C code
     # must not use them in between.
