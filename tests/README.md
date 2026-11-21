@@ -321,7 +321,14 @@ a receiver that ends holding a message (it comes back `PORT_RETURNED`), and a
 program killed while it sleeps in `port_wait`. `sigprobe` checks signals:
 allocation, set, clear and wait, a thread waking another (on another core
 when there is one), 50 messages and a child's end served from one
-`sig_wait`, as a console handler does, and a program killed in `sig_wait`. `--repeat N` runs `allocprobe` N times: page runs, a `malloc`
+`sig_wait`, as a console handler does, and a program killed in `sig_wait`.
+`inputprobe` checks what a screen manager takes from the kernel: a signal at
+any process's end (a child, another program's orphan, a watch stopped or
+whose bit is freed), the input queue and the screen, each claimed, refused to
+another program and taken back at the holder's end; it paints the screen red
+while it holds it, and the step checks that the console redrew it. With
+`--keyboard`, the debug console's `keylog` traces typed keys to the shell,
+then Meta+M to `inputprobe keys 4`, which claims the queue. `--repeat N` runs `allocprobe` N times: page runs, a `malloc`
 heap grown to about 1.5 MiB with churn and `realloc`, a nested child while it is
 live, and deliberate leaks. The kernel heap's live count and the free page count
 must be the same after the last run as after the first, so everything a reaped

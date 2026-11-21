@@ -69,6 +69,11 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
 | 60 | `sig_set` | `unsigned sig_set(unsigned values, unsigned mask)` | the signals before the change |
 | 61 | `sig_send` | `int sig_send(int tid, unsigned mask)` | `0`, or `-1` if there is no such thread |
 | 62 | `port_signal` | `int port_signal(int port, int bit)` | `0`, or `-1` |
+| 63 | `sig_on_end` | `int sig_on_end(int pid, int bit)` | `0`, or `-1` |
+| 64 | `input_claim` | `int input_claim(int bit)` | `0`, or `-1` if another thread holds it |
+| 65 | `input_read` | `int input_read(struct input_event *events, int max)` | events taken, or `-1` without the claim |
+| 66 | `input_focus` | `int input_focus(int pid)` | `0`, or `-1` without the claim |
+| 67 | `fb_claim` | `int fb_claim(int on)` | `0`, or `-1` if another program holds the screen |
 
 ## Notes per call
 
@@ -261,7 +266,8 @@ several ports, a port and a child, or a port and another thread at once.
   highest free one, and clears it. Bits 0 to 7 are kept for the system (none
   is used yet), so a thread has 24.
 - **`sig_free`** frees an allocated bit and clears it; a port tied to it stops
-  setting it.
+  setting it, the thread's end watches on it (`sig_on_end`) stop, and an input
+  claim on it is given back.
 - **`sig_wait`** sleeps until a signal in `mask` is set, then clears those of
   `mask` that are set and returns them. It returns at once if one is set
   already, and returns `0` for an empty mask. A killed program dies in it.
@@ -280,8 +286,55 @@ A signal records that something happened, not how often: set twice before a
 wait it is returned once. So after a port's signal, take every message on it
 (`port_get` until `0`), and expect to find none at times, since `port_wait`
 and `port_get` take messages without clearing the signal. Signals are
-protected by the scheduler's lock, which interrupt handlers take: input will
-be able to signal from its interrupt (console step 4b).
+protected by the scheduler's lock, which interrupt handlers take: the input
+queue signals its claimer from the keyboard's interrupt (below).
+
+### Screen managers (63 to 67)
+
+A screen manager takes the screen and the keyboard from the kernel's console
+and gives them to programs of its own, Amiga style (console step 4b,
+[`project_doc/console-plan.md`](../project_doc/console-plan.md)). The kernel
+gives both back to its console when the program that took them ends, crashed
+or not, so the shell is never left without them. Nobody is checked: as
+everywhere in KoraOS, any program may take them.
+
+- **`sig_on_end`** sets bit `bit` of the calling thread when process `pid`
+  ends, any process and not only a child (`SPAWN_SIGNAL` is that for one's
+  own), once. Watching it again changes the bit, `-1` stops. It fails for a
+  bit not allocated, a process already ended or never started, or a full
+  table (64 watches in all). A screen manager watches its clients this way.
+- **`input_claim`** makes the calling thread the input queue's consumer:
+  every key event queued from then on sets bit `bit` (set at once if events
+  are waiting, which are now the thread's), and the kernel console reads no
+  keys. Claiming again changes the bit; `-1` gives the queue back. The claim
+  is given back too when the thread ends or frees the bit; the console then
+  takes the events left.
+- **`input_read`** takes up to `max` (1 to 32) events, oldest first, and
+  returns how many, `0` for none: it never sleeps, `sig_wait` does that.
+- **`input_focus`** tells the kernel which process the claimer sends the
+  events on to (the front screen's owner), or `0` for none. It is for the
+  debug console's `keylog` only.
+- **`fb_claim(1)`** hands the screen to the calling program, which then draws
+  into `fb_info`'s framebuffer itself: the kernel console keeps taking text
+  but draws nothing. `fb_claim(0)`, or the program's end, gives it back, and
+  the console redraws all of it with what was printed meanwhile. Claiming it
+  twice is once.
+
+An event (`struct input_event`, below) is what a key did: down or up, its
+position as a USB HID usage (`KEY_*`, whatever the layout prints on the key),
+the modifiers after it (`INPUT_MOD_*`, Meta being `INPUT_MOD_*_GUI`), the
+character it types under the layout, and the device that sent it. The kernel
+gives it no meaning.
+
+The debug console's `keylog on` traces every event as it is taken, in the
+manner of X11's `xev`: the device, who took it (the console with the program
+reading it, or the claimer and its focus) and the key.
+
+```
+KeyDown from usb-keyboard to inputprobe (pid 107) -> front: inputprobe (pid 107)
+    time 25912 ms, keycode 0x10 (M), modifiers 0x0008 (LGUI)
+    char U+006D "m", repeat no
+```
 
 ### Standard handles (55 and 56)
 
@@ -391,6 +444,22 @@ struct port_message {      /* filled by port_get() and port_wait() */
     void *msg;
     int   kind;            /* PORT_MESSAGE, PORT_REPLY or PORT_RETURNED */
     int   sender;          /* pid of the program that sent it */
+};
+
+#define INPUT_EVENT_KEY_DOWN 1
+#define INPUT_EVENT_KEY_UP 2
+#define INPUT_FLAG_REPEAT 0x01   /* key down: an auto-repeat */
+#define INPUT_MOD_LEFT_GUI 0x0008  /* and the other INPUT_MOD_* of koraos.h */
+
+struct input_event {       /* filled by input_read() */
+    unsigned char  type;   /* INPUT_EVENT_* */
+    unsigned char  flags;  /* INPUT_FLAG_* */
+    unsigned short modifiers;  /* INPUT_MOD_* after the event */
+    unsigned int   time_ms;    /* uptime when it was queued */
+    unsigned short keycode;    /* a USB HID usage (KEY_*) */
+    unsigned char  source;     /* the device that sent it */
+    unsigned char  reserved;
+    unsigned int   codepoint;  /* key down: the Unicode character, or 0 */
 };
 
 struct fb_info {           /* filled by fb_info() */

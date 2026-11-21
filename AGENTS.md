@@ -67,6 +67,11 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
   terminal's status replies) calls `tty_input_push`. The adapter that turns
   events into console bytes (`src/input/input_tty.c`) is temporary: see
   `project_doc/console-plan.md`.
+- A screen manager claims the input queue (`input_claim`, signalled per
+  event) and the screen (`fb_claim`); the kernel gives both back to its
+  console when the claimer ends. The debug console's `keylog on` traces
+  events, xev style (`src/input/keylog.c`); it prints only with no spinlock
+  held, so keep its notes and its printing apart.
 - Use `run-qemu.sh` for rapid UART smoke tests; see the developer guide for hardware installation steps.
 - Documentation lives under `docs/`; do not store temporary todos there—use `project_doc/` for roadmap-level planning instead.
 
