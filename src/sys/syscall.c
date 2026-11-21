@@ -773,6 +773,9 @@ void syscall_handle(struct trapframe *tf) {
     case SYS_fb_claim:
         ret = sys_fb_claim((long)a0);
         break;
+    case SYS_gettid:
+        ret = task_current()->pid;
+        break;
     default:
         ret = -1;
         break;

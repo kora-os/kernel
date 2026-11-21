@@ -70,6 +70,7 @@
 #define SYS_INPUT_READ   65
 #define SYS_INPUT_FOCUS  66
 #define SYS_FB_CLAIM     67
+#define SYS_GETTID   68
 
 /* open() flags, as the FAT32 layer defines them (checked too). */
 #define KORA_O_RDONLY 0
