@@ -1359,8 +1359,12 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         def demos_on_screens():
             # condemo and gfxdemo open screens of their own under screens.
             q.send("screens condemo + gfxdemo\r")
-            q.expect(rb"condemo: windows \d+x\d+", timeout=30)
-            q.expect(rb"gfxdemo: painted \d+x\d+ on screen \d", timeout=30)
+            # They run side by side: their lines come in either order.
+            seen = set()
+            while len(seen) < 2:
+                m = q.expect(rb"(condemo): windows \d+x\d+|(gfxdemo): painted \d+x\d+ on screen \d",
+                             timeout=30)
+                seen.add(m.group(1) or m.group(2))
             time.sleep(0.3)
             first = q.screendump("screens-demo-front")
             press("meta_l-m")
