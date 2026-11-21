@@ -68,6 +68,10 @@ void fb_console_write(fb_console_t *console, const char *text) {
 // The console the kernel and syscalls treat as "the screen".
 static fb_console_t *active_console;
 
+// The process the screen is handed to (screen_claim), or 0: while it holds
+// it the terminal keeps its text but draws nothing. Under the BKL.
+static int screen_owner_pid;
+
 void fb_console_make_active(fb_console_t *console) {
     active_console = console;
 }
@@ -79,7 +83,9 @@ void screen_putc(char c) {
 }
 
 void screen_flush(void) {
-    fb_console_flush(active_console);
+    if (screen_owner_pid == 0) {
+        fb_console_flush(active_console);
+    }
 }
 
 void screen_scroll_view(int halfpages) {
@@ -91,4 +97,31 @@ void screen_scroll_view(int halfpages) {
 
 const framebuffer_info_t *screen_framebuffer(void) {
     return active_console ? &active_console->fb : NULL;
+}
+
+int screen_claim(int pid) {
+    if (active_console == NULL || pid <= 0 ||
+        (screen_owner_pid != 0 && screen_owner_pid != pid)) {
+        return -1;
+    }
+    if (screen_owner_pid == 0) {
+        fb_console_flush(active_console);  // what was printed is in the grid, drawn
+    }
+    screen_owner_pid = pid;
+    return 0;
+}
+
+void screen_release(int pid) {
+    if (pid == 0 || screen_owner_pid != pid) {
+        return;
+    }
+    screen_owner_pid = 0;
+    // Whatever the owner drew goes: the terminal redraws all of it, with the
+    // text printed meanwhile.
+    framebuffer_clear(&active_console->fb, TERM_DEFAULT_BG);
+    term_render_all(&active_console->render);
+}
+
+int screen_owner(void) {
+    return screen_owner_pid;
 }

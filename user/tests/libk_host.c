@@ -204,3 +204,23 @@ int sig_send(int tid, unsigned mask) {
 int port_signal(int port, int bit) {
     return (int)CALL(SYS_PORT_SIGNAL, port, bit, 0, 0);
 }
+
+int sig_on_end(int pid, int bit) {
+    return (int)CALL(SYS_SIG_ON_END, pid, bit, 0, 0);
+}
+
+int input_claim(int bit) {
+    return (int)CALL(SYS_INPUT_CLAIM, bit, 0, 0, 0);
+}
+
+int input_read(struct input_event *events, int max) {
+    return (int)CALL(SYS_INPUT_READ, events, max, 0, 0);
+}
+
+int input_focus(int pid) {
+    return (int)CALL(SYS_INPUT_FOCUS, pid, 0, 0, 0);
+}
+
+int fb_claim(int on) {
+    return (int)CALL(SYS_FB_CLAIM, on, 0, 0, 0);
+}

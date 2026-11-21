@@ -61,6 +61,11 @@ SYSCALL sig_wait,    SYS_SIG_WAIT
 SYSCALL sig_set,     SYS_SIG_SET
 SYSCALL sig_send,    SYS_SIG_SEND
 SYSCALL port_signal, SYS_PORT_SIGNAL
+SYSCALL sig_on_end, SYS_SIG_ON_END
+SYSCALL input_claim, SYS_INPUT_CLAIM
+SYSCALL input_read, SYS_INPUT_READ
+SYSCALL input_focus, SYS_INPUT_FOCUS
+SYSCALL fb_claim, SYS_FB_CLAIM
 
 // exit(), rename() and the program entry point come from the libc (user/libc).
 

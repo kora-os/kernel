@@ -62,6 +62,12 @@
 #define SYS_sig_send     61
 #define SYS_port_signal  62
 
+#define SYS_sig_on_end   63
+#define SYS_input_claim  64
+#define SYS_input_read   65
+#define SYS_input_focus  66
+#define SYS_fb_claim     67
+
 // Dispatch a syscall described by a trap frame from EL0. The return value is
 // written back into the frame's x0.
 void syscall_handle(struct trapframe *tf);

@@ -66,3 +66,8 @@
 #define SYS_SIG_SET      60
 #define SYS_SIG_SEND     61
 #define SYS_PORT_SIGNAL  62
+#define SYS_SIG_ON_END   63
+#define SYS_INPUT_CLAIM  64
+#define SYS_INPUT_READ   65
+#define SYS_INPUT_FOCUS  66
+#define SYS_FB_CLAIM     67

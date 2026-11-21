@@ -173,6 +173,75 @@ unsigned sig_wait(unsigned mask);
 unsigned sig_set(unsigned values, unsigned mask);
 int sig_send(int tid, unsigned mask);
 int port_signal(int port, int bit);
+int sig_on_end(int pid, int bit);
+
+/* Screen managers. A screen manager takes the screen and the keyboard from
+ * the kernel's console and gives them to programs of its own; the kernel
+ * gives them back to the console when it ends, crashed or not.
+ *
+ *   sig_on_end(pid, bit)  set this thread's signal `bit` when process `pid`
+ *                      ends (any process, as SPAWN_SIGNAL does for a child),
+ *                      once; -1 stops watching: 0, or -1 for a bit not
+ *                      allocated or a process already gone
+ *   input_claim(bit)   this thread takes the input events from now on: each
+ *                      one queued sets signal `bit` (at once if some wait),
+ *                      and the console gets none. -1 gives them back: 0, or
+ *                      -1 if another thread holds them
+ *   input_read(events, max)  take up to `max` (1..32) queued events, oldest
+ *                      first: how many (0 for none), -1 without the claim
+ *   input_focus(pid)   tell the kernel which process the events go on to
+ *                      (the front screen's owner), for the debug console's
+ *                      keylog only: 0, or -1 without the claim
+ *   fb_claim(on)       1 takes the screen: the console stops drawing (it
+ *                      keeps the text printed meanwhile) and fb_info's
+ *                      framebuffer is the caller's; 0 gives it back and the
+ *                      console redraws it: 0, or -1 if another holds it
+ *
+ * An event is what a key did: its position (a USB HID usage, KEY_*), the
+ * modifiers after it, and the character it types under the layout. */
+#define INPUT_EVENT_KEY_DOWN 1
+#define INPUT_EVENT_KEY_UP 2
+#define INPUT_FLAG_REPEAT 0x01  /* key down: an auto-repeat */
+
+#define INPUT_MOD_LEFT_CTRL 0x0001
+#define INPUT_MOD_LEFT_SHIFT 0x0002
+#define INPUT_MOD_LEFT_ALT 0x0004
+#define INPUT_MOD_LEFT_GUI 0x0008   /* Meta: Command, or the Windows key */
+#define INPUT_MOD_RIGHT_CTRL 0x0010
+#define INPUT_MOD_RIGHT_SHIFT 0x0020
+#define INPUT_MOD_RIGHT_ALT 0x0040  /* AltGr where the layout has one */
+#define INPUT_MOD_RIGHT_GUI 0x0080
+#define INPUT_MOD_CAPS_LOCK 0x0100
+#define INPUT_MOD_NUM_LOCK 0x0200
+#define INPUT_MOD_CTRL (INPUT_MOD_LEFT_CTRL | INPUT_MOD_RIGHT_CTRL)
+#define INPUT_MOD_SHIFT (INPUT_MOD_LEFT_SHIFT | INPUT_MOD_RIGHT_SHIFT)
+#define INPUT_MOD_ALT (INPUT_MOD_LEFT_ALT | INPUT_MOD_RIGHT_ALT)
+#define INPUT_MOD_GUI (INPUT_MOD_LEFT_GUI | INPUT_MOD_RIGHT_GUI)
+
+#define KEY_A 0x04  /* letters follow in order, to KEY_A + 25 */
+#define KEY_M 0x10
+#define KEY_ENTER 0x28
+#define KEY_ESCAPE 0x29
+#define KEY_LEFT_GUI 0xE3
+#define KEY_RIGHT_GUI 0xE7
+
+struct input_event {
+    unsigned char type;       /* INPUT_EVENT_* */
+    unsigned char flags;      /* INPUT_FLAG_* */
+    unsigned short modifiers; /* INPUT_MOD_* after the event */
+    unsigned int time_ms;     /* uptime when it was queued */
+    unsigned short keycode;   /* KEY_*: the key's position */
+    unsigned char source;     /* the device that sent it */
+    unsigned char reserved;
+    unsigned int codepoint;   /* key down: the Unicode character, or 0 */
+};
+
+#define INPUT_READ_MAX 32
+
+int input_claim(int bit);
+int input_read(struct input_event *events, int max);
+int input_focus(int pid);
+int fb_claim(int on);
 
 // Change cwd, or copy its volume-qualified canonical spelling (including NUL).
 // Both return 0 on success and -1 on failure; failed chdir preserves cwd.
