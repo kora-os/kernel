@@ -5,6 +5,7 @@
 #include "common.h"
 #include "fs/fat32.h"
 #include "input/input.h"
+#include "input/keylog.h"
 #include "ipc/port.h"
 #include "lib/string.h"
 #include "proc/task.h"
@@ -460,8 +461,13 @@ static long sys_input_read(struct input_event *out, long max) {
     struct input_event events[INPUT_READ_MAX];
     int tid = task_current()->pid;
     int count = input_take(tid, events, (int)max);
-    for (int i = 0; i < count; i++) {
-        out[i] = events[i];
+    if (count > 0) {
+        int focus = input_focus();
+        for (int i = 0; i < count; i++) {
+            keylog_note(&events[i], KEYLOG_TO_CLAIMER, tid, focus);
+            out[i] = events[i];
+        }
+        keylog_flush();
     }
     return count;
 }

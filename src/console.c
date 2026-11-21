@@ -2,6 +2,8 @@
 #include "arch/irq.h"
 #include "arch/systick.h"
 #include "common.h"
+#include "input/input.h"
+#include "input/keylog.h"
 #include "lib/timer.h"
 #include "lib/printf.h"
 #include "lib/string.h"
@@ -34,6 +36,7 @@ void console_cmd_help(const char *args) {
   uart_puts("  heaptest [rounds] - Stress the kernel heap (default 2000 rounds)\n");
   uart_puts("  tasks - List tasks with their state and kernel stack use\n");
   uart_puts("  cpus - List cores with their timer ticks and current task\n");
+  uart_puts("  keylog [on|off] - Trace input events: device, receiver, key\n");
   uart_puts("Ctrl-T switches the serial line between this console and the\n");
   uart_puts("screen terminal (the shell).\n");
 }
@@ -154,6 +157,26 @@ void console_cmd_cpus(const char *args) {
   printf("cpus: %u online, this is cpu %u\n", smp_cores_online(), this_cpu()->id);
 }
 
+// keylog on|off: trace every input event as it is taken out of the queue
+// (input/keylog.h); with no argument, say whether it is on and who takes
+// the events.
+void console_cmd_keylog(const char *args) {
+  if (strcmp(args, "on") == 0) {
+    keylog_enable(true);
+  } else if (strcmp(args, "off") == 0) {
+    keylog_enable(false);
+  } else if (args[0] != '\0') {
+    uart_puts("usage: keylog [on|off]\n");
+    return;
+  }
+  int claimer = input_claimer();
+  if (claimer != 0) {
+    printf("keylog: %s, events go to thread %d\n", keylog_enabled() ? "on" : "off", claimer);
+  } else {
+    printf("keylog: %s, events go to the kernel console\n", keylog_enabled() ? "on" : "off");
+  }
+}
+
 console_command_t commands[] = {
     {"help", "Show available commands", console_cmd_help},
     {"get_el", "Get the current Exception Level", console_cmd_get_el},
@@ -163,6 +186,7 @@ console_command_t commands[] = {
     {"heaptest", "Stress the kernel heap", console_cmd_heaptest},
     {"tasks", "List tasks and kernel stack use", console_cmd_tasks},
     {"cpus", "List cores, their ticks and current tasks", console_cmd_cpus},
+    {"keylog", "Trace input events (on or off)", console_cmd_keylog},
     {NULL, NULL, NULL},
 };
 
