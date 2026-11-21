@@ -54,6 +54,13 @@
 // Standard handles (proc/task.h).
 #define SYS_std_handles  55
 #define SYS_spawn_std    56
+// Signals (proc/task.h).
+#define SYS_sig_alloc    57
+#define SYS_sig_free     58
+#define SYS_sig_wait     59
+#define SYS_sig_set      60
+#define SYS_sig_send     61
+#define SYS_port_signal  62
 
 // Dispatch a syscall described by a trap frame from EL0. The return value is
 // written back into the frame's x0.

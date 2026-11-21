@@ -4,7 +4,8 @@
 #include "common.h"
 
 // Message ports, as in AmigaOS Exec: a queue of messages and a wake-up for the
-// process that owns the port. A message is a block of the sender's own memory
+// process that owns the port: port_wait(), or a signal of one of its threads
+// (port_set_signal, proc/task.h) for a thread that waits on several. A message is a block of the sender's own memory
 // (there is no memory protection, so a pointer is enough): the kernel queues
 // the pointer and never reads or writes the message. The receiver takes it
 // with port_get() or port_wait(), handles it, and gives it back with
@@ -74,6 +75,15 @@ int port_get(struct process *me, int id, struct port_received *out);
 // As port_get(), but sleep until a message arrives. Returns 1, or -1 if `id`
 // is not (or stops being) a port of `me`, or the waiting task was killed.
 int port_wait(struct process *me, int id, struct port_received *out);
+
+// Signal `bit` of thread `tid` (one of `me`'s, which allocated it) whenever a
+// message arrives on `me`'s port `id`, at once if one is already queued; -1
+// for `bit` stops it. Replaces any earlier signal of the port. Returns 0, or
+// -1 if `id` is not a port of `me`. The caller checks `tid` and `bit`.
+int port_set_signal(struct process *me, int id, int tid, int bit);
+
+// Thread `tid` freed signal `bit`: ports that set it stop.
+void port_signal_freed(int tid, int bit);
 
 // Give back `msg`, which `me` received as a PORT_MESSAGE: it goes to its
 // reply port as a PORT_REPLY, or is released if that port is gone or there is

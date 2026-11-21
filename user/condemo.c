@@ -105,15 +105,19 @@ static int run_in_window(const struct fb_info *fb, int argc, char **argv) {
     }
     feed(&console, "\x1b[44m\x1b[2J\x1b[H");  /* a blue window */
 
-    /* The program gets condemo's own stdin, and this console for the rest. */
+    /* The program gets condemo's own stdin, and this console for the rest.
+     * Two signals wake condemo: a packet on its port, and the program's end. */
     struct std_handle std[3];
     int port = port_create(NULL);
-    if (port < 0 || std_handles(std) < 0) {
+    int port_bit = sig_alloc(-1);
+    int end_bit = sig_alloc(-1);
+    if (port < 0 || port_bit < 0 || end_bit < 0 || port_signal(port, port_bit) < 0 ||
+        std_handles(std) < 0) {
         fputs("condemo: no port\n", stderr);
         return 1;
     }
     std[1] = std[2] = (struct std_handle){STD_PORT, port};
-    int pid = spawn_std(argv[0], argc, argv, SPAWN_NOWAIT, std);
+    int pid = spawn_std(argv[0], argc, argv, SPAWN_NOWAIT | SPAWN_SIGNAL(end_bit), std);
     if (pid < 0) {
         fprintf(stderr, "condemo: cannot run %s\n", argv[0]);
         port_delete(port);
@@ -132,6 +136,7 @@ static int run_in_window(const struct fb_info *fb, int argc, char **argv) {
     unsigned long shown = 0;
     int code = -1;
     for (;;) {
+        unsigned signals = sig_wait(SIG_MASK(port_bit) | SIG_MASK(end_bit));
         struct port_message got;
         while (port_get(port, &got) == 1) {
             if (got.kind != PORT_MESSAGE) {
@@ -145,12 +150,13 @@ static int run_in_window(const struct fb_info *fb, int argc, char **argv) {
             port_reply(packet);
         }
         term_render_flush(&view);
-        if (waitpid(pid, &code, WNOHANG) == pid) {
+        if ((signals & SIG_MASK(end_bit)) && waitpid(pid, &code, WNOHANG) == pid) {
             break;
         }
-        msleep(5);
     }
     port_delete(port);
+    sig_free(port_bit);
+    sig_free(end_bit);
     printf("condemo: %s exited with %d; %lu bytes in its window\n", argv[0], code, shown);
     return 0;
 }

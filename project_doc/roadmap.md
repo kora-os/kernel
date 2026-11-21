@@ -338,14 +338,18 @@ The terminal leaves the kernel, on the AmigaOS model (`console.device` plus
 the `CON:` handler): the kernel keeps the hardware, an input event queue,
 message ports and a boot and panic text fallback; a console library in user
 space holds the escape parser, the cell grid, the renderer and the fonts; a
-screen manager task owns the screen and hosts the console instances programs
-use as stdin and stdout. It is the base for koracli and for an optional GUI.
+screen manager task owns the screen and lets programs open full-size
+screens, Amiga style; console clients on those screens (the shell first)
+host the console instances programs use as stdin and stdout. It is the base
+for koracli and for an optional GUI.
 The design, its five steps and its open decisions are in `console-plan.md`.
 Step 1 is done: keyboards post key events to a kernel queue, and a temporary
 adapter turns them back into the bytes the terminal reads. Step 2 is done:
 the terminal is the console library `user/libconsole`, built into the kernel
 and linked by user programs. Step 3 is done: message ports (3a), and
-standard handles with shell redirection (3b).
+standard handles with shell redirection (3b). Step 4, the screen manager, is
+three PRs; 4a is done: signals, so a thread waits on several ports, its
+children and other threads at once.
 
 ## QEMU virt development platform
 

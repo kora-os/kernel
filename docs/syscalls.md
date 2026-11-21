@@ -63,6 +63,12 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
 | 54 | `port_reply` | `int port_reply(void *msg)` | `0`, or `-1` |
 | 55 | `std_handles` | `int std_handles(struct std_handle out[3])` | `0`, or `-1` |
 | 56 | `spawn_std` | `int spawn_std(const char *name, int argc, char *const argv[], int flags, const struct std_handle std[3])` | child pid, or `-1` |
+| 57 | `sig_alloc` | `int sig_alloc(int bit)` | the bit, or `-1` |
+| 58 | `sig_free` | `int sig_free(int bit)` | `0`, or `-1` |
+| 59 | `sig_wait` | `unsigned sig_wait(unsigned mask)` | the signals received of `mask`, now cleared |
+| 60 | `sig_set` | `unsigned sig_set(unsigned values, unsigned mask)` | the signals before the change |
+| 61 | `sig_send` | `int sig_send(int tid, unsigned mask)` | `0`, or `-1` if there is no such thread |
+| 62 | `port_signal` | `int port_signal(int port, int bit)` | `0`, or `-1` |
 
 ## Notes per call
 
@@ -96,7 +102,9 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
   alongside (a background job). Either way, reap the child with `waitpid`.
   `SPAWN_CORE(n)` runs the child on core `n` for life (it fails if that core
   does not exist or is offline); without it the kernel puts the child on the
-  online core with the fewest tasks. libk's `spawn(name, argc, argv)` is the
+  online core with the fewest tasks. `SPAWN_SIGNAL(bit)` sets signal `bit` of
+  the calling thread when the child ends (see Signals below); it fails if the
+  thread has not allocated the bit. libk's `spawn(name, argc, argv)` is the
   flags-0 form. `name` is resolved to a filesystem path: a bare
   name is looked up through `c:` (initially `sys:bin`), with no fallback to
   `/bin` if the assign or command is missing; other names use the caller's
@@ -209,7 +217,7 @@ return `-1`. The kernel API retains detailed errors; user syscalls map them to
 File paths for `open`, `stat`, `chdir` and explicit `spawn` paths use the same
 namespace rules; `/` selects the current volume's root. Syscall numbers 14 to
 31 belong to the scheduler/memory track; filesystem additions use 32 to 47;
-message ports and the console work use 48 and up.
+message ports, standard handles, signals and the console work use 48 and up.
 
 ### Message ports (48 to 54)
 
@@ -240,6 +248,40 @@ which the kernel queues by address and never reads or writes.
   until they are replied: a receiver never touches freed memory. Meanwhile the
   program counts in `sysinfo().procs` but cannot be found, waited for or
   killed.
+
+### Signals (57 to 62)
+
+Signals follow AmigaOS Exec (`Wait()`, `Signal()`, `AllocSignal()`), in the
+scheduler (`src/proc/task.c`, `include/proc/task.h`). Each thread has 32
+signal bits. Other threads, its ports and the end of its children set them,
+and it sleeps until any of several is set: that is how one thread waits on
+several ports, a port and a child, or a port and another thread at once.
+
+- **`sig_alloc`** allocates bit `bit` of the calling thread, or for `-1` its
+  highest free one, and clears it. Bits 0 to 7 are kept for the system (none
+  is used yet), so a thread has 24.
+- **`sig_free`** frees an allocated bit and clears it; a port tied to it stops
+  setting it.
+- **`sig_wait`** sleeps until a signal in `mask` is set, then clears those of
+  `mask` that are set and returns them. It returns at once if one is set
+  already, and returns `0` for an empty mask. A killed program dies in it.
+- **`sig_set`** sets the signals in `mask` to those of `values` and returns
+  what all of them were before: `sig_set(0, 0)` only looks, `sig_set(0, m)`
+  clears `m`.
+- **`sig_send`** sets signals of any live thread, of any program, waking it if
+  it waits for one. A thread id is the pid for a main thread, and the value
+  `thread_create` returns otherwise.
+- **`port_signal`** ties one of the program's ports to bit `bit` of the
+  calling thread: every message arriving on it (a message, a reply or a
+  returned one) sets the bit, and so does one already waiting when it is
+  tied. `-1` unties it. A port has one signal; tying it again replaces it.
+
+A signal records that something happened, not how often: set twice before a
+wait it is returned once. So after a port's signal, take every message on it
+(`port_get` until `0`), and expect to find none at times, since `port_wait`
+and `port_get` take messages without clearing the signal. Signals are
+protected by the scheduler's lock, which interrupt handlers take: input will
+be able to signal from its interrupt (console step 4b).
 
 ### Standard handles (55 and 56)
 

@@ -497,6 +497,107 @@ void task_msleep(uint64_t ms) {
     block_and_switch(flags);
 }
 
+// Signals (proc/task.h) ----------------------------------------------------
+//
+// A thread's received signals and its wait for them are sched_lock-protected,
+// like its state, so an interrupt handler may signal. Only the thread itself
+// allocates and frees its bits, under the BKL.
+
+static bool sig_bit_ok(int bit) {
+    return bit >= SIG_SYSTEM_BITS && bit < SIG_BITS;
+}
+
+// The live thread `tid` (not exited), under sched_lock: its pid cannot change
+// while it is runnable or blocked.
+static task_t *live_task(int tid) {
+    for (int i = 0; tid > 0 && i < MAX_TASKS; i++) {
+        task_t *t = &tasks[i];
+        if (t->pid == tid && (t->state == TASK_RUNNABLE || t->state == TASK_BLOCKED)) {
+            return t;
+        }
+    }
+    return NULL;
+}
+
+// Under sched_lock.
+static bool signal_locked(int tid, uint32_t mask) {
+    task_t *t = live_task(tid);
+    if (t == NULL) {
+        return false;
+    }
+    t->sig_received |= mask;
+    if (t->state == TASK_BLOCKED && t->blocked_on == BLOCK_SIGNAL &&
+        (t->sig_received & t->sig_waiting) != 0) {
+        make_runnable(t);
+    }
+    return true;
+}
+
+int task_signal(int tid, uint32_t mask) {
+    uint64_t flags = spin_lock_irqsave(&sched_lock);
+    bool found = signal_locked(tid, mask);
+    spin_unlock_irqrestore(&sched_lock, flags);
+    return found ? 0 : -1;
+}
+
+int task_sig_alloc(int bit) {
+    task_t *t = current;
+    if (bit == -1) {
+        for (bit = SIG_BITS - 1; bit >= SIG_SYSTEM_BITS; bit--) {
+            if ((t->sig_allocated & (1u << bit)) == 0) {
+                break;
+            }
+        }
+    }
+    if (!sig_bit_ok(bit) || (t->sig_allocated & (1u << bit)) != 0) {
+        return -1;
+    }
+    t->sig_allocated |= 1u << bit;
+    task_sig_set(0, 1u << bit);
+    return bit;
+}
+
+int task_sig_free(int bit) {
+    task_t *t = current;
+    if (!task_sig_allocated(bit) || !sig_bit_ok(bit)) {
+        return -1;
+    }
+    t->sig_allocated &= ~(1u << bit);
+    task_sig_set(0, 1u << bit);
+    port_signal_freed(t->pid, bit);
+    return 0;
+}
+
+bool task_sig_allocated(int bit) {
+    return bit >= 0 && bit < SIG_BITS && (current->sig_allocated & (1u << bit)) != 0;
+}
+
+uint32_t task_sig_wait(uint32_t mask) {
+    task_t *t = current;
+    for (;;) {
+        uint64_t flags = spin_lock_irqsave(&sched_lock);
+        uint32_t got = t->sig_received & mask;
+        if (got != 0 || mask == 0 || t->killed) {
+            t->sig_received &= ~got;
+            spin_unlock_irqrestore(&sched_lock, flags);
+            return got;
+        }
+        t->state = TASK_BLOCKED;
+        t->blocked_on = BLOCK_SIGNAL;
+        t->sig_waiting = mask;
+        block_and_switch(flags);  // woken by a signal in `mask`, or a kill
+    }
+}
+
+uint32_t task_sig_set(uint32_t values, uint32_t mask) {
+    task_t *t = current;
+    uint64_t flags = spin_lock_irqsave(&sched_lock);
+    uint32_t old = t->sig_received;
+    t->sig_received = (old & ~mask) | (values & mask);
+    spin_unlock_irqrestore(&sched_lock, flags);
+    return old;
+}
+
 static void tick_task(task_t *t, uint64_t now_us) {
     if (t->state == TASK_BLOCKED && t->blocked_on == BLOCK_SLEEP && now_us >= t->wake_us) {
         make_runnable(t);
@@ -838,11 +939,20 @@ struct process *task_create(const char *name, int argc, char *const argv[], int 
 
 int task_spawn(const char *name, int argc, char *const argv[], int flags,
                const struct std_handle *std) {
+    int notify = SPAWN_SIGNAL_OF(flags);
+    if (notify >= 0 && (current->proc == NULL || !task_sig_allocated(notify))) {
+        return -1;
+    }
     struct process *child = task_create(name, argc, argv, SPAWN_CORE_OF(flags), std);
     if (child == NULL) {
         return -1;
     }
     int pid = child->pid;
+    // Under the BKL the child cannot end before it knows whom to signal.
+    if (notify >= 0) {
+        child->notify_tid = current->pid;
+        child->notify_bit = notify;
+    }
     if ((flags & SPAWN_NOWAIT) == 0) {
         // Another thread of ours may reap the child meanwhile, freeing its slot.
         while (child->pid == pid && !child->zombie && !task_killed()) {
@@ -994,6 +1104,9 @@ static void thread_die(long value) {
     if (last) {
         p->zombie = true;
         wake_parent(p);
+        if (p->notify_tid != 0) {
+            signal_locked(p->notify_tid, 1u << p->notify_bit);
+        }
     } else {
         for (int i = 0; i < MAX_TASKS; i++) {
             if (tasks[i].proc == p && blocked_for(&tasks[i], BLOCK_JOIN, me)) {

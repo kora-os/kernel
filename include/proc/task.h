@@ -77,6 +77,7 @@ typedef enum {
     BLOCK_JOIN,       // a thread of its process to exit (waiting_for)
     BLOCK_QUEUE,      // a wake-up on a wait queue (wq)
     BLOCK_SLEEP,      // the timer to reach wake_us
+    BLOCK_SIGNAL,     // one of the signals in sig_waiting
 } block_reason_t;
 
 // Tasks sleeping until an event; woken all at once by wait_queue_wake_all().
@@ -111,6 +112,8 @@ struct process {
     struct std_handle std[3];         // stdin, stdout, stderr
     unsigned msgs_out;                // its messages receivers hold (ipc/port.h)
     bool draining;                    // reaped, but kept until msgs_out is 0
+    int notify_tid;                   // the thread to signal when it ends (0: none)
+    int notify_bit;                   // the signal it gets (SPAWN_SIGNAL)
 };
 
 typedef struct task {
@@ -127,6 +130,9 @@ typedef struct task {
     struct wait_queue *wq;            // BLOCK_QUEUE: the queue it sleeps on
     struct task *wq_next;             // next sleeper on that queue
     uint64_t wake_us;                 // BLOCK_SLEEP: timer_us() to wake at
+    uint32_t sig_allocated;           // its signal bits in use (sig_alloc)
+    uint32_t sig_received;            // signals set and not waited for yet
+    uint32_t sig_waiting;             // BLOCK_SIGNAL: the signals it waits for
     bool bkl;                         // holds the BKL (dropped while switched out)
     int forbid;                       // forbid() depth: keeps the BKL and the core
     void *stack;                      // user stack (for reclaim)
@@ -156,9 +162,15 @@ struct process *task_create(const char *name, int argc, char *const argv[], int 
 #define SPAWN_CORE(n) ((((n) + 1) & 0xf) << 8)
 #define SPAWN_CORE_MASK 0xf00
 #define SPAWN_CORE_OF(flags) ((int)(((flags) & SPAWN_CORE_MASK) >> 8) - 1)
+// Signal `bit` (one the spawning thread allocated) to the spawning thread when
+// the child ends. Bits 12..17 hold bit + 1.
+#define SPAWN_SIGNAL(bit) ((((bit) + 1) & 0x3f) << 12)
+#define SPAWN_SIGNAL_MASK 0x3f000
+#define SPAWN_SIGNAL_OF(flags) ((int)(((flags) & SPAWN_SIGNAL_MASK) >> 12) - 1)
 
 // Create a process and, unless SPAWN_NOWAIT, block until it finishes. Returns
-// the child's pid, or -1 on failure. The child stays an unreaped zombie until
+// the child's pid, or -1 on failure (also for a SPAWN_SIGNAL bit the calling
+// thread has not allocated). The child stays an unreaped zombie until
 // its parent collects it with task_wait_ex().
 int task_spawn(const char *name, int argc, char *const argv[], int flags,
                const struct std_handle *std);
@@ -189,6 +201,43 @@ void wait_queue_sleep(struct wait_queue *wq, struct spinlock *cond);
 
 // Make every task sleeping on `wq` runnable. Safe from interrupt handlers.
 void wait_queue_wake_all(struct wait_queue *wq);
+
+// Signals, as in AmigaOS Exec: 32 bits per thread, which other threads,
+// ports (ipc/port.h) and the end of a child (SPAWN_SIGNAL) set, and which the
+// thread waits for, any of several at once. A signal says only that something
+// happened: one set again before it is waited for counts once, so a waiter
+// looks at every source its signal stands for (all the messages on a port)
+// and must cope with finding nothing. A thread allocates the bits it uses;
+// bits 0 to SIG_SYSTEM_BITS - 1 are kept for the system. The bits are
+// sched_lock-protected, so interrupt handlers may signal.
+#define SIG_BITS 32
+#define SIG_SYSTEM_BITS 8
+
+// Allocate signal `bit` of the calling thread, or for -1 its highest free one,
+// and clear it. Returns the bit, or -1 (taken, kept for the system, or none
+// free).
+int task_sig_alloc(int bit);
+
+// Free signal `bit` of the calling thread; ports that set it stop (ipc/port.h).
+// Returns 0, or -1 if it was not allocated.
+int task_sig_free(int bit);
+
+// Whether the calling thread allocated signal `bit` (0..31).
+bool task_sig_allocated(int bit);
+
+// Sleep until the calling thread has received any of the signals in `mask`,
+// then clear and return those. Returns at once with the ones already received;
+// 0 for an empty mask, or when the thread was killed.
+uint32_t task_sig_wait(uint32_t mask);
+
+// Change the calling thread's received signals in `mask` to those of `values`;
+// returns what they all were before. task_sig_set(0, 0) only looks.
+uint32_t task_sig_set(uint32_t values, uint32_t mask);
+
+// Set the signals in `mask` of thread `tid` (of any program), waking it if it
+// waits for one. Returns 0, or -1 if there is no such live thread. Safe from
+// interrupt handlers.
+int task_signal(int tid, uint32_t mask);
 
 // Called by the timer interrupt on every tick: wakes due sleepers and asks
 // for a reschedule (taken on the way back to EL0).
