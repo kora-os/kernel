@@ -15,12 +15,17 @@
  *                            stays condemo's own. It prints how the program
  *                            ended and how many bytes it showed.
  *
+ * Under the screen manager (screens) condemo draws on a screen of its own,
+ * which it closes on Escape; otherwise straight into the framebuffer, over
+ * the kernel's screen terminal.
+ *
  * condemo's own output still goes to its stdout: the kernel's screen terminal.
  * The smoke test checks both against screenshots.
  */
 #include "libk/koraos.h"
 #include "libconsole/term.h"
 #include "libconsole/term_render.h"
+#include "libscreen/screen.h"
 
 #define COLS 40
 #define ROWS 16
@@ -46,6 +51,36 @@ static void console_reply(void *ctx, const char *bytes, size_t length) {
 }
 
 static const term_host_t host = {console_alloc, console_reply, NULL};
+
+/* condemo's screen under the screen manager, or NULL. */
+static screen_t *screen;
+
+/* What was drawn in a rectangle: on a screen, tell the manager. */
+static void show(int x, int y, int width, int height) {
+    if (screen != NULL) {
+        screen_damage(screen, x, y, width, height);
+    }
+}
+
+/* On a screen, keep it until Escape, then close it. */
+static void wait_for_escape(void) {
+    if (screen == NULL) {
+        return;
+    }
+    printf("condemo: Escape closes screen %d\n", screen->id);
+    fflush(stdout);
+    for (;;) {
+        sig_wait(screen_signal(screen));
+        struct input_event event;
+        while (screen_event(screen, &event)) {
+            if (event.type == INPUT_EVENT_KEY_DOWN && event.keycode == KEY_ESCAPE) {
+                screen_close(screen);
+                screen = NULL;
+                return;
+            }
+        }
+    }
+}
 
 static void feed(term_t *t, const char *s) {
     while (*s) {
@@ -124,12 +159,13 @@ static int run_in_window(const struct fb_info *fb, int argc, char **argv) {
         return 1;
     }
 
-    term_surface_t screen;
-    term_surface_init(&screen, (void *)fb->addr, fb->width, fb->height, fb->pitch);
+    term_surface_t surface;
+    term_surface_init(&surface, (void *)fb->addr, fb->width, fb->height, fb->pitch);
     frame(fb, x, y, width, height);
     term_render_t view;
-    term_render_init(&view, &console, &screen, x, y);
+    term_render_init(&view, &console, &surface, x, y);
     term_render_all(&view);
+    show(x - BORDER, y - BORDER, width + 2 * BORDER, height + 2 * BORDER);
 
     /* Serve its packets until it has ended. Each write waits for its reply,
      * so once the program is gone nothing of it is left to serve. */
@@ -150,6 +186,7 @@ static int run_in_window(const struct fb_info *fb, int argc, char **argv) {
             port_reply(packet);
         }
         term_render_flush(&view);
+        show(x, y, width, height);
         if ((signals & SIG_MASK(end_bit)) && waitpid(pid, &code, WNOHANG) == pid) {
             break;
         }
@@ -163,12 +200,18 @@ static int run_in_window(const struct fb_info *fb, int argc, char **argv) {
 
 int main(int argc, char **argv) {
     struct fb_info fb;
-    if (fb_info(&fb) != 0 || fb.bpp != 32) {
+    screen = screen_open("condemo");
+    if (screen != NULL) {
+        fb = (struct fb_info){(unsigned long)screen->pixels, screen->width, screen->height,
+                              screen->pitch, 32};
+    } else if (fb_info(&fb) != 0 || fb.bpp != 32) {
         fputs("condemo: no 32-bit framebuffer\n", stderr);
         return 1;
     }
     if (argc > 1) {
-        return run_in_window(&fb, argc - 1, argv + 1);
+        int code = run_in_window(&fb, argc - 1, argv + 1);
+        wait_for_escape();
+        return code;
     }
     int width = COLS * TERM_CELL_WIDTH;
     int height = ROWS * TERM_CELL_HEIGHT;
@@ -211,16 +254,16 @@ int main(int argc, char **argv) {
         feed(&right, line);
     }
 
-    term_surface_t screen;
-    term_surface_init(&screen, (void *)fb.addr, fb.width, fb.height, fb.pitch);
+    term_surface_t surface;
+    term_surface_init(&surface, (void *)fb.addr, fb.width, fb.height, fb.pitch);
 
     frame(&fb, left_x, y, width, height);
     term_render_t left_view;
-    term_render_init(&left_view, &left, &screen, left_x, y);
+    term_render_init(&left_view, &left, &surface, left_x, y);
     term_render_all(&left_view);
 
     frame(&fb, right_x, y, width, height);
-    term_surface_t window = screen;
+    term_surface_t window = surface;
     window.clip = (term_rect_t){right_x, y, (uint32_t)width, (uint32_t)height};
     term_render_t right_view;
     term_render_init(&right_view, &right, &window, right_x, y);
@@ -233,7 +276,9 @@ int main(int argc, char **argv) {
         fputs("condemo: no cursor report from the left console\n", stderr);
         return 1;
     }
+    show(0, 0, (int)fb.width, (int)fb.height);
     printf("condemo: windows %dx%d at %d,%d and %d,%d; left console cursor at %d;%d\n",
            width, height, left_x, y, right_x, y, row, col);
+    wait_for_escape();
     return 0;
 }
