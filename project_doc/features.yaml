@@ -393,6 +393,7 @@ categories:
         name: Screen manager
         status: in_progress
         description: A user task that owns the screen and the input queue and hosts the consoles programs run in.
+        prs: [105]
       - id: framebuffer-handoff
         name: Framebuffer hand-off
         status: in_progress
