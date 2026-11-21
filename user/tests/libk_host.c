@@ -224,3 +224,7 @@ int input_focus(int pid) {
 int fb_claim(int on) {
     return (int)CALL(SYS_FB_CLAIM, on, 0, 0, 0);
 }
+
+int gettid(void) {
+    return (int)CALL(SYS_GETTID, 0, 0, 0, 0);
+}

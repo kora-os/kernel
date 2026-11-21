@@ -351,8 +351,9 @@ standard handles with shell redirection (3b). Step 4, the screen manager, is
 four PRs; 4a is done: signals, so a thread waits on several ports, its
 children and other threads at once. 4b1 gives a program the input queue and
 the screen, taken back at its end, a signal at any process's end and the
-debug console's `keylog`; 4b2 is the screen manager itself, 4c the shell as
-its first console client.
+debug console's `keylog`; 4b2 is the screen manager itself (`screens`, with
+libscreen for its clients and Meta+M), 4c the shell as its first console
+client.
 
 ## QEMU virt development platform
 

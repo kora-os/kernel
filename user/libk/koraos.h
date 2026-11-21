@@ -345,6 +345,7 @@ int isatty(int fd);
 
 int waitpid(int pid, int *code, int flags);
 int getpid(void);  /* the program's pid, the same in all its threads */
+int gettid(void);  /* the calling thread's id (the pid in the main thread) */
 void yield(void);
 void msleep(unsigned long ms);  /* at least ms milliseconds (up to a 10 ms tick more) */
 

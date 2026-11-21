@@ -100,8 +100,10 @@ static void allocation(void) {
 }
 
 static int woken_bit;
+static int waker_tid;
 
 static long wake_main(void *arg) {
+    waker_tid = gettid();
     msleep(30);
     sig_send((int)(long)arg, SIG_MASK(woken_bit));
     return 0;
@@ -116,6 +118,7 @@ static void thread_wakes(void) {
     unsigned got = sig_wait(SIG_MASK(woken_bit) | SIG_MASK(other));
     unsigned long slept = uptime_us() - start;
     check(tid > 0 && thread_join(tid, NULL) == 0, "the waking thread");
+    check(waker_tid == tid && gettid() == getpid(), "gettid: a thread's id, the pid in main");
     check(got == SIG_MASK(woken_bit), "only the signal that was sent is returned");
     check(slept >= 20000, "the waiter slept until it came");
     sig_free(woken_bit);

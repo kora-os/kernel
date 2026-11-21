@@ -74,6 +74,7 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
 | 65 | `input_read` | `int input_read(struct input_event *events, int max)` | events taken, or `-1` without the claim |
 | 66 | `input_focus` | `int input_focus(int pid)` | `0`, or `-1` without the claim |
 | 67 | `fb_claim` | `int fb_claim(int on)` | `0`, or `-1` if another program holds the screen |
+| 68 | `gettid` | `int gettid(void)` | the calling thread's id, the pid in a program's main thread |
 
 ## Notes per call
 
