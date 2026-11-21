@@ -1,8 +1,8 @@
 # Console and screen plan (handover)
 
 Status: **steps 1 to 3 done** (step 3 as two PRs, 3a and 3b); **step 4 in
-progress**: 4a (signals) done, 4b split into 4b1 (the kernel's part, in
-review) and 4b2 (the screen manager). It is the outcome of a design discussion on
+progress**: 4a (signals) and 4b1 (the kernel's part of the screen manager)
+done, 4b2 (the screen manager program) in review. It is the outcome of a design discussion on
 2026-11-12 and is the "terminal design" that `libc-plan.md` defers to koracli.
 No milestone number has been assigned yet.
 
@@ -71,6 +71,10 @@ to pretend to be one.
 - Signals (step 4a): a thread waits on several sources at once, its ports,
   its children's ends and other threads (`sig_wait`). `condemo <program>`
   waits on its port and its program that way.
+- The screen manager (steps 4b1 and 4b2): `screens` claims the display and
+  the keyboard from the kernel, and programs open screens on it with
+  `user/libscreen`. `condemo` and `gfxdemo` do when it runs. The shell still
+  uses the kernel terminal, which `screens` hides while it runs.
 - The kernel log is UART-only (`kernel.c`). Programs can already draw straight
   into the framebuffer through `fb_info` (`gfxdemo`).
 
@@ -189,7 +193,7 @@ flowchart TB
   - [x] 4a. Signals: one thread waits on several ports, its children and
         other threads at once.
   - [ ] 4b. The screen manager, as two PRs:
-    - [ ] 4b1. The kernel's part: the input queue claimed by a thread and
+    - [x] 4b1. The kernel's part: the input queue claimed by a thread and
           signalling it, the screen handed over and taken back at the
           holder's end, a signal at any process's end, and the debug
           console's `keylog`.
@@ -353,6 +357,44 @@ flowchart TB
   lost.
 - **Not yet**: the manager itself, its protocol and Meta+M (4b2). The kernel
   gives events no meaning; Meta+M will be the manager's.
+
+## Step 4b2 decisions (2026-11-21)
+
+- **Programs open their screens**, as Intuition's `OpenScreen()`: they find
+  the manager's public port `screens`. `screens prog [args] + prog [args]`
+  starts the manager with its first programs and ends when the last screen
+  has closed and they have ended. A program that finds no manager draws on
+  the framebuffer as before.
+- **The client side is a library**, `user/libscreen`, beside libconsole.
+- **The manager allocates the screens**, in its own memory: a crashed
+  client's pages are reclaimed, its screen stays valid until it is closed.
+
+## Step 4b2 as built
+
+- **`screens`** (`user/screens.c`): starts its programs (`+` between them)
+  and serves requests on its port:
+  open, damage (a rectangle copied to the display if the screen is in front),
+  to front, close. A new screen comes to front. A screen closes when its
+  program closes it or ends (`sig_on_end`; its end is found by watching again,
+  which fails for a program gone). It reports on its stdout, the kernel
+  console, shown once it has ended.
+- **The display and the keyboard are held only while a screen is open.** With
+  none, the console has them back, so a program that opens no screen (a
+  shell started by `screens`, say) still gets its keys: it cannot be left
+  waiting for keys nobody passes on.
+- **Keys**: Meta+M brings the next screen to front, its M and the M's key up
+  swallowed; every other event goes to the front screen's program, into its
+  screen's ring of 64 events, and signals the thread that opened it.
+- **`user/libscreen`**: `screen_open`, `screen_damage`, `screen_event`,
+  `screen_signal`, `screen_to_front`, `screen_close`. Requests are messages
+  on the manager's port, each waiting for its reply, so damage is copied when
+  `screen_damage` returns.
+- **`gettid()`** (syscall 68): the thread a screen's events signal.
+- **`condemo` and `gfxdemo`** open a screen when a manager runs, and keep it
+  until Escape.
+- **Not yet**: screens of other sizes or depths, sliding screens (4d), a
+  manager that survives its own crash (the clients' pixels are its memory),
+  and the shell as a client (4c).
 
 ## Safety net
 

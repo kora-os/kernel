@@ -391,7 +391,7 @@ categories:
         prs: [100]
       - id: screen-manager
         name: Screen manager
-        status: planned
+        status: in_progress
         description: A user task that owns the screen and the input queue and hosts the consoles programs run in.
       - id: framebuffer-handoff
         name: Framebuffer hand-off

@@ -67,8 +67,8 @@ A program runs in EL0 with a deliberately small runtime:
   yours, or a console handler's port: see `condemo`); `isatty(1)` tells
   whether your stdout is a console. To wait for several things at once (your
   ports, a child's end, another thread), give each a signal bit and sleep in
-  `sig_wait` (`port_signal`, `SPAWN_SIGNAL`, `sig_send`); `condemo` serves
-  its program's packets and notices its end that way.
+  `sig_wait` (`port_signal`, `SPAWN_SIGNAL`, `sig_on_end`, `sig_send`);
+  `condemo` serves its program's packets and notices its end that way.
   `msleep(ms)` sleeps; `uptime_us()` reads a microsecond clock without a
   syscall. `forbid()`/`permit()` keep the CPU and the kernel to yourself while
   you poke at kernel structures (see [locking.md](locking.md)). `kill(pid)`
@@ -91,6 +91,18 @@ A program runs in EL0 with a deliberately small runtime:
   `atomic_swap` and `atomic_cas`, plus `cpu_relax()` for spin loops.
   [`user/jobdemo.c`](../user/jobdemo.c) and [`user/pindemo.c`](../user/pindemo.c)
   are worked examples of jobs and of pinned sub-processes.
+- **Screens.** Under the screen manager (`screens prog [args] + prog
+  [args]`, [`user/screens.c`](../user/screens.c)) a program opens a screen
+  of its own with libscreen ([`user/libscreen/screen.h`](../user/libscreen/screen.h)):
+  `screen_t *s = screen_open("title")` gives a pixel buffer as large as the
+  display (`s->pixels`, `s->width`, `s->height`, `s->pitch`), NULL when no
+  manager runs. Draw into it, then `screen_damage(s, x, y, w, h)`: the
+  manager copies that rectangle to the display while the screen is in front.
+  Meta+M brings the next screen to front; the keys go to the front screen's
+  program as events, read with `screen_event` after
+  `sig_wait(screen_signal(s))`. `screen_close`, or the program's end, closes
+  it. [`user/gfxdemo.c`](../user/gfxdemo.c) is the smallest example, and
+  draws straight into the framebuffer when no manager runs.
 - **`main` signature.** Either `int main(void)` or `int main(int argc, char
   **argv)`; the libc's entry stub
   [`user/libc/src/crt/crt0.S`](../user/libc/src/crt/crt0.S) calls `main` and
@@ -119,8 +131,9 @@ newline, in one write. Look at the existing programs for patterns: [`user/hello.
 [`user/init.c`](../user/init.c) (spawning),
 [`user/gfxdemo.c`](../user/gfxdemo.c) (framebuffer), and
 [`user/condemo.c`](../user/condemo.c) (consoles of the console library,
-`user/libconsole`, drawn in windows on the framebuffer; its registration in
-`cmake/userfs.cmake` shows how a program links the library's sources).
+`user/libconsole`, drawn in windows on the framebuffer or on a screen; its
+registration in `cmake/userfs.cmake` shows how a program links the
+libraries' sources, `LIBCONSOLE_SOURCES` and `LIBSCREEN_SOURCES`).
 
 ## Building it
 

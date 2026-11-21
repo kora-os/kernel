@@ -328,7 +328,13 @@ whose bit is freed), the input queue and the screen, each claimed, refused to
 another program and taken back at the holder's end; it paints the screen red
 while it holds it, and the step checks that the console redrew it. With
 `--keyboard`, the debug console's `keylog` traces typed keys to the shell,
-then Meta+M to `inputprobe keys 4`, which claims the queue. `--repeat N` runs `allocprobe` N times: page runs, a `malloc`
+then Meta+M to `inputprobe keys 4`, which claims the queue. The screen
+manager runs two `screenprobe`s, each filling a screen with a colour, in the
+background: the front screen fills the display, each probe killed from the
+shell closes its screen at once and brings the other to front, and the
+console gets the display back at the end. With `--keyboard`, a key goes to the
+front probe only, Meta+M switches, Escape closes each, and `condemo` and
+`gfxdemo` show on screens of their own. `--repeat N` runs `allocprobe` N times: page runs, a `malloc`
 heap grown to about 1.5 MiB with churn and `realloc`, a nested child while it is
 live, and deliberate leaks. The kernel heap's live count and the free page count
 must be the same after the last run as after the first, so everything a reaped

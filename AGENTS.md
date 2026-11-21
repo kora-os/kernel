@@ -72,6 +72,9 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
   console when the claimer ends. The debug console's `keylog on` traces
   events, xev style (`src/input/keylog.c`); it prints only with no spinlock
   held, so keep its notes and its printing apart.
+- The screen manager is the user program `screens` (`user/screens.c`); its
+  clients use `user/libscreen` (`screen_open`, `screen_damage`,
+  `screen_event`). Screens are the manager's memory; Meta+M is its hotkey.
 - Use `run-qemu.sh` for rapid UART smoke tests; see the developer guide for hardware installation steps.
 - Documentation lives under `docs/`; do not store temporary todos there—use `project_doc/` for roadmap-level planning instead.
 
