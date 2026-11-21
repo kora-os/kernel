@@ -1245,6 +1245,148 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
                               % (x, y, pixel(shot, x, y), expected))
     yield "gfxdemo paints the framebuffer", gfxdemo
 
+    COLOURS = {b"red": (255, 0, 0), b"green": (0, 255, 0), b"blue": (0, 0, 255)}
+
+    def uniform(name, colour):
+        """The whole display is one colour (a screen in front)."""
+        width, height, rgb = q.screendump(name)
+        want = bytes(colour)
+        wrong = sum(1 for i in range(0, len(rgb), 3 * 97) if rgb[i:i + 3] != want)
+        if wrong:
+            raise Failure("%s: %d sampled pixels are not %s" % (name, wrong, colour))
+
+    def console_back(name):
+        """The kernel console has the display again: text on black, no screen's colour."""
+        width, height, rgb = q.screendump(name)
+        colours = {rgb[i:i + 3] for i in range(0, len(rgb), 3 * 7)}
+        if len(colours) < 2 or any(bytes(c) in colours and rgb.count(bytes(c)) > len(rgb) // 6
+                                   for c in COLOURS.values()):
+            raise Failure("%s: the console did not get the display back" % name)
+
+    def opened(count):
+        """The screenprobes' screens, as {screen id: (colour, pid)}."""
+        screens = {}
+        while len(screens) < count:
+            m = q.expect(rb"(?:^|\$ )screenprobe: (?:(\w+) on screen (\d+), pid (\d+)|([^\r\n]*))\r?\n",
+                         timeout=30)
+            if m.group(4) is not None:
+                raise Failure("screenprobe: %s" % m.group(4).decode(errors="replace"))
+            screens[int(m.group(2))] = (m.group(1), m.group(3).decode())
+        return screens
+
+    def screen_manager():
+        # screens hosts two screenprobes in the background; the shell, on the
+        # serial line, kills them one by one. Each end closes its screen at
+        # once and the other comes to front; after the last, screens ends and
+        # the console gets the display back.
+        # Its lines may follow the shell's prompt, which it prints meanwhile.
+        LINE = rb"(?:^|\$ )"
+        q.send("screens screenprobe red + screenprobe green &\r")
+        q.expect(rb"screens: \d+x\d+, Meta\+M brings the next screen to front")
+        screens = opened(2)
+        if sorted(screens) != [1, 2]:
+            raise Failure("screens opened %s" % sorted(screens))
+        # Each probe printed after its damage was copied: screen 2, opened
+        # last, is in front.
+        uniform("screens-two", COLOURS[screens[2][0]])
+        q.send("kill %s\r" % screens[2][1])
+        q.expect(LINE + rb"screens: screen 2 closed \(screenprobe \w+\), its program ended")
+        q.expect(LINE + rb"screens: screen 1 in front")
+        time.sleep(0.2)
+        uniform("screens-one", COLOURS[screens[1][0]])
+        q.send("kill %s\r" % screens[1][1])
+        q.expect(LINE + rb"screens: screen 1 closed \(screenprobe \w+\), its program ended")
+        q.expect(LINE + rb"screens: done")
+        q.send("\r")
+        q.expect(PROMPT)
+        time.sleep(0.2)
+        console_back("screens-done")
+    yield "screens: two screens, each closed as its program is killed, the console back", \
+        screen_manager
+
+    if keyboard:
+        gap = 0.1 if keyboard == "USB" else 0.02
+
+        def press(key):
+            q.monitor("sendkey %s 10" % key)
+            time.sleep(gap)
+
+        def screen_keys():
+            # Keys go to the front screen's program; Meta+M is the manager's
+            # and brings the other screen to front; Escape closes each.
+            q.send("screens screenprobe red + screenprobe blue\r")
+            screens = opened(2)
+            front, back = screens[2][0], screens[1][0]
+            press("a")
+            q.expect(rb"^screenprobe " + front + rb": key down 0x04 mods 0x0000 char 0x61")
+            press("meta_l-m")
+            q.expect(rb"^screens: screen 1 in front")
+            time.sleep(0.2)
+            uniform("screens-meta-m", COLOURS[back])
+            press("a")
+            m = q.expect(rb"^screenprobe (\w+): key down 0x04 mods 0x0000 char 0x61")
+            if m.group(1) != back:
+                raise Failure("after Meta+M the key went to %s" % m.group(1).decode())
+            press("esc")
+            q.expect(rb"^screens: screen 2 in front")  # before its reply to the probe
+            q.expect(rb"^screenprobe: " + back + rb" closed")
+            press("esc")
+            q.expect(rb"^screenprobe: " + front + rb" closed")
+            q.expect(rb"^screens: done")
+            q.expect(rb"exited with 0")
+            q.expect(PROMPT)
+        yield "screens: keys to the front screen, Meta+M switches, Escape closes (%s)" % keyboard, \
+            screen_keys
+
+        def screens_without_a_screen():
+            # A program under screens that opens no screen gets the keys, as
+            # without screens: here a shell, typed to and left with "exit".
+            q.send("screens shell\r")
+            q.expect(rb"Meta\+M brings the next screen to front")
+            q.expect(PROMPT)
+            for key in ("e", "c", "h", "o", "spc", "x", "y", "ret"):
+                press(key)
+            q.expect(rb"^xy\r?$")
+            q.expect(PROMPT)
+            for key in ("e", "x", "i", "t", "ret"):
+                press(key)
+            q.expect(rb"screens: done")
+            q.expect(rb"exited with 0")
+            q.expect(PROMPT)
+        yield "screens: a program with no screen keeps the keyboard (%s)" % keyboard, \
+            screens_without_a_screen
+
+        def demos_on_screens():
+            # condemo and gfxdemo open screens of their own under screens.
+            q.send("screens condemo + gfxdemo\r")
+            q.expect(rb"condemo: windows \d+x\d+", timeout=30)
+            q.expect(rb"gfxdemo: painted \d+x\d+ on screen \d", timeout=30)
+            time.sleep(0.3)
+            first = q.screendump("screens-demo-front")
+            press("meta_l-m")
+            q.expect(rb"^screens: screen 1 in front")
+            time.sleep(0.3)
+            second = q.screendump("screens-demo-back")
+            # One is gfxdemo's gradient, the other condemo's windows on black.
+            shots = {}
+            for shot in (first, second):
+                width, height, rgb = shot
+                near_black = sum(1 for i in range(0, len(rgb), 3 * 101) if max(rgb[i:i + 3]) < 16)
+                shots["condemo" if near_black * 101 * 3 > len(rgb) // 2 else "gfxdemo"] = shot
+            if len(shots) != 2:
+                raise Failure("the two screens did not show condemo and gfxdemo")
+            shot = shots["gfxdemo"]
+            x, y = shot[0] - 8, shot[1] - 8
+            expected = ((x * 255) // shot[0], (y * 255) // shot[1], 0)
+            if not near(pixel(shot, x, y), expected):
+                raise Failure("gfxdemo's screen: pixel (%d,%d) = %s" % (x, y, pixel(shot, x, y)))
+            press("esc")
+            press("esc")
+            q.expect(rb"^screens: done", timeout=30)
+            q.expect(rb"exited with 0")
+            q.expect(PROMPT)
+        yield "screens: condemo and gfxdemo on screens of their own (%s)" % keyboard, demos_on_screens
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
