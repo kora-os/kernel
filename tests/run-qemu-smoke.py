@@ -972,6 +972,36 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         q.expect(PROMPT)
     yield "signals: bits, threads, a port and a child's end in one wait, kill", signals
 
+    def screen_manager_claims():
+        # inputprobe: what a screen manager takes from the kernel. A signal at
+        # any process's end, the input queue and the screen, each claimed,
+        # refused to a second program and taken back at its holder's end.
+        q.send("inputprobe\r")
+        cases = [rb"a signal at any process's end",
+                 rb"the input queue, claimed and given back"]
+        if graphics:
+            cases += [rb"printed while the screen is claimed",
+                      rb"the screen, claimed and given back"]
+        else:
+            cases += [rb"no screen"]
+        for case in cases + [rb"all passed"]:
+            m = q.expect(rb"^inputprobe: (?:(" + case + rb")|FAIL ([^\r\n]*))\r?\n", timeout=60)
+            if m.group(2) is not None:
+                raise Failure("inputprobe: %s" % m.group(2).decode(errors="replace"))
+        q.expect(rb"\] exited with 0")
+        q.expect(PROMPT)
+        if graphics:
+            # The probe painted the screen red while it held it: the console
+            # redraws everything when it comes back, text printed meanwhile
+            # included.
+            width, height, rgb = q.screendump("inputprobe")
+            red = sum(1 for i in range(0, len(rgb), 3) if rgb[i:i + 3] == b"\xff\x00\x00")
+            if red > width * height // 100:
+                raise Failure("the console did not redraw the screen it got back "
+                              "(%d red pixels)" % red)
+    yield "screen manager claims: an end signal, the input queue and the screen", \
+        screen_manager_claims
+
     def jobdemo():
         # One job, then one per core: the renderings must agree (the demo
         # checks), and with several cores the jobs must run in parallel. The
@@ -1032,11 +1062,11 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
     if stress:
         def stress_rounds():
             for _ in range(stress):
-                for check in (threads, thread_lifetime, kill_job, message_ports, signals, jobdemo,
-                              pindemo):
+                for check in (threads, thread_lifetime, kill_job, message_ports, signals,
+                              screen_manager_claims, jobdemo, pindemo):
                     check()
-        yield ("stress: %d rounds of threads, process lifetime, kill, message ports, signals and "
-               "both demos"
+        yield ("stress: %d rounds of threads, process lifetime, kill, message ports, signals, "
+               "screen manager claims and both demos"
                % stress), stress_rounds
 
     if repeat:
@@ -1081,6 +1111,50 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
             time.sleep(gap)
             q.monitor("sendkey shift-pgdn 10")
         yield "%s keyboard handles Shift, release, an arrow, editing and Enter" % keyboard, keyboard_input
+
+        def keylog():
+            # The debug console's keylog traces each event as it is taken: the
+            # device, the reader (the kernel console, read by the shell) and
+            # the key. Then inputprobe claims the queue: Meta+M goes to it
+            # (front: itself), not to the shell.
+            gap = 0.1 if keyboard == "USB" else 0.02
+            device = rb"(?:virtio|usb)-keyboard"
+            q.send("\x14")
+            q.expect(rb"koraos> ")
+            q.send("keylog on\r")
+            q.expect(rb"^keylog: on, events go to the kernel console")
+            q.send("\x14")
+            q.expect(rb"\[serial -> screen terminal")
+            q.monitor("sendkey shift-k 10")
+            q.expect(rb"^KeyDown from " + device + rb" to kernel console \(read by shell \(pid \d+\)\)\r?\n"
+                     rb"    time \d+ ms, keycode 0x0e \(K\), modifiers 0x0002 \(LShift\)\r?\n"
+                     rb"    char U\+004B \"K\", repeat no")
+            time.sleep(gap)
+            q.monitor("sendkey backspace 10")  # leave the shell's line empty
+            q.expect(rb"keycode 0x2a \(Backspace\)")
+            time.sleep(gap)
+            q.send("inputprobe keys 4\r")
+            q.expect(rb"^inputprobe: ready for 4 keys")
+            time.sleep(gap)
+            q.monitor("sendkey meta_l-m 10")
+            m = q.expect(rb"^KeyDown from " + device + rb" to inputprobe \(pid (\d+)\) -> "
+                         rb"front: inputprobe \(pid (\d+)\)\r?\n"
+                         rb"    time \d+ ms, keycode 0x10 \(M\), modifiers 0x0008 \(LGUI\)", timeout=20)
+            if m.group(1) != m.group(2):
+                raise Failure("keylog names another front process: %r" % m.group(0))
+            q.expect(rb"^inputprobe: key down 0x10 mods 0x0008 char 0x6d", timeout=20)
+            m = q.expect(rb"^inputprobe: (keys done|FAIL [^\r\n]*)", timeout=30)
+            if m.group(1) != b"keys done":
+                raise Failure(m.group(1).decode(errors="replace"))
+            q.expect(rb"\] exited with 0")
+            q.expect(PROMPT)
+            q.send("\x14")
+            q.expect(rb"koraos> ")
+            q.send("keylog off\r")
+            q.expect(rb"^keylog: off")
+            q.send("\x14")
+            q.expect(rb"\[serial -> screen terminal")
+        yield "keylog traces %s keys to the console and to a claimer (Meta+M)" % keyboard, keylog
 
     if not graphics:
         return

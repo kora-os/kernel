@@ -54,6 +54,11 @@
 #define sig_set libk_sig_set
 #define sig_send libk_sig_send
 #define port_signal libk_port_signal
+#define sig_on_end libk_sig_on_end
+#define input_claim libk_input_claim
+#define input_read libk_input_read
+#define input_focus libk_input_focus
+#define fb_claim libk_fb_claim
 #define wait libk_wait
 
 #endif // LIBK_HOST_RENAME_H

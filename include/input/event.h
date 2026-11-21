@@ -42,7 +42,10 @@ struct input_event {
     // The key as a position on the keyboard, whatever the layout prints on
     // it: a usage of the USB HID Keyboard/Keypad page (input/hid_keys.h).
     uint16_t keycode;
-    uint16_t reserved;
+    // The device that sent it: a number input_source_register() handed its
+    // driver (input/input.h), or 0 for none.
+    uint8_t source;
+    uint8_t reserved;
     // Key down: the Unicode character the key types under the layout, Shift,
     // Caps Lock and AltGr, or 0 for a key that types none (Enter, arrows,
     // modifiers). Ctrl, Alt and GUI do not change it. Key up: 0.

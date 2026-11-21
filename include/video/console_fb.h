@@ -42,3 +42,16 @@ void screen_scroll_view(int halfpages);
 // The active screen's framebuffer, or NULL if no console is active. Used by the
 // fb_info syscall to hand user programs the framebuffer geometry and address.
 const framebuffer_info_t *screen_framebuffer(void);
+
+// Hand the screen to process `pid` (a screen manager), which draws into the
+// framebuffer itself: the terminal keeps taking text but stops drawing until
+// the screen comes back. Returns 0, or -1 if there is no screen or another
+// process holds it. BKL held.
+int screen_claim(int pid);
+
+// Process `pid` gives the screen back, if it holds it (also when it ends):
+// the terminal redraws the whole screen. BKL held.
+void screen_release(int pid);
+
+// The process holding the screen, or 0 when the terminal draws it.
+int screen_owner(void);

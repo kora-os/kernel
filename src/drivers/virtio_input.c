@@ -30,6 +30,7 @@ static struct {
     uint8_t buffer_by_head[VIRTIO_QUEUE_MAX];
     struct virtio_keymap_state keymap;
     unsigned irq;
+    uint8_t source;  // input_source_register()'s number for its events
     bool attempted;
     bool active;
 } keyboard;
@@ -147,6 +148,7 @@ static void keyboard_events(void) {
         volatile const struct virtio_input_event *event = &keyboard.buffers[index];
         struct input_event key;
         if (virtio_keymap_event(&keyboard.keymap, event->type, event->code, event->value, &key)) {
+            key.source = keyboard.source;
             input_post(&key);
         }
         if (!post_event(index)) {
@@ -199,6 +201,7 @@ static bool initialize_keyboard(void) {
             stop_keyboard();
             return false;
         }
+        keyboard.source = (uint8_t)input_source_register("virtio-keyboard");
         keyboard.active = true;
         virtio_queue_notify(&keyboard.events);
         return true;

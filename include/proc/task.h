@@ -218,7 +218,8 @@ void wait_queue_wake_all(struct wait_queue *wq);
 // free).
 int task_sig_alloc(int bit);
 
-// Free signal `bit` of the calling thread; ports that set it stop (ipc/port.h).
+// Free signal `bit` of the calling thread; ports that set it stop (ipc/port.h),
+// so do its end watches (task_sig_on_end) and an input claim (input/input.h).
 // Returns 0, or -1 if it was not allocated.
 int task_sig_free(int bit);
 
@@ -238,6 +239,22 @@ uint32_t task_sig_set(uint32_t values, uint32_t mask);
 // waits for one. Returns 0, or -1 if there is no such live thread. Safe from
 // interrupt handlers.
 int task_signal(int tid, uint32_t mask);
+
+// Set the calling thread's signal `bit` when process `pid` ends (any
+// process, not only a child: SPAWN_SIGNAL is the same for one's own), once.
+// Watching it again changes the bit; -1 stops watching it. Returns 0, or -1
+// for a bit not allocated, a process that has already ended (or never was)
+// or a full table (TASK_END_WATCHES). Freeing the bit, or the thread's end,
+// stops its watches.
+#define TASK_END_WATCHES 64
+int task_sig_on_end(int pid, int bit);
+
+// The name and process id of live thread `tid`, or false if it has ended.
+// BKL held.
+bool task_describe(int tid, char name[TASK_NAME_MAX], int *pid);
+
+// The name of process `pid`, or false if it has ended. BKL held.
+bool proc_describe(int pid, char name[TASK_NAME_MAX]);
 
 // Called by the timer interrupt on every tick: wakes due sleepers and asks
 // for a reschedule (taken on the way back to EL0).

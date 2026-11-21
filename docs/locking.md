@@ -79,9 +79,13 @@ Take locks only in this order (a lock may be skipped, never taken backwards):
    interrupt handler
 4. `tty input` (`src/tty.c`): the console input queue, scrollback requests,
    and the condition readers sleep on
-5. `input events` (`src/input/input.c`): the input event queue. A leaf:
-   keyboard drivers post under their own locks and readers poll under
-   `tty input`, and the queue releases it before it wakes the readers
+5. `input events` (`src/input/input.c`): the input event queue, its claim
+   and its source names. A leaf: keyboard drivers post under their own locks
+   and the tty's readers poll under `tty input`, and the queue releases it
+   before it wakes the readers or signals the claimer (`sched`)
+   - `keylog` (`src/input/keylog.c`): the debug console's notes of the events
+     taken. A leaf, taken under `tty input`; the notes are printed later,
+     with no spinlock held
 6. `ports` (`src/ipc/port.c`): only hands a task waiting on a message port
    over to the scheduler; the ports and messages themselves are BKL-protected
 7. `sched` (`src/proc/task.c`): task states, wait queues, sleep deadlines

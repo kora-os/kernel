@@ -4,6 +4,8 @@
 #include "arch/trapframe.h"
 #include "common.h"
 #include "fs/fat32.h"
+#include "input/input.h"
+#include "input/keylog.h"
 #include "ipc/port.h"
 #include "lib/string.h"
 #include "proc/task.h"
@@ -434,6 +436,55 @@ static long sys_port_signal(int port, int bit) {
     return port_set_signal(proc_current(), port, task_current()->pid, bit);
 }
 
+// input_claim(bit): the calling thread becomes the input queue's consumer,
+// signalled on `bit`; -1 gives the queue back to the tty adapter.
+static long sys_input_claim(int bit) {
+    int tid = task_current()->pid;
+    if (bit == -1) {
+        input_release(tid);
+        return 0;
+    }
+    if (proc_current() == NULL || !task_sig_allocated(bit)) {
+        return -1;
+    }
+    return input_claim(tid, bit);
+}
+
+#define INPUT_READ_MAX 32
+
+// input_read(events, max): the claimer takes up to `max` queued events.
+static long sys_input_read(struct input_event *out, long max) {
+    if (max <= 0 || max > INPUT_READ_MAX ||
+        !uptr_ok((uint64_t)out, (size_t)max * sizeof(*out))) {
+        return -1;
+    }
+    struct input_event events[INPUT_READ_MAX];
+    int tid = task_current()->pid;
+    int count = input_take(tid, events, (int)max);
+    if (count > 0) {
+        int focus = input_focus();
+        for (int i = 0; i < count; i++) {
+            keylog_note(&events[i], KEYLOG_TO_CLAIMER, tid, focus);
+            out[i] = events[i];
+        }
+        keylog_flush();
+    }
+    return count;
+}
+
+// fb_claim(on): hand the screen to the calling process, or give it back.
+static long sys_fb_claim(long on) {
+    struct process *p = proc_current();
+    if (p == NULL) {
+        return -1;
+    }
+    if (on) {
+        return screen_claim(p->pid);
+    }
+    screen_release(p->pid);
+    return 0;
+}
+
 // std_handles(out): the caller's standard handles, out[0..2].
 static long sys_std_handles(struct std_handle *out) {
     struct process *p = proc_current();
@@ -706,6 +757,21 @@ void syscall_handle(struct trapframe *tf) {
         break;
     case SYS_port_signal:
         ret = sys_port_signal((int)a0, (int)a1);
+        break;
+    case SYS_sig_on_end:
+        ret = task_sig_on_end((int)a0, (int)a1);
+        break;
+    case SYS_input_claim:
+        ret = sys_input_claim((int)a0);
+        break;
+    case SYS_input_read:
+        ret = sys_input_read((struct input_event *)a0, (long)a1);
+        break;
+    case SYS_input_focus:
+        ret = input_set_focus(task_current()->pid, (int)a0);
+        break;
+    case SYS_fb_claim:
+        ret = sys_fb_claim((long)a0);
         break;
     default:
         ret = -1;

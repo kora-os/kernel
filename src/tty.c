@@ -9,6 +9,7 @@
 #include "console.h"
 #include "input/input.h"
 #include "input/input_tty.h"
+#include "input/keylog.h"
 #include "lib/panic.h"
 #include "arch/spinlock.h"
 #include "mini_uart.h"
@@ -55,6 +56,7 @@ static void drain_key_events(void) {
     struct input_event event;
     while (INPUT_QUEUE_SIZE - (input_head - input_tail) >= INPUT_TTY_MAX_BYTES &&
            input_poll(&event)) {
+        keylog_note(&event, KEYLOG_TO_CONSOLE, task_current()->pid, 0);
         struct input_tty_bytes out;
         input_tty_translate(&event, &out);
         for (unsigned i = 0; i < out.length; i++) {
@@ -184,6 +186,7 @@ int tty_getc(void) {
 long tty_read(char *buf, size_t len) {
     int ch = tty_getc();
     if (ch < 0) {
+        keylog_flush();
         return -1;  // killed: the task dies on its way back to EL0
     }
     buf[0] = (char)ch;
@@ -194,6 +197,7 @@ long tty_read(char *buf, size_t len) {
         n++;
     }
     spin_unlock_irqrestore(&input_lock, flags);
+    keylog_flush();  // the events taken, now that no lock is held
     return (long)n;
 }
 

@@ -38,6 +38,7 @@ struct hid_keyboard usb_keyboard;
 // Circle's keymap gives the character of a key under the layout picked at
 // build time (KORAOS_KEYMAP); it also keeps the Caps Lock and Num Lock state.
 CKeyMap *usb_keymap;
+static u8 usb_keyboard_source;  // input_source_register()'s number
 
 // The character a key types, as a Unicode code point, or 0 for none. Call
 // once for each key that goes down: Translate() is what toggles the locks.
@@ -69,6 +70,7 @@ void key_changed(void *, uint8_t usage, bool down, uint8_t modifiers) {
     struct input_event event = {};
     event.type = down ? INPUT_EVENT_KEY_DOWN : INPUT_EVENT_KEY_UP;
     event.keycode = usage;
+    event.source = usb_keyboard_source;
     if (down && usage < HID_KEY_LEFT_CTRL) {
         event.codepoint = key_character(
             usage, modifiers & (KEY_LSHIFT_MASK | KEY_RSHIFT_MASK | KEY_ALTGR_MASK));
@@ -159,6 +161,7 @@ void circle_usb_init(int enumerate) {
 
     static CKeyMap KeyMap;
     usb_keymap = &KeyMap;
+    usb_keyboard_source = (u8)input_source_register("usb-keyboard");
     pKeyboard->RegisterKeyStatusHandlerRaw(key_status_raw, FALSE /* raw only */);
     tfp_printf("circle: USB keyboard ready -- input goes to the screen terminal\n");
 }

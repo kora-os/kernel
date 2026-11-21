@@ -395,8 +395,9 @@ categories:
         description: A user task that owns the screen and the input queue and hosts the consoles programs run in.
       - id: framebuffer-handoff
         name: Framebuffer hand-off
-        status: planned
+        status: in_progress
         description: The kernel hands the framebuffer to one task and takes it back when that task exits or crashes.
+        prs: [104]
       - id: console-fonts
         name: Console fonts
         status: planned
@@ -457,7 +458,12 @@ categories:
         name: Input events
         status: in_progress
         description: Keys and mouse reach user space as structured events instead of bytes.
-        prs: [99]
+        prs: [99, 104]
+      - id: keylog
+        name: Key event trace
+        status: in_progress
+        description: The debug console's keylog shows each key event, xev style, with the device that sent it and the task that took it.
+        prs: [104]
       - id: mouse
         name: Mouse
         status: planned

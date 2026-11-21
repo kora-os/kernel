@@ -1,7 +1,8 @@
 # Console and screen plan (handover)
 
 Status: **steps 1 to 3 done** (step 3 as two PRs, 3a and 3b); **step 4 in
-progress** as three PRs, 4a (signals) done. It is the outcome of a design discussion on
+progress**: 4a (signals) done, 4b split into 4b1 (the kernel's part, in
+review) and 4b2 (the screen manager). It is the outcome of a design discussion on
 2026-11-12 and is the "terminal design" that `libc-plan.md` defers to koracli.
 No milestone number has been assigned yet.
 
@@ -187,13 +188,18 @@ flowchart TB
 - [ ] 4. Screen manager on top of the library, as three PRs:
   - [x] 4a. Signals: one thread waits on several ports, its children and
         other threads at once.
-  - [ ] 4b. The screen manager: the framebuffer handed to it and reclaimed
-        on a crash, screens with changed rectangles, Meta+M, input to the
-        front screen's owner. The kernel terminal becomes the boot and panic
-        fallback only.
+  - [ ] 4b. The screen manager, as two PRs:
+    - [ ] 4b1. The kernel's part: the input queue claimed by a thread and
+          signalling it, the screen handed over and taken back at the
+          holder's end, a signal at any process's end, and the debug
+          console's `keylog`.
+    - [ ] 4b2. The screen manager program: screens with changed rectangles,
+          Meta+M, input to the front screen's owner, `condemo` on a screen of
+          its own.
   - [ ] 4c. The shell as the first console client: a screen, the `CON:`
         handler with cooked and raw modes, line editing and history out of
-        `kgetline`, Ctrl+C to the foreground program.
+        `kgetline`, Ctrl+C to the foreground program. The kernel terminal
+        becomes the boot and panic fallback only.
   - Screens sliding down to show the one behind can follow, as 4d or later.
 - [ ] 5. Mouse events, then the graphics layer.
 
@@ -309,6 +315,44 @@ flowchart TB
   `sig_wait`; its 5 ms poll is gone.
 - **Not yet**: the input queue setting a signal. It has one consumer, the
   kernel's tty adapter, until the screen manager takes it over in 4b.
+
+## Step 4b decisions (2026-11-21)
+
+- **Two PRs**: 4b1 for the kernel, 4b2 for the screen manager program.
+- **No kernel console screen.** Until 4c makes the shell a client, the
+  manager does not show the kernel terminal as one of its screens: it is
+  started from the shell with the programs it hosts, the shell waits for it,
+  and it gives the screen and the keyboard back when it ends (or the kernel
+  takes them back if it crashes).
+- **Clients' ends**: a new syscall sets a signal when any process ends, so the
+  manager closes a crashed client's screen at once.
+- **`keylog on|off`** in the debug console traces each key event, xev style:
+  the device that sent it, who took it and, for a screen manager, the process
+  it says the events go on to (the front screen's owner).
+
+## Step 4b1 as built
+
+- **The input queue's claim** (`src/input/input.c`, syscalls 64 to 66): a
+  thread takes the events with `input_claim(bit)`; each queued event then
+  sets its signal, from the keyboard's interrupt, instead of waking the tty's
+  readers, and `input_read` takes up to 32 without sleeping. Events waiting at
+  the claim are the claimer's. The claim goes back to the tty adapter when the
+  thread gives it up, frees the bit or ends; the adapter takes what is left.
+  `input_focus(pid)` names the front screen's owner, for `keylog` only.
+- **Event sources**: drivers register a name (`virtio-keyboard`,
+  `usb-keyboard`) and stamp its number in the event's former reserved byte.
+- **The screen** (`src/video/console_fb.c`, syscall 67): `fb_claim(1)` stops
+  the kernel terminal drawing; it keeps taking text. `fb_claim(0)` or the
+  holder's end gives the screen back, and the terminal redraws all of it.
+- **`sig_on_end(pid, bit)`** (syscall 63): a signal at any process's end,
+  from a table of 64 watches, stopped by `-1`, `sig_free` or the watcher's
+  end.
+- **`keylog [on|off]`** (`src/input/keylog.c`): each event taken is noted
+  under the locks that take it and printed later with no spinlock held (by
+  the tty's reader or `input_read`), with the queue's drops and any notes
+  lost.
+- **Not yet**: the manager itself, its protocol and Meta+M (4b2). The kernel
+  gives events no meaning; Meta+M will be the manager's.
 
 ## Safety net
 

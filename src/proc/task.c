@@ -25,6 +25,7 @@
 #include "arch/systick.h"
 #include "user/elf.h"
 #include "fs/fat32.h"
+#include "input/input.h"
 #include "ipc/port.h"
 #include "mm.h"
 #include "mm/frame_alloc.h"
@@ -34,6 +35,7 @@
 #include "lib/printf.h"
 #include "lib/string.h"
 #include "lib/timer.h"
+#include "video/console_fb.h"
 
 #define KSTACK_SIZE (KSTACK_PAGES * PAGE_SIZE)
 #define KSTACK_FILL 0x6b6b6b6b6b6b6b6bull  // untouched kernel stack words
@@ -540,6 +542,96 @@ int task_signal(int tid, uint32_t mask) {
     return found ? 0 : -1;
 }
 
+// End watches (task_sig_on_end): whom to signal when a process ends. Under
+// sched_lock, as the signals they set.
+static struct {
+    int pid;  // the process watched; 0 for a free slot
+    int tid;  // the thread to signal
+    int bit;
+} end_watches[TASK_END_WATCHES];
+
+// Stop thread `tid`'s watches on signal `bit`, or all of them for -1.
+static void end_watches_drop(int tid, int bit) {
+    uint64_t flags = spin_lock_irqsave(&sched_lock);
+    for (int i = 0; i < TASK_END_WATCHES; i++) {
+        if (end_watches[i].pid != 0 && end_watches[i].tid == tid &&
+            (bit == -1 || end_watches[i].bit == bit)) {
+            end_watches[i].pid = 0;
+        }
+    }
+    spin_unlock_irqrestore(&sched_lock, flags);
+}
+
+// Under sched_lock: process `pid` ended, signal and forget its watchers.
+static void end_watches_fire(int pid) {
+    for (int i = 0; i < TASK_END_WATCHES; i++) {
+        if (end_watches[i].pid == pid) {
+            end_watches[i].pid = 0;
+            signal_locked(end_watches[i].tid, 1u << end_watches[i].bit);
+        }
+    }
+}
+
+int task_sig_on_end(int pid, int bit) {
+    int tid = current->pid;
+    if (bit != -1 && !task_sig_allocated(bit)) {
+        return -1;
+    }
+    // Under the BKL the process cannot end between this check and the watch.
+    struct process *p = proc_find(pid);
+    if (p == NULL || p->zombie) {
+        return -1;
+    }
+    uint64_t flags = spin_lock_irqsave(&sched_lock);
+    int slot = -1;
+    for (int i = 0; i < TASK_END_WATCHES; i++) {
+        if (end_watches[i].pid == pid && end_watches[i].tid == tid) {
+            slot = i;
+            break;
+        }
+        if (end_watches[i].pid == 0 && slot < 0) {
+            slot = i;
+        }
+    }
+    int result = 0;
+    if (bit == -1) {
+        if (slot >= 0 && end_watches[slot].pid == pid && end_watches[slot].tid == tid) {
+            end_watches[slot].pid = 0;
+        }
+    } else if (slot < 0) {
+        result = -1;
+    } else {
+        end_watches[slot].pid = pid;
+        end_watches[slot].tid = tid;
+        end_watches[slot].bit = bit;
+    }
+    spin_unlock_irqrestore(&sched_lock, flags);
+    return result;
+}
+
+bool task_describe(int tid, char name[TASK_NAME_MAX], int *pid) {
+    for (int i = 0; tid > 0 && i < MAX_TASKS; i++) {
+        task_t *t = &tasks[i];
+        if (t->pid == tid && (t->state == TASK_RUNNABLE || t->state == TASK_BLOCKED)) {
+            strncpy(name, t->name, TASK_NAME_MAX - 1);
+            name[TASK_NAME_MAX - 1] = '\0';
+            *pid = t->proc != NULL ? t->proc->pid : 0;
+            return true;
+        }
+    }
+    return false;
+}
+
+bool proc_describe(int pid, char name[TASK_NAME_MAX]) {
+    struct process *p = proc_find(pid);
+    if (p == NULL || p->zombie) {
+        return false;
+    }
+    strncpy(name, p->name, TASK_NAME_MAX - 1);
+    name[TASK_NAME_MAX - 1] = '\0';
+    return true;
+}
+
 int task_sig_alloc(int bit) {
     task_t *t = current;
     if (bit == -1) {
@@ -565,6 +657,8 @@ int task_sig_free(int bit) {
     t->sig_allocated &= ~(1u << bit);
     task_sig_set(0, 1u << bit);
     port_signal_freed(t->pid, bit);
+    input_signal_freed(t->pid, bit);
+    end_watches_drop(t->pid, bit);
     return 0;
 }
 
@@ -1082,7 +1176,12 @@ static void thread_die(long value) {
     fpsimd_release(me);
     me->exit_value = value;
     bool last = --p->threads == 0;
+    // A screen manager's claims go back to the kernel: the input queue with
+    // the thread that claimed it, the screen with the process.
+    input_release(me->pid);
+    end_watches_drop(me->pid, -1);
     if (last) {
+        screen_release(p->pid);
         // Its ports go, its queued messages are withdrawn, those it holds go
         // back to their senders.
         port_process_exit(p);
@@ -1107,6 +1206,7 @@ static void thread_die(long value) {
         if (p->notify_tid != 0) {
             signal_locked(p->notify_tid, 1u << p->notify_bit);
         }
+        end_watches_fire(p->pid);
     } else {
         for (int i = 0; i < MAX_TASKS; i++) {
             if (tasks[i].proc == p && blocked_for(&tasks[i], BLOCK_JOIN, me)) {
