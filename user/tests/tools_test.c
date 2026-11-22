@@ -54,6 +54,17 @@ static unsigned listing_size, listing_next;
 static int readdir_fails;
 static int spawn_result, child_exit_code;
 
+// The standard handles the kernel reports (have_handles 0: none, the kernel
+// console), and a console handler on port 5 that hands out `typed` in reads,
+// a line at a time, then the end of input.
+#define HANDLER_PORT 5
+static int have_handles;
+static struct std_handle handles[3];
+static const char *typed;
+static int modes_asked;
+static struct con_packet *pending;
+static int pending_reply;
+
 static const struct task_info tasks[] = {
     {.pid = 1, .ppid = 0, .core = 0, .state = TASK_SLEEPING, .name = "init", .tid = 1},
     {.pid = 12, .ppid = 2, .core = 3, .state = TASK_RUNNING, .name = "ps", .tid = 12},
@@ -93,9 +104,62 @@ static long kernel(long number, long a0, long a1, long a2, long a3) {
     case SYS_WAITPID:
         *(int *)a1 = child_exit_code;
         return a0;
+    case SYS_STD_HANDLES:
+        if (!have_handles) {
+            return -1;
+        }
+        memcpy((void *)a0, handles, sizeof(handles));
+        return 0;
+    case SYS_PORT_CREATE:
+        return 100;
+    case SYS_PORT_PUT: {
+        if (a0 != HANDLER_PORT) {
+            return -1;
+        }
+        struct con_packet *packet = (struct con_packet *)a1;
+        if (packet->op == CON_MODE) {
+            modes_asked++;
+            packet->result = packet->length == CON_COOKED ? 0 : -1;
+        } else if (packet->op == CON_READ) {
+            size_t n = 0;
+            while (n < packet->length && typed[n] && (n == 0 || typed[n - 1] != '\n')) {
+                ((char *)packet->buf)[n] = typed[n];
+                n++;
+            }
+            typed += n;
+            packet->result = (long)n;
+        } else {
+            packet->result = -1;
+        }
+        pending = packet;
+        pending_reply = (int)a2;
+        return 0;
+    }
+    case SYS_PORT_WAIT: {
+        struct port_message *out = (struct port_message *)a1;
+        CHECK(pending != NULL && a0 == pending_reply, "a packet comes back to its reply port");
+        *out = (struct port_message){pending, PORT_REPLY, 9};
+        pending = NULL;
+        return 1;
+    }
     default:
         return -1;
     }
+}
+
+// Give the program stdin as `handle`, and stdout and stderr as the console,
+// as if it had just started (the libc asks the kernel again).
+static void stdin_is(struct std_handle handle) {
+    fake_reset_std_streams();
+    have_handles = 1;
+    handles[0] = handle;
+    handles[1] = handles[2] = (struct std_handle){STD_CONSOLE, 0};
+}
+
+// Back to the kernel console for all three.
+static void console_stdin(void) {
+    fake_reset_std_streams();
+    have_handles = 0;
 }
 
 static void reset(void) {
@@ -202,7 +266,23 @@ static void test_cat(void) {
               fake_open_fds() == 0,
           "a directory opens but cannot be read");
     reset();
-    CHECK(RUN(cat, "cat") == 1 && printed("", "usage: cat <path>...\n"), "usage");
+    CHECK(RUN(cat, "cat") == 1 &&
+              printed("", "usage: cat [path...] (with no path, stdin: a file or a console window)\n"),
+          "with no path on the kernel console, which has no end of input: usage");
+
+    // With no path, stdin: a file, and a console window's lines to Ctrl+D.
+    reset();
+    put("in.txt", "from a file\nline two\n");
+    int in = open("in.txt", O_RDONLY);
+    stdin_is((struct std_handle){STD_FILE, in});
+    CHECK(RUN(cat, "cat") == 0 && printed("from a file\nline two\n", ""), "cat < file");
+    reset();
+    typed = "typed\nlines\n";
+    modes_asked = 0;
+    stdin_is((struct std_handle){STD_PORT, HANDLER_PORT});
+    CHECK(RUN(cat, "cat") == 0 && printed("typed\nlines\n", "") && modes_asked == 1,
+          "cat in a console window: its lines, to the end of input, in cooked mode");
+    console_stdin();
 
     // Binary data through short reads from the file and short console writes.
     reset();

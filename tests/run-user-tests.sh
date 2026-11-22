@@ -49,7 +49,8 @@ while IFS= read -r src; do
     obj="$OUT/libc/${name//\//_}.o"
     "$CC" "${LIBC_FLAGS[@]}" -c -o "$obj" "$src"
     objects+=("$obj")
-done < <(find "$LIBC/src" -name '*.c' -not -path '*/math/*' | sort; echo "$LIBC/tests/fake_syscall.c")
+done < <(find "$LIBC/src" -name '*.c' -not -path '*/math/*' | sort; echo "$LIBC/tests/fake_syscall.c";
+         echo "$LIBC/tests/fake_std.c")
 "$CC" "${USER_FLAGS[@]}" -c -o "$OUT/libk_host.o" "$ROOT/user/tests/libk_host.c"
 objects+=("$OUT/libk_host.o")
 
@@ -80,6 +81,8 @@ run_test tools
 run_test demos user/libk/job.c user/libscreen/screen.c
 run_test condemo user/libconsole/term.c user/libconsole/term_render.c user/libscreen/screen.c
 run_test screens user/libscreen/screen.c
+run_test console user/libscreen/console.c user/libscreen/screen.c user/libconsole/term.c \
+    user/libconsole/term_render.c user/libconsole/edit.c user/libconsole/keys.c
 run_test cp
 run_test shell_input
 

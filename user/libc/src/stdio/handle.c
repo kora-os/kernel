@@ -94,6 +94,17 @@ long __stdio_write_raw(FILE *f, const void *buf, size_t n) {
     return __syscall3(SYS_WRITE, f->fd, (long)buf, (long)n);
 }
 
+int __con_mode(int mode) {
+    __stdio_std_init();
+    if (stdin->port == 0) {
+        return -1;
+    }
+    __lock(&stdin->lock);
+    long result = transact(stdin, CON_MODE, NULL, (size_t)mode);
+    __unlock(&stdin->lock);
+    return result == 0 ? 0 : -1;
+}
+
 // POSIX isatty for the standard streams' numbers: whether stdin (0), stdout
 // (1) or stderr (2) is a console, the kernel's or a handler's. Files and every
 // other number are not.

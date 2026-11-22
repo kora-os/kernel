@@ -57,7 +57,13 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
     # The screen manager (screens) and the client side of its protocol
     # (user/libscreen), linked by the programs that open screens.
     set(LIBSCREEN_SOURCES "${USER_DIR}/libscreen/screen.c")
+    # A console on a screen: libscreen's console, the terminal and the line
+    # editor of libconsole.
+    set(CONSOLE_SOURCES "${USER_DIR}/libscreen/console.c" ${LIBSCREEN_SOURCES}
+        ${LIBCONSOLE_SOURCES})
     koraos_add_user_program(screens "${USER_DIR}/screens.c" FLAGS -Wextra -Werror)
+    koraos_add_user_program(newcon "${USER_DIR}/newcon.c" ${CONSOLE_SOURCES}
+        FLAGS -Wextra -Werror)
     koraos_add_user_program(gfxdemo "${USER_DIR}/gfxdemo.c" ${LIBSCREEN_SOURCES})
     koraos_add_user_program(condemo "${USER_DIR}/condemo.c" ${LIBCONSOLE_SOURCES}
         ${LIBSCREEN_SOURCES} FLAGS -Wextra -Werror)
@@ -75,6 +81,7 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
     koraos_add_user_program(inputprobe "${SOURCE_ROOT}/tests/user/inputprobe.c")
     koraos_add_user_program(screenprobe "${SOURCE_ROOT}/tests/user/screenprobe.c"
         ${LIBSCREEN_SOURCES})
+    koraos_add_user_program(conprobe "${SOURCE_ROOT}/tests/user/conprobe.c")
     koraos_add_user_program(nsprobe "${SOURCE_ROOT}/tests/user/nsprobe.c")
     koraos_add_user_program(writeprobe "${SOURCE_ROOT}/tests/user/writeprobe.c")
     koraos_add_user_program(libcprobe "${SOURCE_ROOT}/tests/user/libcprobe.c"

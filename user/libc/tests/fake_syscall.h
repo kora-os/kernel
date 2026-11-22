@@ -66,6 +66,10 @@ const char *fake_output(int fd, size_t *len);
 const char *fake_screen(size_t *len);
 unsigned fake_writes(int fd);
 void fake_reset_console(void);
+// Put stdin, stdout and stderr back as a program starts: unread, unbuffered
+// state cleared, their handles to be asked for again (SYS_STD_HANDLES). In
+// fake_std.c, which a test links when it needs it.
+void fake_reset_std_streams(void);
 // Each SYS_WRITE takes at most `n` bytes (0: no limit), like a short write.
 void fake_set_write_chunk(size_t n);
 // While `fail` is set, SYS_WRITE returns -1 and stores nothing.

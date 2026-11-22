@@ -75,6 +75,10 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
 - The screen manager is the user program `screens` (`user/screens.c`); its
   clients use `user/libscreen` (`screen_open`, `screen_damage`,
   `screen_event`). Screens are the manager's memory; Meta+M is its hotkey.
+- A console on a screen (`user/libscreen/console.c`, `newcon`) serves its
+  programs' packets; line editing is `user/libconsole/edit.c` and key bytes
+  `keys.c`, both pure (built into the kernel too, like `term.c`) and tested
+  on the host (`tests/host/edit_test.c`).
 - Use `run-qemu.sh` for rapid UART smoke tests; see the developer guide for hardware installation steps.
 - Documentation lives under `docs/`; do not store temporary todos there—use `project_doc/` for roadmap-level planning instead.
 

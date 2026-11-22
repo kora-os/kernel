@@ -342,6 +342,13 @@ static inline int spawn_std(const char *name, int argc, char *const argv[], int 
 /* Whether stdin (0), stdout (1) or stderr (2) is a console: the kernel's or a
  * console handler's, not a file. From the libc; any other number is not. */
 int isatty(int fd);
+/* A console handler's input mode, for stdin: CON_COOKED (the default: whole
+ * lines, edited and echoed by the console) or CON_RAW (each key as typed, no
+ * echo), as AmigaOS's CON: and RAW:. 0, or -1 when stdin is not a handler
+ * that has modes (the kernel console is always raw). */
+static inline int console_mode(int mode) {
+    return __con_mode(mode);
+}
 
 int waitpid(int pid, int *code, int flags);
 int getpid(void);  /* the program's pid, the same in all its threads */
