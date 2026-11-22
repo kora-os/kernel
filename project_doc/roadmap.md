@@ -352,8 +352,8 @@ four PRs; 4a is done: signals, so a thread waits on several ports, its
 children and other threads at once. 4b1 gives a program the input queue and
 the screen, taken back at its end, a signal at any process's end and the
 debug console's `keylog`; 4b2 is the screen manager itself (`screens`, with
-libscreen for its clients and Meta+M), 4c the shell as its first console
-client.
+libscreen for its clients and Meta+M), done; 4c the console handler with
+line editing (4c1) and the shell as its first client (4c2).
 
 ## QEMU virt development platform
 

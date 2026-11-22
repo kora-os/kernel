@@ -269,11 +269,11 @@ categories:
         description: A full-screen shell with a menu and a status bar.
       - id: line-editing
         name: Console line editing
-        status: planned
+        status: in_progress
         description: Line editing, history and a raw/cooked switch provided by the console to every program.
       - id: break-key
         name: Ctrl+C break
-        status: planned
+        status: in_progress
         description: Ctrl+C stops the program in the foreground of a console.
 
   - id: storage

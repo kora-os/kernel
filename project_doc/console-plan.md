@@ -1,8 +1,8 @@
 # Console and screen plan (handover)
 
 Status: **steps 1 to 3 done** (step 3 as two PRs, 3a and 3b); **step 4 in
-progress**: 4a (signals) and 4b1 (the kernel's part of the screen manager)
-done, 4b2 (the screen manager program) in review. It is the outcome of a design discussion on
+progress**: 4a (signals) and 4b (the screen manager) done; 4c split into
+4c1 (the console handler, in review) and 4c2 (the shell on it). It is the outcome of a design discussion on
 2026-11-12 and is the "terminal design" that `libc-plan.md` defers to koracli.
 No milestone number has been assigned yet.
 
@@ -166,7 +166,7 @@ flowchart TB
   (`user/shell.c`, converted in step 4c); koracli comes later, and a GUI's
   terminal windows are consoles too.
 - Line editing and history live in the client, with a raw/cooked switch, so
-  `kgetline` goes away (to be confirmed in step 4c). This also enables a
+  `kgetline` goes away (confirmed for step 4c). This also enables a
   C64-style screen editor: move the cursor anywhere, press Return, submit
   that line.
 - Two interfaces to a console:
@@ -197,13 +197,17 @@ flowchart TB
           signalling it, the screen handed over and taken back at the
           holder's end, a signal at any process's end, and the debug
           console's `keylog`.
-    - [ ] 4b2. The screen manager program: screens with changed rectangles,
+    - [x] 4b2. The screen manager program: screens with changed rectangles,
           Meta+M, input to the front screen's owner, `condemo` on a screen of
           its own.
-  - [ ] 4c. The shell as the first console client: a screen, the `CON:`
-        handler with cooked and raw modes, line editing and history out of
-        `kgetline`, Ctrl+C to the foreground program. The kernel terminal
-        becomes the boot and panic fallback only.
+  - [ ] 4c. The shell as the first console client, as two PRs:
+    - [ ] 4c1. The console handler: a console on a screen that serves its
+          programs' packets, cooked and raw modes, line editing and history,
+          Ctrl+C; `newcon` runs a program in one.
+    - [ ] 4c2. The shell on it: a screen of its own, init starting
+          `screens shell` with a display, Ctrl+C to the foreground program,
+          `kgetline` gone. The kernel terminal becomes the boot and panic
+          fallback only.
   - Screens sliding down to show the one behind can follow, as 4d or later.
 - [ ] 5. Mouse events, then the graphics layer.
 
@@ -395,6 +399,42 @@ flowchart TB
 - **Not yet**: screens of other sizes or depths, sliding screens (4d), a
   manager that survives its own crash (the clients' pixels are its memory),
   and the shell as a client (4c).
+
+## Step 4c decisions (2026-11-22)
+
+- **Line editing and history live in the console**, with cooked and raw
+  modes; `kgetline` goes away.
+- **The serial line stays separate.** A shell on a screen takes only keys;
+  runs without a display (and the QEMU tests that drive the shell over
+  serial) use the shell on the kernel console.
+- **init starts `screens shell`** when there is a display, the plain shell
+  otherwise.
+- **Ctrl+C kills** the foreground program.
+- **Two PRs**: 4c1 the console handler, 4c2 the shell on it.
+
+## Step 4c1 as built
+
+- **`user/libconsole/keys.c`**: key events to the bytes xterm sends
+  (arrows, Home, End, Delete, Ctrl codes, UTF-8), pure like `term.c`.
+- **`user/libconsole/edit.c`**: the line editor, pure and host-tested
+  through a real terminal. Cooked: echo, Left/Right, Home/End (Ctrl+A/E),
+  Backspace/Delete, Ctrl+U/K, Up/Down through 32 lines of history, Ctrl+D on
+  an empty line as the end of input, one line per read. Raw: bytes as typed,
+  no echo. Ctrl+C is a break in both. The echo keeps the terminal's cursor
+  where the editor counts it, wrapped lines included (rows by CSI A/B, the
+  column by CSI G).
+- **`user/libscreen/console.c`**: a console on a screen. It serves its
+  programs' packets (`CON_WRITE`, `CON_READ`, and the new `CON_MODE`), holds
+  reads until a line or a key is there, answers the reads of programs that
+  ended (`sig_on_end`), scrolls back with Shift+PageUp/PageDown, and copies
+  only the rows that changed.
+- **`console_mode(CON_RAW)`** in libk (`__con_mode` in the libc) switches a
+  program's console.
+- **`newcon program`** runs a program in a console on a screen of its own;
+  Ctrl+C kills it.
+- **Not yet**: the shell on it, init, and `kgetline`'s removal (4c2).
+  Program output that arrives while a line is half typed is not redrawn
+  around it.
 
 ## Safety net
 

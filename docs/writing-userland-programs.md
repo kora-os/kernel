@@ -103,6 +103,15 @@ A program runs in EL0 with a deliberately small runtime:
   `sig_wait(screen_signal(s))`. `screen_close`, or the program's end, closes
   it. [`user/gfxdemo.c`](../user/gfxdemo.c) is the smallest example, and
   draws straight into the framebuffer when no manager runs.
+- **Consoles.** A console on a screen (`user/libscreen/console.h`) is a
+  terminal its programs use as stdin, stdout and stderr: `newcon program`
+  runs one there. Reads are cooked by default: the console edits the line
+  (arrows, Home/End, history with Up/Down) and a read gets it once Enter is
+  pressed, with Ctrl+D as the end of input. `console_mode(CON_RAW)` hands
+  your program each key as typed instead, unechoed (arrows as xterm escape
+  sequences), and `console_mode(CON_COOKED)` goes back. Ctrl+C kills the
+  program. On the kernel console these do nothing: it is always raw, and
+  `kgetline` does the editing there.
 - **`main` signature.** Either `int main(void)` or `int main(int argc, char
   **argv)`; the libc's entry stub
   [`user/libc/src/crt/crt0.S`](../user/libc/src/crt/crt0.S) calls `main` and

@@ -359,7 +359,9 @@ are in [`<_libc/console.h>`](../user/libc/includes/_libc/console.h), which
   behaves as before; a file's stdout is fully buffered; a handler's stream
   sends it one `struct con_packet` per read or write (`CON_READ`, `CON_WRITE`,
   a buffer, a length) on a reply port of its own, and takes the `result` the
-  handler fills in before replying, as AmigaOS DOS packets. `isatty(0..2)`
+  handler fills in before replying, as AmigaOS DOS packets. `CON_MODE`
+  (`length` = `CON_COOKED` or `CON_RAW`) switches a console's input mode:
+  libk's `console_mode()` sends it for stdin. `isatty(0..2)`
   (libk) says whether a standard stream is a console, the kernel's or a
   handler's. Raw `read(0)` and `write(1)` still reach the kernel console.
 
@@ -433,6 +435,7 @@ struct spawn_request {     /* spawn_std()'s one argument */
 
 #define CON_WRITE 1
 #define CON_READ 2
+#define CON_MODE 3         /* length: CON_COOKED (0) or CON_RAW (1) */
 
 struct con_packet {        /* the libc to a console handler */
     int op;                /* CON_WRITE or CON_READ */
