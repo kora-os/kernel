@@ -431,7 +431,10 @@ flowchart TB
 - **`console_mode(CON_RAW)`** in libk (`__con_mode` in the libc) switches a
   program's console.
 - **`newcon program`** runs a program in a console on a screen of its own;
-  Ctrl+C kills it.
+  Ctrl+C kills it. `cat` with no path copies stdin when it can end (a console
+  window, where Ctrl+D ends it, or a file), so `screens newcon cat` echoes
+  lines; on the kernel console, which has no end of input, it prints its
+  usage.
 - **Not yet**: the shell on it, init, and `kgetline`'s removal (4c2).
   Program output that arrives while a line is half typed is not redrawn
   around it.

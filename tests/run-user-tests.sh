@@ -49,7 +49,8 @@ while IFS= read -r src; do
     obj="$OUT/libc/${name//\//_}.o"
     "$CC" "${LIBC_FLAGS[@]}" -c -o "$obj" "$src"
     objects+=("$obj")
-done < <(find "$LIBC/src" -name '*.c' -not -path '*/math/*' | sort; echo "$LIBC/tests/fake_syscall.c")
+done < <(find "$LIBC/src" -name '*.c' -not -path '*/math/*' | sort; echo "$LIBC/tests/fake_syscall.c";
+         echo "$LIBC/tests/fake_std.c")
 "$CC" "${USER_FLAGS[@]}" -c -o "$OUT/libk_host.o" "$ROOT/user/tests/libk_host.c"
 objects+=("$OUT/libk_host.o")
 

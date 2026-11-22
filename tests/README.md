@@ -338,7 +338,8 @@ front probe only, Meta+M switches, Escape closes each, and `condemo` and
 runs a program in a console: a line edited with an arrow, recalled with Up,
 edited with Backspace and Home, Ctrl+D as the end of input and raw mode's
 bytes, each reported by `conprobe` on the serial line; then Ctrl+C kills
-`conprobe hang`. `--repeat N` runs `allocprobe` N times: page runs, a `malloc`
+`conprobe hang`, and `cat` copies typed lines until Ctrl+D. `cat` alone on
+the kernel console prints its usage, and `cat < file` copies the file. `--repeat N` runs `allocprobe` N times: page runs, a `malloc`
 heap grown to about 1.5 MiB with churn and `realloc`, a nested child while it is
 live, and deliberate leaks. The kernel heap's live count and the free page count
 must be the same after the last run as after the first, so everything a reaped

@@ -327,7 +327,12 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         q.send("cat /docs/a-long-file-name.txt\r")
         q.expect(rb"long-filename \(LFN\)")
         q.expect(PROMPT)
-    yield "cat reads a long-filename file", cat
+        # With no path, on the kernel console, which has no end of input.
+        q.send("cat\r")
+        q.expect(rb"^usage: cat \[path\.\.\.\]")
+        q.expect(rb"exited with 1")
+        q.expect(PROMPT)
+    yield "cat reads a long-filename file; alone on the kernel console, its usage", cat
 
     def namespace():
         q.send("nsprobe%s\r" % (" extras" if multi_volume else ""))
@@ -468,6 +473,11 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
             file_is("RD.TXT", [b"redirected words"])
             run("echo appended >>RD.TXT", 1)
             file_is("RD.TXT", [b"redirected words", b"appended"])
+            q.send("cat < RD.TXT\r")  # with no path: stdin, here a file
+            q.expect(rb"^redirected words\r?$")
+            q.expect(rb"^appended\r?$")
+            q.expect(rb"exited with 0\r?$")
+            q.expect(PROMPT)
             q.send("libcprobe handles\r")
             q.expect(rb"^libcprobe: isatty 1 1 1, stdin EOF\r?$")
             q.expect(rb"^inherited\r?$")
@@ -477,7 +487,8 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
             run("libcprobe handles < RD.TXT > HANDLES.TXT")
             file_is("HANDLES.TXT", [b"libcprobe: isatty 0 0 1, stdin redirected words", b"inherited"])
             run("rm RD.TXT HANDLES.TXT")
-        yield "shell redirection: > and >> to a file, < from one, isatty, inherited by a child", redirection
+        yield ("shell redirection: > and >> to a file, < from one (cat too), isatty, inherited by a "
+               "child"), redirection
 
     def debug_console():
         q.send("\x14")  # Ctrl-T
@@ -1437,6 +1448,26 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
             q.expect(rb"exited with 0")
             q.expect(PROMPT)
         yield "console: Ctrl+C kills the program (%s)" % keyboard, console_break
+
+        def console_cat():
+            # cat with no path in a console window copies the lines typed
+            # until Ctrl+D; its output shows only on the screen.
+            q.send("screens newcon cat\r")
+            q.expect(rb"run 'cat'", timeout=30)
+            time.sleep(0.3)
+            for k in ("h", "i", "ret"):
+                press(k)
+            time.sleep(0.2)
+            width, height, rgb = q.screendump("newcon-cat")
+            lit = sum(1 for i in range(0, len(rgb), 3 * 5) if rgb[i:i + 3] != b"\x00\x00\x00")
+            if lit < 10:
+                raise Failure("cat's window shows nothing (%d lit pixels sampled)" % lit)
+            press("ctrl-d")
+            q.expect(rb"newcon: cat exited with 0")
+            q.expect(rb"screens: done")
+            q.expect(rb"exited with 0")
+            q.expect(PROMPT)
+        yield "console: cat copies typed lines until Ctrl+D (%s)" % keyboard, console_cat
 
 
 def main():
