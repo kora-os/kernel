@@ -31,7 +31,8 @@ static unsigned asked;
 static char shown[512];
 static size_t shown_len;
 static const char *typed;  // what a CON_READ hands out, a byte at a time per request
-static unsigned packets, writes, reads, reply_ports;
+static unsigned packets, writes, reads, modes, reply_ports;
+static long last_mode = -1, mode_result;
 static int handler_gone, return_unhandled;
 static struct {
     void *msg;
@@ -82,6 +83,11 @@ static long kernel(long number, long a0, long a1, long a2, long a3) {
                 memcpy(p->buf, typed, n);
                 typed += n;
                 p->result = (long)n;
+            } else if (p->op == CON_MODE) {
+                modes++;
+                CHECK(p->buf == NULL, "a mode packet carries no buffer");
+                last_mode = (long)p->length;
+                p->result = mode_result;
             }
         }
         pending.msg = p;
@@ -123,7 +129,9 @@ static void reset(void) {
     asked = 0;
     shown_len = 0;
     shown[0] = '\0';
-    packets = writes = reads = reply_ports = 0;
+    packets = writes = reads = modes = reply_ports = 0;
+    last_mode = -1;
+    mode_result = 0;
     handler_gone = return_unhandled = 0;
     pending.msg = NULL;
 }
@@ -270,4 +278,28 @@ static void test_freopen(void) {
     fclose(stdout);
 }
 
-TEST_MAIN(test_console, test_files, test_console_handler, test_freopen)
+static void test_modes(void) {
+    reset();
+    CHECK(__con_mode(CON_RAW) == -1 && packets == 0, "the kernel console has no modes");
+    reset();
+    have_handles = 1;
+    set(0, STD_FILE, open_file("modes.txt", 0x102));  // O_RDWR | O_CREAT
+    set(1, STD_CONSOLE, 0);
+    set(2, STD_CONSOLE, 0);
+    CHECK(__con_mode(CON_RAW) == -1 && packets == 0, "nor has a file");
+    reset();
+    have_handles = 1;
+    set(0, STD_PORT, HANDLER_PORT);
+    set(1, STD_CONSOLE, 0);
+    set(2, STD_CONSOLE, 0);
+    CHECK(__con_mode(CON_RAW) == 0 && modes == 1 && last_mode == CON_RAW,
+          "a handler's stdin gets a CON_MODE packet");
+    CHECK(__con_mode(CON_COOKED) == 0 && modes == 2 && last_mode == CON_COOKED, "and back");
+    mode_result = -1;
+    CHECK(__con_mode(CON_RAW) == -1, "a handler without modes refuses");
+    mode_result = 0;
+    handler_gone = 1;
+    CHECK(__con_mode(CON_RAW) == -1, "a handler that is gone");
+}
+
+TEST_MAIN(test_console, test_files, test_console_handler, test_freopen, test_modes)

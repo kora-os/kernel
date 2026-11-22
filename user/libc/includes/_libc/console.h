@@ -25,12 +25,23 @@ struct std_handle {
 // `buf` until it replies, and not after.
 #define CON_WRITE 1
 #define CON_READ 2
+// The console's input mode, in `length`: CON_COOKED (lines, edited and
+// echoed by the console, the default) or CON_RAW (keys as typed, no echo).
+// `buf` is unused; `result` is 0, or -1 for a handler without modes.
+#define CON_MODE 3
+#define CON_COOKED 0
+#define CON_RAW 1
 
 struct con_packet {
-    int op;               // CON_WRITE or CON_READ
+    int op;               // CON_WRITE, CON_READ or CON_MODE
     long result;
     void *buf;
     unsigned long length;
 };
+
+// Set the input mode (CON_COOKED or CON_RAW) of the console handler that
+// stdin is: 0, or -1 when stdin is the kernel console (always raw), a file,
+// or a handler that has no modes.
+int __con_mode(int mode);
 
 #endif // _LIBC_CONSOLE_H
