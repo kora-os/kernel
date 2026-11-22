@@ -271,10 +271,12 @@ categories:
         name: Console line editing
         status: in_progress
         description: Line editing, history and a raw/cooked switch provided by the console to every program.
+        prs: [106]
       - id: break-key
         name: Ctrl+C break
         status: in_progress
         description: Ctrl+C stops the program in the foreground of a console.
+        prs: [106]
 
   - id: storage
     name: Storage and filesystems
