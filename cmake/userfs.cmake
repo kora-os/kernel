@@ -57,7 +57,13 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
     # The screen manager (screens) and the client side of its protocol
     # (user/libscreen), linked by the programs that open screens.
     set(LIBSCREEN_SOURCES "${USER_DIR}/libscreen/screen.c")
+    # A console on a screen: libscreen's console, the terminal and the line
+    # editor of libconsole.
+    set(CONSOLE_SOURCES "${USER_DIR}/libscreen/console.c" ${LIBSCREEN_SOURCES}
+        ${LIBCONSOLE_SOURCES})
     koraos_add_user_program(screens "${USER_DIR}/screens.c" FLAGS -Wextra -Werror)
+    koraos_add_user_program(newcon "${USER_DIR}/newcon.c" ${CONSOLE_SOURCES}
+        FLAGS -Wextra -Werror)
     koraos_add_user_program(gfxdemo "${USER_DIR}/gfxdemo.c" ${LIBSCREEN_SOURCES})
     koraos_add_user_program(condemo "${USER_DIR}/condemo.c" ${LIBCONSOLE_SOURCES}
         ${LIBSCREEN_SOURCES} FLAGS -Wextra -Werror)

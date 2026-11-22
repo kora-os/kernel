@@ -80,6 +80,8 @@ run_test tools
 run_test demos user/libk/job.c user/libscreen/screen.c
 run_test condemo user/libconsole/term.c user/libconsole/term_render.c user/libscreen/screen.c
 run_test screens user/libscreen/screen.c
+run_test console user/libscreen/console.c user/libscreen/screen.c user/libconsole/term.c \
+    user/libconsole/term_render.c user/libconsole/edit.c user/libconsole/keys.c
 run_test cp
 run_test shell_input
 
