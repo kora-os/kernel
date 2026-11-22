@@ -30,6 +30,10 @@ ALLOWED = {
     "tests/user/fpprobe.c": (
         {"write(1)"},
         "no libc code may run while it checks the FP registers, stdio included"),
+    "tests/user/conprobe.c": (
+        {"write(1)"},
+        "its stdio is the console it tests; it reports to the kernel console, "
+        "which the smoke test reads on the serial line"),
     "tests/user/threadprobe.c": (
         {"read(0)", "write(1)"},
         "it tests the kernel: a thread blocked in a console read, and whole "

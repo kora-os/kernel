@@ -1391,6 +1391,53 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
             q.expect(PROMPT)
         yield "screens: condemo and gfxdemo on screens of their own (%s)" % keyboard, demos_on_screens
 
+        def console_lines():
+            # A console on a screen (newcon) edits the lines conprobe reads:
+            # a cursor move, the history, Backspace and Home, then Ctrl+D ends
+            # the input, and raw mode hands over each key's bytes. conprobe
+            # reports on the serial line; the console shows its text.
+            q.send("screens newcon conprobe\r")
+            q.expect(rb"conprobe: isatty 1 1 1", timeout=30)
+            time.sleep(0.3)
+            for k in ("h", "i", "left", "x", "ret"):
+                press(k)
+            q.expect(rb"^conprobe: line <hxi>")
+            for k in ("up", "ret"):
+                press(k)
+            q.expect(rb"^conprobe: line <hxi>")
+            for k in ("a", "b", "c", "backspace", "home", "z", "ret"):
+                press(k)
+            q.expect(rb"^conprobe: line <zab>")
+            width, height, rgb = q.screendump("newcon")
+            lit = sum(1 for i in range(0, len(rgb), 3 * 5) if rgb[i:i + 3] != b"\x00\x00\x00")
+            if lit < 50:
+                raise Failure("the console shows no text (%d lit pixels sampled)" % lit)
+            press("ctrl-d")
+            q.expect(rb"^conprobe: end of input")
+            time.sleep(0.2)
+            for k in ("q", "up", "ret", "backspace"):
+                press(k)
+            q.expect(rb"^conprobe: raw 71 1b 5b 41 0a 7f")
+            q.expect(rb"^conprobe: done")
+            q.expect(rb"newcon: conprobe exited with 0")
+            q.expect(rb"screens: done")
+            q.expect(rb"exited with 0")
+            q.expect(PROMPT)
+        yield "console: line editing, history, end of input and raw mode (%s)" % keyboard, \
+            console_lines
+
+        def console_break():
+            # Ctrl+C in the console kills its program.
+            q.send("screens newcon conprobe hang\r")
+            q.expect(rb"conprobe: hanging", timeout=30)
+            time.sleep(0.2)
+            press("ctrl-c")
+            q.expect(rb"newcon: conprobe exited with -9")
+            q.expect(rb"screens: done")
+            q.expect(rb"exited with 0")
+            q.expect(PROMPT)
+        yield "console: Ctrl+C kills the program (%s)" % keyboard, console_break
+
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__.split("\n")[0])
