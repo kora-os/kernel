@@ -355,6 +355,16 @@ static void test_lending(void) {
     ask(SCREEN_RETURN, NULL, 10);
     CHECK(watched[10] && fb_held, "and keeps its watch for its screen");
 
+    // A borrower whose screen closes is still watched for the lend.
+    struct screen *own = open_for(45, "borrower's");
+    CHECK(ask(SCREEN_LEND, NULL, 45).result == 0, "a program with a screen borrows");
+    ask(SCREEN_CLOSE, own, 45);
+    CHECK(watched[45] && lent_to == 45, "its screen closed, it is still watched");
+    ended[45] = 1;
+    close_ended();
+    CHECK(lent_to == 0 && fb_held && display_is(a),
+          "so its end brings the display back");
+
     ask(SCREEN_CLOSE, a, 10);
     CHECK(ask(SCREEN_LEND, NULL, 44).result == 0 && ask(SCREEN_RETURN, NULL, 44).result == 0 &&
           !fb_held && input_held_bit == -1, "with no screen open, nothing is taken back");

@@ -136,6 +136,10 @@ static long kernel(long number, long a0, long a1, long a2, long a3) {
         return 0;
     case SYS_SIG_WAIT:
         CHECK(a0 == (SIG_MASK(END_BIT) | SIG_MASK(SIG_BREAK)), "it waits for the end or Ctrl+C");
+        if (waits >= 10) {  // a break that kills nothing: end the test's child anyway
+            CHECK(false, "the shell kills its foreground program on Ctrl+C");
+            child_killed = true;
+        }
         return waits++ == 0 ? SIG_MASK(SIG_BREAK) : SIG_MASK(END_BIT);
     default:
         return -1;
