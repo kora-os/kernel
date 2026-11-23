@@ -9,6 +9,12 @@
  * brings the next one there, and the keys go to the program whose screen is
  * in front, as events (<libk/koraos.h>'s struct input_event).
  *
+ * The manager draws the mouse pointer over the front screen, and its
+ * program gets the mouse's events too (INPUT_EVENT_MOUSE): x and y are the
+ * pointer's position on the screen, in pixels (INPUT_FLAG_ABSOLUTE is not
+ * set), with the buttons held and the wheel's turn. Moves the program has not
+ * taken yet are merged: it gets where the pointer is, not every step.
+ *
  *   screen_t *s = screen_open("mydemo");   NULL: no screen manager runs
  *   ... draw into s->pixels (s->width x s->height, s->pitch bytes a row) ...
  *   screen_damage(s, 0, 0, s->width, s->height);
@@ -41,8 +47,8 @@
 
 #define SCREEN_TITLE_MAX 32
 
-/* Key events for a screen's program: a message from the manager, in its
- * memory, on the screen's port. The program reads them and replies. */
+/* Key and mouse events for a screen's program: a message from the manager,
+ * in its memory, on the screen's port. The program reads them and replies. */
 struct screen_events {
     int count;
     struct input_event events[SCREEN_BATCH];
@@ -96,7 +102,8 @@ screen_t *screen_open(const char *title);
 /* The signal mask that the screen's events, and the manager's end, set. */
 unsigned screen_signal(const screen_t *s);
 
-/* Take the oldest key event for the screen: 1, or 0 when there is none. */
+/* Take the oldest event for the screen, a key's or the mouse's: 1, or 0
+ * when there is none. */
 int screen_event(screen_t *s, struct input_event *event);
 
 /* Whether the manager has ended: the screen is gone, nothing more shows and

@@ -5,8 +5,9 @@
 // stay untouched) from the programs' own pixels, Meta+M, where the keys go
 // (messages on the screen's port, one out at a time, the rest waiting, a
 // full queue), messages back after their screen closed or their program
-// ended, screens closed by their programs or by their ends, lending, and how
-// it starts its programs.
+// ended, screens closed by their programs or by their ends, lending, the
+// pointer (drawn over the front screen, hidden while typing, moves merged,
+// mouse events in the screen's pixels), and how it starts its programs.
 
 #include "test.h"
 
@@ -267,12 +268,6 @@ static void test_two_screens_and_keys(void) {
               taken(10) == NULL,
           "and goes to it as a message on its port");
 
-    // Mouse events go to no program yet (step 5b).
-    struct input_event click = {.type = INPUT_EVENT_MOUSE, .buttons = INPUT_BUTTON_LEFT, .x = 4};
-    unsigned before = b->head;
-    route(&click);
-    CHECK(b->head == before && a->head == 0, "a mouse event is delivered to nobody");
-
     // Meta+M: the next screen, wrapping round; the M is the manager's.
     struct input_event m_down = key(INPUT_EVENT_KEY_DOWN, KEY_M, INPUT_MOD_LEFT_GUI);
     struct input_event m_up = key(INPUT_EVENT_KEY_UP, KEY_M, INPUT_MOD_LEFT_GUI);
@@ -477,6 +472,185 @@ static void test_lending(void) {
           !fb_held && input_held_bit == -1, "with no screen open, nothing is taken back");
 }
 
+// The display is the screen with the pointer drawn at x, y over it, clipped,
+// the padding untouched.
+static int display_with_pointer(const struct screen *screen, int px, int py) {
+    for (int y = 0; y < HEIGHT; y++) {
+        for (int x = 0; x < STRIDE; x++) {
+            unsigned want = x >= WIDTH ? UNTOUCHED : screen->pixels[y * (screen->pitch / 4) + x];
+            int col = x - px, row = y - py;
+            if (x < WIDTH && col >= 0 && col < POINTER_WIDTH && row >= 0 && row < POINTER_HEIGHT &&
+                pointer_shape[row][col] != ' ') {
+                want = pointer_shape[row][col] == 'X' ? POINTER_EDGE : POINTER_FILL;
+            }
+            if (shown(x, y) != want) {
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+static struct input_event moved_by(int dx, int dy, int buttons) {
+    return (struct input_event){.type = INPUT_EVENT_MOUSE, .x = (short)dx, .y = (short)dy,
+                                .buttons = (unsigned char)buttons};
+}
+
+static struct input_event moved_to(int x, int y) {
+    return (struct input_event){.type = INPUT_EVENT_MOUSE, .flags = INPUT_FLAG_ABSOLUTE,
+                                .x = (short)x, .y = (short)y};
+}
+
+// Every event the manager sends pid's program from now, each message replied.
+static int received(int pid, struct input_event *events, int max) {
+    int n = 0;
+    send_all();
+    struct screen_events *e;
+    while ((e = taken(pid)) != NULL) {
+        for (int i = 0; i < e->count && n < max; i++) {
+            events[n++] = e->events[i];
+        }
+        batch_back(e);
+    }
+    return n;
+}
+
+static int is_mouse(const struct input_event *e, int x, int y, int buttons, int wheel) {
+    return e->type == INPUT_EVENT_MOUSE && e->flags == 0 && e->x == x && e->y == y &&
+           e->buttons == buttons && e->wheel == wheel;
+}
+
+static void test_pointer(void) {
+    reset_display();
+    pointer_init();
+    struct screen *a = open_for(50, "pointer");
+    fill(a, 0, 0, WIDTH, HEIGHT, RED);
+    damage(a, 50, 0, 0, WIDTH, HEIGHT, 0);
+    CHECK(!pointer_shown && pointer_x == WIDTH / 2 && pointer_y == HEIGHT / 2 && display_is(a),
+          "the pointer starts hidden, in the middle");
+
+    struct input_event got[8];
+    struct input_event e = moved_by(0, 0, 0);
+    e.wheel = -1;
+    route(&e);
+    int n = received(50, got, 8);
+    CHECK(n == 1 && is_mouse(&got[0], WIDTH / 2, HEIGHT / 2, 0, -1) && !pointer_shown &&
+              display_is(a),
+          "the wheel alone goes to the program at the pointer, which stays hidden");
+
+    e = moved_by(-30, -4, 0);
+    route(&e);
+    CHECK(pointer_shown && pointer_x == 2 && pointer_y == 20 && display_with_pointer(a, 2, 20),
+          "a move shows the pointer over the front screen");
+    n = received(50, got, 8);
+    CHECK(n == 1 && is_mouse(&got[0], 2, 20, 0, 0), "and the program gets its position (%d)", n);
+
+    // Moves the program has not taken are merged; a click is not, and stays
+    // where it was.
+    route(&e);  // out: the message is the program's
+    send_all();
+    struct screen_events *out = taken(50);
+    CHECK(out != NULL && pointer_x == 0 && pointer_y == 16, "clamped at the left");
+    e = moved_by(1, 0, 0);
+    route(&e);
+    route(&e);
+    e = moved_by(0, 1, 0);
+    route(&e);
+    CHECK(a->head - a->tail == 1 && a->pending[a->tail % SCREEN_PENDING].x == 2 &&
+              a->pending[a->tail % SCREEN_PENDING].y == 17,
+          "three moves wait as one, where the pointer is");
+    e = moved_by(0, 0, INPUT_BUTTON_LEFT);
+    route(&e);
+    e = moved_by(1, 0, INPUT_BUTTON_LEFT);
+    route(&e);
+    route(&e);
+    e = moved_by(0, 0, 0);
+    route(&e);
+    route(&e);  // nothing changed: nothing sent
+    batch_back(out);
+    n = received(50, got, 8);
+    CHECK(n == 4 && is_mouse(&got[0], 2, 17, 0, 0) &&
+              is_mouse(&got[1], 2, 17, INPUT_BUTTON_LEFT, 0) &&
+              is_mouse(&got[2], 4, 17, INPUT_BUTTON_LEFT, 0) && is_mouse(&got[3], 4, 17, 0, 0),
+          "a click where it was, a drag merged, the release (%d)", n);
+    CHECK(display_with_pointer(a, 4, 17), "drawn where it went, the screen shown where it was");
+
+    e = moved_by(1000, 1000, 0);
+    route(&e);
+    CHECK(pointer_x == WIDTH - 1 && pointer_y == HEIGHT - 1 &&
+              display_with_pointer(a, WIDTH - 1, HEIGHT - 1),
+          "clamped at the bottom right, drawn clipped, the padding untouched");
+    e = moved_by(5, 3, 0);
+    route(&e);
+    n = received(50, got, 8);
+    CHECK(n == 1 && is_mouse(&got[0], WIDTH - 1, HEIGHT - 1, 0, 0),
+          "a move against the edge goes nowhere and is not sent");
+
+    e = moved_to(INPUT_ABS_MAX / 2 + 1, 0);
+    route(&e);
+    CHECK(pointer_x == WIDTH / 2 && pointer_y == 0 && display_with_pointer(a, WIDTH / 2, 0),
+          "a tablet's position is scaled to the display (%d,%d)", pointer_x, pointer_y);
+    e = moved_to(INPUT_ABS_MAX, INPUT_ABS_MAX);
+    route(&e);
+    n = received(50, got, 8);
+    CHECK(pointer_x == WIDTH - 1 && pointer_y == HEIGHT - 1 && n == 1 &&
+              is_mouse(&got[0], WIDTH - 1, HEIGHT - 1, 0, 0),
+          "its far corner is the display's, in pixels, not absolute (the two moves merged)");
+
+    e = moved_to(INPUT_ABS_MAX / 4 + 1, INPUT_ABS_MAX / 4 + 1);
+    route(&e);
+    fill(a, 0, 0, WIDTH, HEIGHT, BLUE);
+    damage(a, 50, 0, 0, WIDTH / 2, HEIGHT / 2, 0);
+    CHECK(display_with_pointer(a, WIDTH / 4, HEIGHT / 4) == 0 && shown(0, 0) == BLUE &&
+              shown(WIDTH / 4, HEIGHT / 4) == POINTER_EDGE,
+          "damage under the pointer leaves it on top");
+    damage(a, 50, 0, 0, WIDTH, HEIGHT, 0);
+    CHECK(display_with_pointer(a, WIDTH / 4, HEIGHT / 4), "all of it");
+    received(50, got, 8);
+
+    struct screen *b = open_for(51, "other");
+    CHECK(front == b && display_with_pointer(b, WIDTH / 4, HEIGHT / 4),
+          "a screen that comes to front has the pointer over it");
+    e = moved_by(2, 2, 0);
+    route(&e);
+    CHECK(received(51, got, 8) == 1 && received(50, got, 8) == 0,
+          "mouse events go to the front screen's program only");
+
+    struct input_event shift = key(INPUT_EVENT_KEY_DOWN, KEY_LEFT_CTRL + 1, INPUT_MOD_LEFT_SHIFT);
+    route(&shift);
+    CHECK(pointer_shown && display_with_pointer(b, WIDTH / 4 + 2, HEIGHT / 4 + 2),
+          "a modifier alone keeps it shown (Shift+click)");
+    struct input_event typed_a = key(INPUT_EVENT_KEY_DOWN, KEY_A, INPUT_MOD_LEFT_SHIFT);
+    route(&typed_a);
+    CHECK(!pointer_shown && display_is(b), "typing hides it");
+    struct input_event meta_m = key(INPUT_EVENT_KEY_DOWN, KEY_M, INPUT_MOD_LEFT_GUI);
+    route(&meta_m);
+    CHECK(front == a && display_is(a), "and it stays hidden on the next screen");
+    e = moved_by(0, 0, INPUT_BUTTON_RIGHT);
+    route(&e);
+    CHECK(pointer_shown && display_with_pointer(a, WIDTH / 4 + 2, HEIGHT / 4 + 2),
+          "a click shows it again, where it was");
+    n = received(50, got, 8);
+    CHECK(n == 1 && is_mouse(&got[0], WIDTH / 4 + 2, HEIGHT / 4 + 2, INPUT_BUTTON_RIGHT, 0),
+          "and goes to the new front's program");
+    received(51, got, 8);
+
+    CHECK(ask(SCREEN_LEND, NULL, 52).result == 0 && !pointer_drawn,
+          "lent: the console draws over it");
+    for (unsigned i = 0; i < HEIGHT * STRIDE; i++) {
+        display_pixels[i] = UNTOUCHED;
+    }
+    ask(SCREEN_RETURN, NULL, 52);
+    CHECK(display_with_pointer(a, WIDTH / 4 + 2, HEIGHT / 4 + 2),
+          "back: the front screen and the pointer drawn again");
+
+    route(&typed_a);
+    received(50, got, 8);
+    ask(SCREEN_CLOSE, a, 50);
+    ask(SCREEN_CLOSE, b, 51);
+    CHECK(screen_count == 0 && !fb_held, "closed");
+}
+
 static void test_programs(void) {
     char *argv[] = {"a", "1", "+", "b", "+", "+", "nosuch", "+", "c", "x", "y", "+"};
     start_programs(12, argv, 7);
@@ -503,5 +677,5 @@ static void teardown(void) {
 }
 
 TEST_MAIN(setup, test_open_and_damage, test_two_screens_and_keys, test_closing, test_lending,
-          test_programs,
+          test_pointer, test_programs,
           teardown)

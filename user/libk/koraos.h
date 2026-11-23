@@ -242,6 +242,7 @@ int sig_on_end(int pid, int bit);
 #define KEY_M 0x10
 #define KEY_ENTER 0x28
 #define KEY_ESCAPE 0x29
+#define KEY_LEFT_CTRL 0xE0  /* the modifiers follow, to KEY_RIGHT_GUI */
 #define KEY_LEFT_GUI 0xE3
 #define KEY_RIGHT_GUI 0xE7
 
