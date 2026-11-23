@@ -132,11 +132,11 @@ jobs:
           - profile: serial-small-ram
             args: --ramdisk 16 --ram 64M --no-graphics --repeat 32
           - profile: el2-entry
-            args: --ramdisk 16 --el2 --no-graphics --repeat 32 --smp 4 --stress 3
+            args: --ramdisk 16 --el2 --repeat 32 --smp 4 --stress 3
           - profile: gicv3
             args: --ramdisk 16 --gic 3 --smp 4 --repeat 64 --stress 3
           - profile: gicv3-el2
-            args: --ramdisk 16 --gic 3 --el2 --smp 4 --no-graphics --repeat 32 --stress 3
+            args: --ramdisk 16 --gic 3 --el2 --smp 4 --repeat 32 --stress 3
           - profile: no-ramdisk
             args: --disk build/userfs/aarch64/koraos.img --smp 4
     steps:
