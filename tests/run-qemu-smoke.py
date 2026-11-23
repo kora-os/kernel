@@ -1568,7 +1568,7 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         if len(manager) != 1:
             raise Failure("ps shows screens as %s" % manager)
         q.send("kill %d\r" % manager[0])
-        q.expect(rb"^init: the shell ended \(exit -9\); starting it again", timeout=30)
+        q.expect(LINE + rb"init: the shell ended \(exit -9\); starting it again", timeout=30)
         q.expect(rb"KoraOS shell\. Type 'help'\.", timeout=60)
         q.expect(PROMPT)
         for _ in range(20):
@@ -1592,9 +1592,9 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         q.send("exit\r")
         q.expect(rb"^bye")
         q.expect(rb"screens: screen \d+ closed \(shell\), closed by its program")
-        q.expect(rb"^screens: done")
-        q.expect(rb"^init: the shell ended \(exit 0\); starting it again")
-        q.expect(rb"^init: starting the shell \(screens shell\)")
+        q.expect(LINE + rb"screens: done")
+        q.expect(LINE + rb"init: the shell ended \(exit 0\); starting it again")
+        q.expect(LINE + rb"init: starting the shell \(screens shell\)")
         q.expect(rb"KoraOS shell\. Type 'help'\.", timeout=60)
         q.expect(PROMPT)
         q.send("hello\r")
