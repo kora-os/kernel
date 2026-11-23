@@ -84,6 +84,27 @@ static void test_order_and_time(void) {
     CHECK(held == 0, "post and poll release the lock");
 }
 
+// A mouse event carries the modifiers of the last key event: Shift+click.
+static void test_mouse_modifiers(void) {
+    struct input_event shift = key(INPUT_EVENT_KEY_DOWN, HID_KEY_LEFT_CTRL + 1);
+    shift.modifiers = INPUT_MOD_LEFT_SHIFT;
+    struct input_event click = {.type = INPUT_EVENT_MOUSE, .modifiers = 0x00FF,
+                                .buttons = INPUT_BUTTON_LEFT, .x = -4, .y = 7, .wheel = 1};
+    input_post(&shift);
+    input_post(&click);
+    struct input_event release = key(INPUT_EVENT_KEY_UP, HID_KEY_LEFT_CTRL + 1);
+    input_post(&release);
+    input_post(&click);
+    struct input_event event;
+    CHECK(input_poll(&event) && input_poll(&event), "a key, then a click");
+    CHECK(event.type == INPUT_EVENT_MOUSE && event.modifiers == INPUT_MOD_LEFT_SHIFT &&
+              event.buttons == INPUT_BUTTON_LEFT && event.x == -4 && event.y == 7 && event.wheel == 1,
+          "the click carries Shift held, and its own movement, buttons and wheel");
+    CHECK(input_poll(&event) && input_poll(&event) && event.modifiers == 0,
+          "after Shift's release, none");
+    CHECK(!input_poll(&event), "the queue is empty again");
+}
+
 // Fill past the end, more than once, from different ring positions: a full
 // queue drops the newest events and counts them, and keeps what it holds.
 static void test_overflow_and_wraparound(void) {
@@ -209,5 +230,5 @@ static void test_claim(void) {
     CHECK(held == 0, "every critical section is balanced");
 }
 
-TEST_MAIN(test_empty, test_order_and_time, test_overflow_and_wraparound, test_sources,
-          test_claim)
+TEST_MAIN(test_empty, test_order_and_time, test_mouse_modifiers, test_overflow_and_wraparound,
+          test_sources, test_claim)

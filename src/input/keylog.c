@@ -143,11 +143,30 @@ static char *end(char *out) {
     return out;
 }
 
+// "Left+Middle", or "none".
+static char *buttons_text(char *out, uint8_t buttons) {
+    static const char *const names[] = {"Left", "Right", "Middle", "Side", "Extra"};
+    char *start = out;
+    for (unsigned i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        if (buttons & (1u << i)) {
+            out = append(out, out == start ? "" : "+");
+            out = append(out, names[i]);
+        }
+    }
+    if (out == start) {
+        out = append(out, "none");
+    }
+    *out = '\0';
+    return out;
+}
+
 void keylog_format(char *out, const struct keylog_note *note, const char *source,
                    const char *receiver, const char *focus) {
     const struct input_event *e = &note->event;
     char *p = out;
-    if (e->type == INPUT_EVENT_KEY_DOWN) {
+    if (e->type == INPUT_EVENT_MOUSE) {
+        p = append(p, "Mouse");
+    } else if (e->type == INPUT_EVENT_KEY_DOWN) {
         p = append(p, "KeyDown");
     } else if (e->type == INPUT_EVENT_KEY_UP) {
         p = append(p, "KeyUp");
@@ -162,6 +181,16 @@ void keylog_format(char *out, const struct keylog_note *note, const char *source
     if (focus != NULL) {
         p = append(p, " -> front: ");
         p = append(p, focus);
+    }
+    if (e->type == INPUT_EVENT_MOUSE) {
+        tfp_sprintf(p, (e->flags & INPUT_FLAG_ABSOLUTE) ? "\n    time %u ms, at %d,%d, buttons 0x%02x ("
+                                                        : "\n    time %u ms, move %d,%d, buttons 0x%02x (",
+                    (unsigned)e->time_ms, (int)e->x, (int)e->y, (unsigned)e->buttons);
+        p = buttons_text(end(p), e->buttons);
+        tfp_sprintf(p, "), wheel %d, modifiers 0x%04x (", (int)e->wheel, (unsigned)e->modifiers);
+        p = modifiers_text(end(p), e->modifiers);
+        append(p, ")\n");
+        return;
     }
     const char *name = keylog_key_name(e->keycode);
     tfp_sprintf(p, "\n    time %u ms, keycode 0x%02x (%s), modifiers 0x%04x (",
