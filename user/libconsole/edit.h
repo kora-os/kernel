@@ -35,6 +35,10 @@ typedef struct {
     // Where the echo goes: bytes for the terminal.
     void (*echo)(void *ctx, const char *bytes, size_t length);
     void *ctx;
+    // Optional: each line entered, with its '\n', and "^C\n" for a break in
+    // cooked mode, as plain text (the echo is full of cursor moves): what a
+    // console copies to a log (conlog). Same ctx.
+    void (*entered)(void *ctx, const char *text, size_t length);
     int mode;  // CON_COOKED or CON_RAW
 
     // The line being typed: bytes, UTF-8, and the cursor's byte offset.

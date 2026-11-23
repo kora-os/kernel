@@ -21,8 +21,16 @@ static void echo(void *ctx, const char *bytes, size_t length) {
     }
 }
 
-/* Programs' text, with their '\n' starting a new line (ONLCR). */
+/* A line entered, as plain text, for the serial line when conlog is on. */
+static void entered(void *ctx, const char *text, size_t length) {
+    (void)ctx;
+    conlog(text, length);
+}
+
+/* Programs' text, with their '\n' starting a new line (ONLCR), and a copy on
+ * the serial line when conlog is on. */
 static void show(console_t *c, const char *text, size_t length) {
+    conlog(text, length);
     for (size_t i = 0; i < length; i++) {
         if (text[i] == '\n') {
             term_putc(&c->term, '\r');
@@ -76,6 +84,7 @@ console_t *console_open(screen_t *s) {
         return NULL;
     }
     con_edit_init(&c->edit, echo, c);
+    c->edit.entered = entered;
     c->port = port_create(NULL);
     c->port_bit = sig_alloc(-1);
     c->end_bit = sig_alloc(-1);

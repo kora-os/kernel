@@ -200,6 +200,9 @@ static void enter(con_edit_t *e) {
     history_add(e);
     e->line[e->length] = '\n';
     ready_add(e, e->line, e->length + 1);
+    if (e->entered != NULL) {
+        e->entered(e->ctx, e->line, e->length + 1);
+    }
     end_line(e);
 }
 
@@ -210,6 +213,9 @@ static void interrupt(con_edit_t *e) {
             move(e, e->cursor, e->length);
         }
         outs(e, "^C\r\n");
+        if (e->entered != NULL) {
+            e->entered(e->ctx, "^C\n", 3);
+        }
         end_line(e);
     }
     e->ready_length = 0;  // what was typed ahead goes with the program
