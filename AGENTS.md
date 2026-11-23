@@ -79,6 +79,11 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
   programs' packets; line editing is `user/libconsole/edit.c` and key bytes
   `keys.c`, both pure (built into the kernel too, like `term.c`) and tested
   on the host (`tests/host/edit_test.c`).
+- The serial line is the kernel debug console (on QEMU too). With `conlog on`
+  (the default under QEMU) it carries a copy of what the consoles show, and
+  the debug console neither echoes nor prompts; `type TEXT` and `key NAME`
+  post key events. The smoke test drives the shell that way (`q.send` types,
+  `q.debug` runs a debug console command, `q.key` presses keys).
 - Use `run-qemu.sh` for rapid UART smoke tests; see the developer guide for hardware installation steps.
 - Documentation lives under `docs/`; do not store temporary todos there—use `project_doc/` for roadmap-level planning instead.
 
