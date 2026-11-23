@@ -48,7 +48,7 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
     foreach(name hello init echo termdemo ls cat)
         koraos_add_user_program(${name} "${USER_DIR}/${name}.c")
     endforeach()
-    foreach(name cp rm mkdir rmdir mv ps jobdemo pindemo)
+    foreach(name cp rm mkdir rmdir mv ps pindemo)
         koraos_add_user_program(${name} "${USER_DIR}/${name}.c")
     endforeach()
     # The console library (user/libconsole) is linked into the programs that
@@ -67,6 +67,7 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
     # The shell serves its own console (user/shell.c).
     koraos_add_user_program(shell "${USER_DIR}/shell.c" ${CONSOLE_SOURCES})
     koraos_add_user_program(gfxdemo "${USER_DIR}/gfxdemo.c" ${LIBSCREEN_SOURCES})
+    koraos_add_user_program(jobdemo "${USER_DIR}/jobdemo.c" ${LIBSCREEN_SOURCES})
     koraos_add_user_program(condemo "${USER_DIR}/condemo.c" ${LIBCONSOLE_SOURCES}
         ${LIBSCREEN_SOURCES} FLAGS -Wextra -Werror)
     koraos_add_user_program(allocprobe "${SOURCE_ROOT}/tests/user/allocprobe.c")

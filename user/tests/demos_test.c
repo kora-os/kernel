@@ -2,9 +2,10 @@
 //
 // Host tests of the demos on the fake kernel: gfxdemo, termdemo, jobdemo and
 // pindemo. The test stands in for what the fake kernel does not have: a
-// framebuffer (host memory), a clock that moves a fixed step per reading,
-// threads that run to completion when created, and children that are only
-// recorded. So every line the demos print is fixed and checked exactly.
+// framebuffer (host memory), a screen manager with one screen on that memory,
+// a clock that moves a fixed step per reading, threads that run to completion
+// when created, and children that are only recorded. So every line the demos
+// print is fixed and checked exactly.
 
 #include "test.h"
 
@@ -62,8 +63,61 @@ static int spawn_fails_at;             // the child (0, 1, ...) that cannot star
 static int reap_order[MAX_CHILDREN];   // which child each waitpid returns
 static int reap_codes[MAX_CHILDREN];   // and its exit code
 
+// The screen manager: one screen, on the framebuffer's memory. A wait for
+// its signal finds Enter typed on it.
+#define MANAGER_PORT 3
+#define REPLY_PORT 4
+#define SCREEN_BIT 9
+static int manager_runs, screen_damaged, screen_closed;
+static struct screen the_screen;
+static struct screen_request *last_request;
+
+static void serve_screen(struct screen_request *r) {
+    last_request = r;
+    r->result = 0;
+    switch (r->op) {
+    case SCREEN_OPEN:
+        the_screen = (struct screen){.id = 2, .owner = 7, .width = FB_WIDTH, .height = FB_HEIGHT,
+                                     .pitch = FB_STRIDE * 4, .pixels = framebuffer};
+        r->screen = &the_screen;
+        break;
+    case SCREEN_DAMAGE:
+        screen_damaged = r->x == 0 && r->y == 0 && r->width == FB_WIDTH && r->height == FB_HEIGHT;
+        break;
+    case SCREEN_CLOSE:
+        screen_closed = 1;
+        break;
+    default:
+        r->result = -1;
+    }
+}
+
 static long kernel(long number, long a0, long a1, long a2, long a3) {
     switch (number) {
+    case SYS_PORT_FIND:
+        return manager_runs && strcmp((const char *)a0, SCREENS_PORT) == 0 ? MANAGER_PORT : -1;
+    case SYS_PORT_CREATE:
+        return REPLY_PORT;
+    case SYS_SIG_ALLOC:
+        return SCREEN_BIT;
+    case SYS_PORT_DELETE:
+    case SYS_SIG_FREE:
+        return 0;
+    case SYS_PORT_PUT:
+        CHECK(a0 == MANAGER_PORT && a2 == REPLY_PORT, "requests go to the manager");
+        serve_screen((struct screen_request *)a1);
+        return 0;
+    case SYS_PORT_WAIT:
+        *(struct port_message *)a1 = (struct port_message){last_request, PORT_REPLY, 1};
+        return 1;
+    case SYS_SIG_WAIT: {
+        CHECK(a0 == SIG_MASK(SCREEN_BIT), "it waits for its screen's keys");
+        unsigned head = the_screen.head;
+        the_screen.events[head % SCREEN_EVENTS] =
+            (struct input_event){.type = INPUT_EVENT_KEY_DOWN, .keycode = KEY_ENTER};
+        the_screen.head = head + 1;
+        return SIG_MASK(SCREEN_BIT);
+    }
     case SYS_FB_INFO: {
         if (!have_framebuffer) {
             return -1;
@@ -144,6 +198,7 @@ static void reset(void) {
     thread_cost_us = 0;
     spawned = reaped = kills = 0;
     spawn_fails_at = -1;
+    manager_runs = screen_damaged = screen_closed = 0;
 }
 
 // main returns here instead of going through exit(), so stdout is flushed by
@@ -232,7 +287,7 @@ static void test_termdemo(void) {
 static void test_jobdemo(void) {
     reset();
     thread_cost_us = 3000;
-    CHECK(RUN(jobdemo, "jobdemo", "16") == 0, "jobdemo without a framebuffer");
+    CHECK(RUN(jobdemo, "jobdemo", "16") == 0, "jobdemo without a screen manager");
     // 1 job: 1 ms of clock + 3 ms of thread; 4 jobs one after the other: 13 ms.
     CHECK(printed("jobdemo: 640x480, 16 iterations: 1 core 4 ms, 4 cores 13 ms, speedup 0.30x\n",
                   ""),
@@ -254,15 +309,15 @@ static void test_jobdemo(void) {
           "one core is not \"1 cores\"");
 
     reset();
-    have_framebuffer = 1;
+    manager_runs = 1;
     cpus = 2;
-    fake_set_input("\r", 1, 0);
-    CHECK(RUN(jobdemo, "jobdemo", "64") == 0, "jobdemo on a framebuffer");
+    CHECK(RUN(jobdemo, "jobdemo", "64") == 0, "jobdemo on a screen");
     CHECK(printed("jobdemo: 16x8, 64 iterations: 1 core 1 ms, 2 cores 1 ms, speedup 1.00x, "
-                  "press Enter\n\n",
+                  "press Enter\n",
                   ""),
-          "it asks for Enter, and the key is echoed");
-    CHECK(fake_input_position() == 1, "and waits for it");
+          "it asks for Enter");
+    CHECK(screen_damaged && screen_closed && the_screen.tail == 1,
+          "shows the whole picture, and closes its screen at Enter");
     int painted = 0, padding = 1;
     for (unsigned y = 0; y < FB_HEIGHT; y++) {
         for (unsigned x = 0; x < FB_STRIDE; x++) {
@@ -270,7 +325,7 @@ static void test_jobdemo(void) {
             padding &= x < FB_WIDTH || pixel(x, y) == 0x55555555u;
         }
     }
-    CHECK(painted && padding, "the picture is on the framebuffer, inside its width");
+    CHECK(painted && padding, "the picture is on its screen, inside its width");
 
     reset();
     thread_limit = 2;

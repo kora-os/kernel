@@ -6,8 +6,9 @@
 // byte per read, so input typed ahead stays queued for whoever reads next.
 // Reading from stdin first flushes stdout, so a prompt shows up.
 //
-// The console hands over raw bytes: no echo, and Enter arrives as '\r'.
-// Line editing is the program's job (libk's kgetline does it).
+// The kernel's console hands over raw bytes: no echo, and Enter arrives as
+// '\r'. A console handler (user/libscreen/console.c) edits the lines itself,
+// and a read gets a whole one.
 
 #include <errno.h>
 #include <string.h>

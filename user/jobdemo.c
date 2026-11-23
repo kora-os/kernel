@@ -2,19 +2,19 @@
  * (in integer fixed point) once as a single job
  * on core 0, then split into one job per online core, and reports both times
  * and the speedup. Job j renders every n-th row from row j, so the cheap and
- * the expensive rows share out evenly. Draws to the framebuffer when there is
- * one; either way each job returns the sum of its iteration counts, and the
- * two renderings must agree. Printing the result scrolls the screen terminal,
- * which redraws its text over the picture, so the picture is put back
- * afterwards and stays until Enter.
+ * the expensive rows share out evenly. Under the screen manager it draws on a
+ * screen of its own, which stays until Enter or Escape; without one it only
+ * computes. Either way each job returns the sum of its iteration counts, and
+ * the two renderings must agree.
  *
  *   jobdemo [iterations]   iterations per pixel, 16 to 4096 (default 1024)
  */
 #include "libk/koraos.h"
+#include "libscreen/screen.h"
 
 #define FRAC 28                   // fixed point: value * 2^28
 #define FIX(x) ((long)((x) * (1L << FRAC)))
-#define NOFB_WIDTH 640            // the picture's size without a framebuffer
+#define NOFB_WIDTH 640            // the picture's size without a screen
 #define NOFB_HEIGHT 480
 
 struct picture {
@@ -25,7 +25,7 @@ struct picture {
     long left;                    // the real part at x = 0
     long top;                     // the imaginary part at y = 0
     volatile unsigned *pixels;    // NULL: compute only
-    unsigned stride;              // pixels per framebuffer row
+    unsigned stride;              // pixels per row
 };
 
 struct band {
@@ -120,12 +120,12 @@ int main(int argc, char **argv) {
     unsigned cpus = sysinfo(&info) == 0 && info.cpus > 0 ? info.cpus : 1;
 
     struct picture pic = {.width = NOFB_WIDTH, .height = NOFB_HEIGHT, .max_iter = max_iter};
-    struct fb_info fb;
-    if (fb_info(&fb) == 0 && fb.bpp == 32) {
-        pic.width = fb.width;
-        pic.height = fb.height;
-        pic.pixels = (volatile unsigned *)fb.addr;
-        pic.stride = fb.pitch / 4;
+    screen_t *screen = screen_open("jobdemo");
+    if (screen != NULL) {
+        pic.width = screen->width;
+        pic.height = screen->height;
+        pic.pixels = screen->pixels;
+        pic.stride = screen->pitch / 4;
     }
     // Real parts -2.5 to 1.0 across the width; centred vertically.
     pic.step = FIX(3.5) / (long)pic.width;
@@ -143,27 +143,26 @@ int main(int argc, char **argv) {
         return 1;
     }
     unsigned long speedup = all_ms != 0 ? one_ms * 100 / all_ms : 100;
-    // Keep the picture on screen: save it, print, put it back.
-    unsigned *saved = NULL;
-    size_t words = (size_t)pic.height * pic.stride;
-    if (pic.pixels != NULL && (saved = malloc(words * sizeof(unsigned))) != NULL) {
-        for (size_t i = 0; i < words; i++) {
-            saved[i] = pic.pixels[i];
-        }
+    if (screen != NULL) {
+        screen_damage(screen, 0, 0, (int)screen->width, (int)screen->height);
     }
     // One line, so one write() once stdout sees the newline: no other
     // program's output can land in the middle of it.
     printf("jobdemo: %ux%u, %u iterations: 1 core %lu ms, %u %s %lu ms, speedup %lu.%02lux%s\n",
            pic.width, pic.height, max_iter, one_ms, cpus, cpus == 1 ? "core" : "cores", all_ms,
-           speedup / 100, speedup % 100, saved != NULL ? ", press Enter" : "");
-    fflush(stdout);  // the terminal scrolls now, before the picture goes back
-    if (saved != NULL) {
-        for (size_t i = 0; i < words; i++) {
-            pic.pixels[i] = saved[i];
+           speedup / 100, speedup % 100, screen != NULL ? ", press Enter" : "");
+    fflush(stdout);
+    // The picture stays on its screen until Enter or Escape there.
+    while (screen != NULL) {
+        sig_wait(screen_signal(screen));
+        struct input_event event;
+        while (screen != NULL && screen_event(screen, &event)) {
+            if (event.type == INPUT_EVENT_KEY_DOWN &&
+                (event.keycode == KEY_ENTER || event.keycode == KEY_ESCAPE)) {
+                screen_close(screen);
+                screen = NULL;
+            }
         }
-        free(saved);
-        char key[16];
-        kgetline(key, sizeof(key));
     }
     return 0;
 }
