@@ -4,7 +4,7 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
 
 ## Project Snapshot
 - **Target**: QEMU AArch64 virt (independent development target), plus Bare-metal Raspberry Pi kernel (Pi 3 and Pi 4, also via QEMU raspi3b/raspi4b)
-- **Current Capabilities**: EL0/FAT32 reads/writes and file tools, volume/assign paths, Pi USB keyboards and drives, Pi 3/Pi 4 SD card; SMP threads and jobs; virt PL011/GICv2/v3, ramfb, VirtIO storage/input and CI development profiles
+- **Current Capabilities**: EL0/FAT32 reads/writes and file tools, volume/assign paths, Pi USB keyboards, mice and drives, Pi 3/Pi 4 SD card; SMP threads and jobs; virt PL011/GICv2/v3, ramfb, VirtIO storage/input and CI development profiles
 - **Toolchain**: LLVM/Clang cross-compilation managed by CMake (`./build.sh`)
 
 ## Where To Look
@@ -63,9 +63,11 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
   `proc/task.h`, `<_libc/console.h>`): the kernel console, a file or a console
   handler's port, set at spawn (`spawn_std`). The libc reads them on first
   I/O (`user/libc/src/stdio/handle.c`); raw fds 0/1/2 stay the kernel console.
-- Keyboards post key events to the input event queue (`src/input`,
-  `include/input/input.h`); only input that is bytes already (serial, the
-  terminal's status replies) calls `tty_input_push`. The adapter that turns
+- Keyboards post key events, and mice (USB through Circle, VirtIO mouse and
+  tablet, the debug console's `mouse`) mouse events, to the input event queue
+  (`src/input`, `include/input/input.h`); only input that is bytes already
+  (the terminal's status replies) calls `tty_input_push`. `int8_t` is signed:
+  plain `char` is unsigned on AArch64. The adapter that turns
   events into console bytes (`src/input/input_tty.c`) is temporary: see
   `project_doc/console-plan.md`.
 - A screen manager claims the input queue (`input_claim`, signalled per

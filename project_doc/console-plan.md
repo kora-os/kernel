@@ -217,7 +217,14 @@ flowchart TB
           serial line removed. The kernel terminal becomes the boot and panic
           fallback only.
   - Screens sliding down to show the one behind can follow, as 4d or later.
-- [ ] 5. Mouse events, then the graphics layer.
+- [ ] 5. Mouse events, then the graphics layer:
+  - [ ] 5a. The kernel's part: mouse events in the input queue, from USB mice
+        (Circle), VirtIO mice and tablets and the debug console's `mouse`;
+        keylog shows them.
+  - [ ] 5b. The screen manager: a pointer over the front screen, hidden while
+        typing, and mouse events to the program in front.
+  - Then fonts (PSF2, a `font` command, consoles that resize), before
+    koracli; the graphics layer after.
 
 ## Step 1 as built
 
@@ -511,6 +518,46 @@ flowchart TB
   the display is lent wait for the manager. A crashed manager leaves the
   shell running with nothing on the display, drawing into pixels that were
   the manager's memory, and init does not notice.
+
+## Step 5 decisions (2026-11-23)
+
+- **Mouse before fonts**, both before koracli.
+- **The pointer hides while typing** and shows again when the mouse moves.
+  No idle timer yet: the manager has no timer.
+- **The kernel carries what the mouse reports**: movements (or a tablet's
+  positions), the buttons held and the wheel. The screen manager keeps the
+  pointer's position, as Intuition does.
+- **QEMU virt takes a VirtIO mouse and a VirtIO tablet**: the tablet's
+  positions let the host's pointer move the guest's in a QEMU window.
+- **Two PRs**: 5a the kernel, 5b the screen manager.
+- **Fonts**, from the discussion: PSF2 at run time (fixed cells, a Unicode
+  table, small to load), BDF as the source format converted at build time,
+  a `font` command per console, consoles that resize (which the resolution
+  work reuses later). FreeType can wait.
+
+## Step 5a as built
+
+- **The event**: `INPUT_EVENT_MOUSE` (3) shares the 16 bytes of a key
+  event: `x` and `y` (a movement, or with `INPUT_FLAG_ABSOLUTE` a position
+  from 0 to `INPUT_ABS_MAX`), `buttons` (`INPUT_BUTTON_*`, as in a USB boot
+  mouse) and `wheel`. `input_post` stamps it with the modifiers of the last
+  key event, so Shift+click is seen.
+- **USB mice** (Pi): Circle's driver, in raw mode. Circle's `CMouseDevice`
+  is now vendored (`lib/input/mouse.cpp`, `mousebehaviour.cpp`), and its
+  USB mouse no longer excluded.
+- **VirtIO** (virt): the driver takes up to three devices, a keyboard and
+  pointers: a mouse (relative) and a tablet (absolute, scaled from its axes'
+  range). `src/drivers/virtio_pointer.c` turns their evdev events into one
+  mouse event per report, pure and host-tested.
+- **The debug console's `mouse`**: `mouse DX DY`, `mouse to X Y`, `mouse
+  down|up|click BUTTON`, `mouse wheel N` (`src/input/typing.c`'s
+  `typing_mouse`, host-tested).
+- **keylog** shows mouse events.
+- **`int8_t` is signed now**: `include/common.h` had it as plain `char`,
+  unsigned on AArch64.
+- **Not yet**: the screen manager passes mouse events to no program and
+  draws no pointer (5b). QEMU's monitor cannot move a tablet without a
+  display window, so the smoke test moves the mouse only.
 
 ## Safety net
 
