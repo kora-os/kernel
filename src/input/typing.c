@@ -183,3 +183,109 @@ int typing_unescape(const char *text, char *out, size_t size) {
     }
     return (int)n;
 }
+
+// --- The mouse ---------------------------------------------------------------
+
+// The next word of `*text`, skipping spaces: its start and length (0 at the end).
+static const char *word(const char **text, size_t *length) {
+    const char *p = *text;
+    while (*p == ' ') {
+        p++;
+    }
+    const char *start = p;
+    while (*p && *p != ' ') {
+        p++;
+    }
+    *length = (size_t)(p - start);
+    *text = p;
+    return start;
+}
+
+// A decimal integer, with an optional '-', from min to max.
+static bool integer(const char *text, size_t length, long min, long max, long *out) {
+    size_t i = 0;
+    bool negative = length > 0 && text[0] == '-';
+    i += negative;
+    if (i == length) {
+        return false;
+    }
+    long value = 0;
+    for (; i < length; i++) {
+        if (text[i] < '0' || text[i] > '9' || value > 100000) {
+            return false;
+        }
+        value = value * 10 + (text[i] - '0');
+    }
+    value = negative ? -value : value;
+    if (value < min || value > max) {
+        return false;
+    }
+    *out = value;
+    return true;
+}
+
+static uint8_t button(const char *name, size_t length) {
+    static const char *const names[] = {"left", "right", "middle", "side", "extra"};
+    for (unsigned i = 0; i < sizeof(names) / sizeof(names[0]); i++) {
+        if (equal(name, length, names[i])) {
+            return (uint8_t)(1u << i);
+        }
+    }
+    return 0;
+}
+
+unsigned typing_mouse(const char *args, uint8_t *buttons, struct input_event events[2]) {
+    size_t length[4];
+    const char *w[4];
+    for (int i = 0; i < 4; i++) {
+        w[i] = word(&args, &length[i]);
+    }
+    if (length[0] == 0 || length[3] != 0) {
+        return 0;
+    }
+    struct input_event e = {.type = INPUT_EVENT_MOUSE, .buttons = *buttons};
+    long a, b;
+    if (equal(w[0], length[0], "to")) {
+        if (!integer(w[1], length[1], 0, INPUT_ABS_MAX, &a) ||
+            !integer(w[2], length[2], 0, INPUT_ABS_MAX, &b)) {
+            return 0;
+        }
+        e.flags = INPUT_FLAG_ABSOLUTE;
+        e.x = (int16_t)a;
+        e.y = (int16_t)b;
+        events[0] = e;
+        return 1;
+    }
+    if (equal(w[0], length[0], "wheel")) {
+        if (length[2] != 0 || !integer(w[1], length[1], -128, 127, &a)) {
+            return 0;
+        }
+        e.wheel = (int8_t)a;
+        events[0] = e;
+        return 1;
+    }
+    bool down = equal(w[0], length[0], "down"), up = equal(w[0], length[0], "up");
+    bool click = equal(w[0], length[0], "click");
+    if (down || up || click) {
+        uint8_t b_bit = button(w[1], length[1]);
+        if (b_bit == 0 || length[2] != 0) {
+            return 0;
+        }
+        e.buttons = up ? (uint8_t)(*buttons & ~b_bit) : (uint8_t)(*buttons | b_bit);
+        events[0] = e;
+        if (click) {
+            events[1] = e;
+            events[1].buttons = (uint8_t)(*buttons & ~b_bit);
+        }
+        *buttons = click ? events[1].buttons : e.buttons;
+        return click ? 2 : 1;
+    }
+    if (!integer(w[0], length[0], -32768, 32767, &a) || !integer(w[1], length[1], -32768, 32767, &b) ||
+        length[2] != 0) {
+        return 0;
+    }
+    e.x = (int16_t)a;
+    e.y = (int16_t)b;
+    events[0] = e;
+    return 1;
+}
