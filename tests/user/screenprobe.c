@@ -56,6 +56,11 @@ int main(int argc, char **argv) {
                 return 0;
             }
         }
+        if (screen_gone(s)) {
+            screen_close(s);
+            printf("screenprobe: %s gone, the manager ended\n", name);
+            return 0;
+        }
         fflush(stdout);
     }
 }

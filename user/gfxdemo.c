@@ -63,6 +63,10 @@ int main(int argc, char **argv) {
                     return 0;
                 }
             }
+            if (screen_gone(screen)) {  /* the manager ended */
+                screen_close(screen);
+                return 1;
+            }
         }
     }
 

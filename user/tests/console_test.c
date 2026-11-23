@@ -24,7 +24,12 @@
 #define KEY_BIT 20
 #define KEY_PAGE_UP 0x4B
 
-static struct screen shared;  // the manager's side
+static int shared;  // the manager's name for the screen
+// The keys typed: a message of the manager's on the screen's port.
+#define EVENT_PORT 8
+#define MANAGER_PID 99
+static struct screen_events typed;
+static int typed_out, typed_replies, gone_test;
 static unsigned pixels[WIDTH * HEIGHT];
 static screen_t handle;
 
@@ -65,6 +70,14 @@ static long kernel(long number, long a0, long a1, long a2, long a3) {
     case SYS_SIG_ALLOC:
         return sig_next--;
     case SYS_PORT_GET: {
+        if (a0 == EVENT_PORT) {
+            if (typed.count == 0 || typed_out) {
+                return 0;
+            }
+            typed_out = 1;
+            *(struct port_message *)a1 = (struct port_message){&typed, PORT_MESSAGE, MANAGER_PID};
+            return 1;
+        }
         if (a0 != CONSOLE_PORT || taken == queued) {
             return 0;
         }
@@ -74,6 +87,13 @@ static long kernel(long number, long a0, long a1, long a2, long a3) {
         return 1;
     }
     case SYS_PORT_REPLY:
+        if ((void *)a0 == &typed) {
+            CHECK(typed_out, "the keys' message is replied once");
+            typed_out = 0;
+            typed.count = 0;
+            typed_replies++;
+            return 0;
+        }
         answered[answer_count++] = (struct con_packet *)a0;
         return 0;
     case SYS_PORT_PUT: {  // screen_damage to the manager
@@ -111,6 +131,9 @@ static long kernel(long number, long a0, long a1, long a2, long a3) {
         int end = ((run_flags >> 12) & 0x3f) - 1;
         CHECK((a0 & SIG_MASK(end)) && (a0 & SIG_MASK(KEY_BIT)), "it waits for keys and the end");
         waits++;
+        if (waits == 1 && gone_test) {
+            return SIG_MASK(KEY_BIT);  // the manager's end
+        }
         if (waits == 1) {
             type_key(0x06, INPUT_MOD_LEFT_CTRL, 'c');
             return SIG_MASK(KEY_BIT);
@@ -149,11 +172,10 @@ static void put(struct con_packet *packet, int sender) {
 }
 
 static void type_key(unsigned keycode, unsigned modifiers, unsigned codepoint) {
-    unsigned head = shared.head;
-    shared.events[head % SCREEN_EVENTS] = (struct input_event){
+    CHECK(!typed_out && typed.count < SCREEN_BATCH, "keys typed between services");
+    typed.events[typed.count++] = (struct input_event){
         .type = INPUT_EVENT_KEY_DOWN, .modifiers = (unsigned short)modifiers,
         .keycode = (unsigned short)keycode, .codepoint = codepoint};
-    shared.head = head + 1;
 }
 
 static void type_text(const char *text) {
@@ -194,10 +216,9 @@ static const char *row_text(uint32_t row) {
 
 static void setup(void) {
     fake_set_handler(kernel);
-    shared = (struct screen){.id = 1, .owner = 1, .width = WIDTH, .height = HEIGHT,
-                             .pitch = WIDTH * 4, .pixels = pixels};
     handle = (screen_t){.width = WIDTH, .height = HEIGHT, .pitch = WIDTH * 4, .pixels = pixels,
-                        .id = 1, .screen = &shared, .manager = MANAGER_PORT, .reply_port = 4,
+                        .id = 1, .screen = &shared, .manager = MANAGER_PORT,
+                        .manager_pid = MANAGER_PID, .reply_port = 4, .event_port = EVENT_PORT,
                         .bit = KEY_BIT};
     c = console_open(&handle);
     CHECK(c != NULL && c->term.cols == 40 && c->term.rows == 12, "a console of 40x12 cells");
@@ -327,7 +348,7 @@ static void test_modes_and_keys(void) {
     type_key(0x14, 0, 'q');
     service(SIG_MASK(KEY_BIT));
     CHECK(c->term.view_offset == 0, "typing returns to the live screen");
-    CHECK(shared.tail == shared.head, "every key was taken");
+    CHECK(typed.count == 0 && !typed_out, "every key was taken");
 }
 
 static void test_run(void) {
@@ -349,7 +370,24 @@ static void test_run(void) {
     CHECK(console_run(c, "shell", 1, argv, CONSOLE_BREAK_KILL, &code) == 0 && code == 5,
           "again, killing on Ctrl+C");
     CHECK(killed == RUN_PID && sent_to == 0, "Ctrl+C kills it");
-    CHECK(shared.tail == shared.head, "every key was taken");
+    CHECK(typed.count == 0 && !typed_out, "every key was taken");
+}
+
+static void test_manager_ends(void) {
+    CHECK(!console_gone(c) && typed_replies > 0, "the manager runs; the keys' messages were replied");
+    ended[MANAGER_PID] = 1;
+    gone_test = 1;
+    waits = 0;
+    killed = 0;
+    int code = 0;
+    char *argv[] = {"shell", NULL};
+    CHECK(console_run(c, "shell", 1, argv, CONSOLE_BREAK_SIGNAL, &code) == 0 && code == 5,
+          "the manager ends while a program runs");
+    CHECK(console_gone(c) && killed == RUN_PID,
+          "the screen is gone, and the program is killed: nothing reaches it");
+    damages = 0;
+    console_write(c, "unseen\n", 7);
+    CHECK(damages == 0, "nothing is sent to a manager that has ended");
 }
 
 static void test_close(void) {
@@ -363,4 +401,5 @@ static void test_close(void) {
     fake_set_handler(NULL);
 }
 
-TEST_MAIN(setup, test_writes, test_reads, test_modes_and_keys, test_run, test_close)
+TEST_MAIN(setup, test_writes, test_reads, test_modes_and_keys, test_run, test_manager_ends,
+          test_close)

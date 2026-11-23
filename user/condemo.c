@@ -79,6 +79,11 @@ static void wait_for_escape(void) {
                 return;
             }
         }
+        if (screen_gone(screen)) {  /* the manager ended */
+            screen_close(screen);
+            screen = NULL;
+            return;
+        }
     }
 }
 

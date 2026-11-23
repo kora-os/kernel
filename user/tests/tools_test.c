@@ -72,14 +72,13 @@ static const struct task_info tasks[] = {
     {.pid = 9, .ppid = 2, .core = 2, .state = 99, .name = "odd", .tid = 9},
 };
 
-// The clock: koraos.h leaves uptime_us() to the host test. Each reading is
-// `clock_step` later; init's shell runs `shell_runs` times before it stops.
-static unsigned long clock_us, clock_step;
-static int have_display, shell_runs;
+// The clock: koraos.h leaves uptime_us() to the host test. Each shell init
+// starts runs for the next of `run_us` (a short time once they run out).
+static unsigned long clock_us, run_us[8];
+static int have_display, runs;
 static char spawned_as[64];
 
 unsigned long uptime_us(void) {
-    clock_us += clock_step;
     return clock_us;
 }
 
@@ -115,9 +114,8 @@ static long kernel(long number, long a0, long a1, long a2, long a3) {
         }
         if (spawn_result > 0) {
             write(1, "<shell>\n", 8);
-            if (--shell_runs == 0) {
-                clock_step = 1000;  // the next run ends at once
-            }
+            clock_us += runs < 8 && run_us[runs] ? run_us[runs] : 1000;
+            runs++;
         }
         return spawn_result;
     case SYS_FB_INFO:
@@ -194,8 +192,8 @@ static void reset(void) {
     fake_set_handler(kernel);
     listing_size = listing_next = 0;
     readdir_fails = 0;
-    have_display = shell_runs = 0;
-    clock_step = 0;
+    have_display = runs = 0;
+    memset(run_us, 0, sizeof(run_us));
 }
 
 // Runs a program's main with the given arguments (argv[0] first). main
@@ -427,8 +425,7 @@ static void test_init(void) {
     have_display = 1;
     spawn_result = 5;
     child_exit_code = 3;
-    clock_step = 2000000;
-    shell_runs = 3;
+    run_us[0] = run_us[1] = 2000000;  // then ends at once
     CHECK(RUN(init, "init") == 3 && strcmp(spawned_as, "screens shell") == 0,
           "with one, the shell under the screen manager");
     CHECK(screen_is("init: starting the shell (screens shell)\n<shell>\n"
@@ -436,8 +433,20 @@ static void test_init(void) {
                     "init: starting the shell (screens shell)\n<shell>\n"
                     "init: the shell ended (exit 3); starting it again\n"
                     "init: starting the shell (screens shell)\n<shell>\n"
-                    "init: the shell ended at once (exit 3); not starting it again\n"),
-          "started again as it ends, until it ends at once:\n%s", fake_screen(NULL));
+                    "init: the shell ended (exit 3); starting it again\n"
+                    "init: starting the shell (screens shell)\n<shell>\n"
+                    "init: the shell ended (exit 3); starting it again\n"
+                    "init: starting the shell (screens shell)\n<shell>\n"
+                    "init: the shell ended at once 3 times (exit 3); not starting it again\n"),
+          "started again as it ends, until it ends at once three times in a row:\n%s",
+          fake_screen(NULL));
+    reset();
+    have_display = 1;
+    spawn_result = 5;
+    child_exit_code = 3;
+    run_us[2] = 2000000;  // two quick ends, a long run, then quick ones
+    CHECK(RUN(init, "init") == 3 && runs == 6, "a run that lasts starts the count again (%d runs)",
+          runs);
     reset();
     have_display = 1;
     spawn_result = -1;

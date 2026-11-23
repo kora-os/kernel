@@ -2,12 +2,12 @@
  * Intuition's OpenScreen().
  *
  * A screen is a pixel buffer as large as the display, 32 bits per pixel,
- * that the manager allocates and the program that opened it draws into.
- * After drawing, the program says which rectangle changed; when its screen
- * is in front, the manager copies that rectangle to the display. Only one
- * screen is in front: Meta+M (Command or the Windows key, with M) brings the
- * next one there, and the keys go to the program whose screen is in front,
- * as events (<libk/koraos.h>'s struct input_event).
+ * that the program opening it allocates and draws into; the manager only
+ * reads it. After drawing, the program says which rectangle changed; when
+ * its screen is in front, the manager copies that rectangle to the display.
+ * Only one screen is in front: Meta+M (Command or the Windows key, with M)
+ * brings the next one there, and the keys go to the program whose screen is
+ * in front, as events (<libk/koraos.h>'s struct input_event).
  *
  *   screen_t *s = screen_open("mydemo");   NULL: no screen manager runs
  *   ... draw into s->pixels (s->width x s->height, s->pitch bytes a row) ...
@@ -16,12 +16,17 @@
  *       sig_wait(screen_signal(s) | other signals);
  *       struct input_event event;
  *       while (screen_event(s, &event)) { ... }
+ *       if (screen_gone(s)) { ... the manager ended: stop ... }
  *   }
  *   screen_close(s);
  *
- * A program's screens close when it ends. There is no memory protection: the
- * pixels and the events are the manager's memory, valid until the screen
- * closes or the manager ends.
+ * Either side may end, crashed or not, and neither ever writes into the
+ * other's memory, so neither is left writing into memory freed: there is no
+ * memory protection to catch it. The pixels are the program's own. The
+ * events come as messages from the manager on the screen's own port, in the
+ * manager's memory, which the kernel keeps until they are replied. A
+ * program's screens close when it ends; when the manager ends, its screens
+ * are gone (screen_gone), and the screen's signal says so.
  */
 #ifndef LIBSCREEN_SCREEN_H
 #define LIBSCREEN_SCREEN_H
@@ -31,33 +36,21 @@
 /* The manager's public message port. */
 #define SCREENS_PORT "screens"
 
-/* Events a screen holds for its program; more are dropped and counted. A
- * line typed at once (the debug console's `type`) is two events a key, four
- * with Shift. */
-#define SCREEN_EVENTS 256  /* a power of two */
+/* Events one message carries. */
+#define SCREEN_BATCH 32
 
 #define SCREEN_TITLE_MAX 32
 
-/* A screen, in the manager's memory and shared with the program that opened
- * it. The event ring has one writer (the manager: events[], head, lost) and
- * one reader (the program: tail). */
-struct screen {
-    int id;                 /* 1, 2, ... in the order they were opened */
-    int owner;              /* the pid of the program that opened it */
-    int owner_tid;          /* the thread its events signal, and the bit */
-    int owner_bit;
-    unsigned width, height;
-    unsigned pitch;         /* bytes a row */
-    unsigned *pixels;
-    char title[SCREEN_TITLE_MAX];
-    unsigned head, tail;    /* events written and read, counting up */
-    unsigned lost;          /* events dropped on a full ring */
-    struct input_event events[SCREEN_EVENTS];
+/* Key events for a screen's program: a message from the manager, in its
+ * memory, on the screen's port. The program reads them and replies. */
+struct screen_events {
+    int count;
+    struct input_event events[SCREEN_BATCH];
 };
 
 /* A program's request to the manager, a message on its port (in the
  * program's memory) that the manager replies to once it is done. */
-#define SCREEN_OPEN 1    /* title, tid, bit in; screen out */
+#define SCREEN_OPEN 1    /* title, pixels, width, height, pitch, port in; screen, id, pid out */
 #define SCREEN_DAMAGE 2  /* screen, x, y, width, height in */
 #define SCREEN_FRONT 3   /* screen in */
 #define SCREEN_CLOSE 4   /* screen in */
@@ -67,35 +60,48 @@ struct screen {
 struct screen_request {
     int op;
     int result;          /* 0, or -1: set by the manager before its reply */
-    struct screen *screen;
+    void *screen;        /* the manager's name for the screen */
+    int id;
+    int pid;             /* SCREEN_OPEN: the manager's, to watch for its end */
     int x, y, width, height;
-    int tid, bit;
+    unsigned pitch;      /* bytes a row */
+    unsigned *pixels;    /* the program's */
+    int port;            /* where the screen's events go */
     const char *title;
 };
 
 /* The program's side of a screen. */
 typedef struct screen_handle {
     unsigned width, height;
-    unsigned pitch;
-    unsigned *pixels;
+    unsigned pitch;                /* bytes a row */
+    unsigned *pixels;              /* this program's memory */
     int id;
-    struct screen *screen;  /* the manager's */
-    int manager;            /* its port */
+    void *screen;                  /* the manager's name for it */
+    int manager;                   /* its port, and its pid */
+    int manager_pid;
     int reply_port;
-    int bit;                /* the signal events set */
+    int event_port;
+    int bit;                       /* the signal events and the manager's end set */
+    struct screen_events *batch;   /* events taken and not all read: the manager's */
+    int next;                      /* the next one of them */
+    int gone;                      /* the manager has ended */
     struct screen_request request;
 } screen_t;
 
 /* Open a screen titled `title`, put it in front, and make the calling thread
  * the one its events signal. NULL when no screen manager runs, or it
- * refused (no memory). */
+ * refused, or there is no memory. */
 screen_t *screen_open(const char *title);
 
-/* The signal mask that the screen's events set, for sig_wait. */
+/* The signal mask that the screen's events, and the manager's end, set. */
 unsigned screen_signal(const screen_t *s);
 
 /* Take the oldest key event for the screen: 1, or 0 when there is none. */
 int screen_event(screen_t *s, struct input_event *event);
+
+/* Whether the manager has ended: the screen is gone, nothing more shows and
+ * no key comes. Close it then (or carry on without it). */
+int screen_gone(screen_t *s);
 
 /* The rectangle drawn since the last call (clipped to the screen): the
  * manager copies it to the display if the screen is in front, and returns
@@ -105,7 +111,8 @@ void screen_damage(screen_t *s, int x, int y, int width, int height);
 /* Bring the screen to front. */
 void screen_to_front(screen_t *s);
 
-/* Close the screen and free the handle. */
+/* Close the screen (if the manager still runs) and free it: its pixels and
+ * the handle. */
 void screen_close(screen_t *s);
 
 /* Borrow the display and the keyboard from the screen manager, as a program

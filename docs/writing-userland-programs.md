@@ -95,13 +95,14 @@ A program runs in EL0 with a deliberately small runtime:
   [args]`, [`user/screens.c`](../user/screens.c)) a program opens a screen
   of its own with libscreen ([`user/libscreen/screen.h`](../user/libscreen/screen.h)):
   `screen_t *s = screen_open("title")` gives a pixel buffer as large as the
-  display (`s->pixels`, `s->width`, `s->height`, `s->pitch`), NULL when no
-  manager runs. Draw into it, then `screen_damage(s, x, y, w, h)`: the
+  display (`s->pixels`, `s->width`, `s->height`, `s->pitch`), your program's
+  own memory, which the manager only reads; NULL when no manager runs. Draw into it, then `screen_damage(s, x, y, w, h)`: the
   manager copies that rectangle to the display while the screen is in front.
   Meta+M brings the next screen to front; the keys go to the front screen's
   program as events, read with `screen_event` after
-  `sig_wait(screen_signal(s))`. `screen_close`, or the program's end, closes
-  it. [`user/gfxdemo.c`](../user/gfxdemo.c) is the smallest example. A
+  `sig_wait(screen_signal(s))`. If the manager ends, `screen_gone(s)` says so
+  (the same signal wakes you): close the screen and stop. `screen_close`, or
+  the program's end, closes it. [`user/gfxdemo.c`](../user/gfxdemo.c) is the smallest example. A
   program that drives the display and the keyboard itself (`fb_claim`,
   `input_claim`) first borrows them from the manager with `screens_borrow()`,
   and gives them back with `screens_return()` or by ending.

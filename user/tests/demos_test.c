@@ -63,13 +63,18 @@ static int spawn_fails_at;             // the child (0, 1, ...) that cannot star
 static int reap_order[MAX_CHILDREN];   // which child each waitpid returns
 static int reap_codes[MAX_CHILDREN];   // and its exit code
 
-// The screen manager: one screen, on the framebuffer's memory. A wait for
-// its signal finds Enter typed on it.
+// The screen manager: one screen, copied to the framebuffer at each damage,
+// as screens does. A wait for its signal finds Enter on the screen's port, a
+// message of the manager's.
 #define MANAGER_PORT 3
-#define REPLY_PORT 4
+#define MANAGER_PID 2
 #define SCREEN_BIT 9
-static int manager_runs, screen_damaged, screen_closed;
-static struct screen the_screen;
+static int manager_runs, screen_damaged, screen_closed, events_replied, next_port;
+static int event_port, events_waiting, manager_ended, manager_ended_later;
+static int the_screen;  // the manager's name for it
+static const unsigned *screen_pixels;
+static unsigned screen_pitch;
+static struct screen_events enter = {1, {{.type = INPUT_EVENT_KEY_DOWN, .keycode = KEY_ENTER}}};
 static struct screen_request *last_request;
 
 static void serve_screen(struct screen_request *r) {
@@ -77,12 +82,23 @@ static void serve_screen(struct screen_request *r) {
     r->result = 0;
     switch (r->op) {
     case SCREEN_OPEN:
-        the_screen = (struct screen){.id = 2, .owner = 7, .width = FB_WIDTH, .height = FB_HEIGHT,
-                                     .pitch = FB_STRIDE * 4, .pixels = framebuffer};
+        CHECK(r->width == FB_WIDTH && r->height == FB_HEIGHT && r->pixels != NULL &&
+                  r->pitch >= FB_WIDTH * 4,
+              "the program brings pixels of its own, as large as the display");
+        screen_pixels = r->pixels;
+        screen_pitch = r->pitch;
+        event_port = r->port;
         r->screen = &the_screen;
+        r->id = 2;
+        r->pid = MANAGER_PID;
         break;
     case SCREEN_DAMAGE:
         screen_damaged = r->x == 0 && r->y == 0 && r->width == FB_WIDTH && r->height == FB_HEIGHT;
+        for (int y = r->y; y < r->y + r->height; y++) {
+            memcpy(framebuffer + y * FB_STRIDE + r->x,
+                   (const char *)screen_pixels + (size_t)y * screen_pitch + (size_t)r->x * 4,
+                   (size_t)r->width * 4);
+        }
         break;
     case SCREEN_CLOSE:
         screen_closed = 1;
@@ -97,27 +113,42 @@ static long kernel(long number, long a0, long a1, long a2, long a3) {
     case SYS_PORT_FIND:
         return manager_runs && strcmp((const char *)a0, SCREENS_PORT) == 0 ? MANAGER_PORT : -1;
     case SYS_PORT_CREATE:
-        return REPLY_PORT;
+        return ++next_port;
     case SYS_SIG_ALLOC:
         return SCREEN_BIT;
     case SYS_PORT_DELETE:
     case SYS_SIG_FREE:
+    case SYS_PORT_SIGNAL:
         return 0;
+    case SYS_SIG_ON_END:  // watching the manager
+        CHECK(a0 == MANAGER_PID, "the program watches the manager");
+        return manager_ended && a1 != -1 ? -1 : 0;
     case SYS_PORT_PUT:
-        CHECK(a0 == MANAGER_PORT && a2 == REPLY_PORT, "requests go to the manager");
+        CHECK(a0 == MANAGER_PORT && a2 > MANAGER_PORT, "requests go to the manager");
         serve_screen((struct screen_request *)a1);
         return 0;
     case SYS_PORT_WAIT:
-        *(struct port_message *)a1 = (struct port_message){last_request, PORT_REPLY, 1};
+        // A reply's sender is the program that sent the request: itself.
+        *(struct port_message *)a1 = (struct port_message){last_request, PORT_REPLY, 7};
         return 1;
-    case SYS_SIG_WAIT: {
+    case SYS_PORT_GET:
+        if (a0 != event_port || !events_waiting) {
+            return 0;
+        }
+        events_waiting = 0;
+        *(struct port_message *)a1 = (struct port_message){&enter, PORT_MESSAGE, MANAGER_PID};
+        return 1;
+    case SYS_PORT_REPLY:
+        events_replied += (void *)a0 == &enter;
+        return 0;
+    case SYS_SIG_WAIT:
         CHECK(a0 == SIG_MASK(SCREEN_BIT), "it waits for its screen's keys");
-        unsigned head = the_screen.head;
-        the_screen.events[head % SCREEN_EVENTS] =
-            (struct input_event){.type = INPUT_EVENT_KEY_DOWN, .keycode = KEY_ENTER};
-        the_screen.head = head + 1;
+        if (manager_ended_later) {
+            manager_ended = 1;  // its end sets the screen's signal, with no keys
+        } else {
+            events_waiting = 1;
+        }
         return SIG_MASK(SCREEN_BIT);
-    }
     case SYS_FB_INFO: {
         if (!have_framebuffer) {
             return -1;
@@ -198,7 +229,9 @@ static void reset(void) {
     thread_cost_us = 0;
     spawned = reaped = kills = 0;
     spawn_fails_at = -1;
-    manager_runs = screen_damaged = screen_closed = 0;
+    manager_runs = screen_damaged = screen_closed = events_replied = 0;
+    next_port = MANAGER_PORT;
+    event_port = events_waiting = manager_ended = manager_ended_later = 0;
 }
 
 // main returns here instead of going through exit(), so stdout is flushed by
@@ -252,6 +285,14 @@ static void test_gfxdemo(void) {
     CHECK(RUN(gfxdemo, "gfxdemo", "mauve") == 0 && pixel(0, 0) == 0 &&
               pixel(FB_WIDTH - 1, 0) == (FB_WIDTH - 1) * 255 / FB_WIDTH << 16,
           "an unknown name paints the gradient");
+
+    // On a screen, gfxdemo ends with the manager, closing nothing it cannot.
+    reset();
+    manager_runs = have_framebuffer = manager_ended_later = 1;
+    CHECK(RUN(gfxdemo, "gfxdemo") == 1 &&
+              printed("gfxdemo: painted 16x8 on screen 2, Escape closes it\n", ""),
+          "gfxdemo on a screen ends when the manager has ended");
+    CHECK(screen_damaged && !screen_closed, "no request goes to a manager that has ended");
 }
 
 static int termdemo_run(int argc, char **argv) {
@@ -309,15 +350,15 @@ static void test_jobdemo(void) {
           "one core is not \"1 cores\"");
 
     reset();
-    manager_runs = 1;
+    manager_runs = have_framebuffer = 1;
     cpus = 2;
     CHECK(RUN(jobdemo, "jobdemo", "64") == 0, "jobdemo on a screen");
     CHECK(printed("jobdemo: 16x8, 64 iterations: 1 core 1 ms, 2 cores 1 ms, speedup 1.00x, "
                   "press Enter\n",
                   ""),
           "it asks for Enter");
-    CHECK(screen_damaged && screen_closed && the_screen.tail == 1,
-          "shows the whole picture, and closes its screen at Enter");
+    CHECK(screen_damaged && screen_closed && events_replied == 1,
+          "shows the whole picture, and closes its screen at Enter, its message replied");
     int painted = 0, padding = 1;
     for (unsigned y = 0; y < FB_HEIGHT; y++) {
         for (unsigned x = 0; x < FB_STRIDE; x++) {

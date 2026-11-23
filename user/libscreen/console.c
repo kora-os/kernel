@@ -110,6 +110,10 @@ console_t *console_open(screen_t *s) {
     return c;
 }
 
+int console_gone(const console_t *c) {
+    return c->screen->gone;
+}
+
 int console_port(const console_t *c) {
     return c->port;
 }
@@ -231,6 +235,7 @@ static void reads(console_t *c) {
 void console_service(console_t *c, unsigned got) {
     if (got & screen_signal(c->screen)) {
         keys(c);
+        screen_gone(c->screen);  /* the manager's end sets the same signal */
     }
     packets(c);
     if (got & SIG_MASK(c->end_bit)) {
@@ -276,11 +281,16 @@ int console_run(console_t *c, const char *name, int argc, char *const argv[], in
         return -1;
     }
     console_on_break(c, break_program, &r);
+    int killed = 0;
     for (;;) {
         unsigned got = sig_wait(console_signals(c) | SIG_MASK(end_bit));
         console_service(c, got);
         if ((got & SIG_MASK(end_bit)) && waitpid(r.pid, code, WNOHANG) == r.pid) {
             break;
+        }
+        if (console_gone(c) && !killed) {
+            kill(r.pid);  /* nothing shows its output, and no key reaches it */
+            killed = 1;
         }
     }
     console_on_break(c, NULL, NULL);
