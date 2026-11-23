@@ -2,13 +2,15 @@
  * /bin/init). Following the classic Unix model, the kernel knows nothing about
  * what to run -- init owns that policy. With a display it runs the shell on a
  * screen of its own, under the screen manager (`screens shell`), and starts
- * it again when it ends. Without one there is no shell: the serial line's
+ * it again when it ends (unless it keeps ending at once). Without one there is no shell: the serial line's
  * kernel debug console is all there is.
  */
 #include "libk/koraos.h"
 
-// A shell that ends sooner than this is not started again: it cannot run.
+// A shell that ends this soon QUICK_ENDS times in a row cannot run: init
+// stops starting it. (One quick exit is only someone typing fast.)
 #define QUICK_END_US 1000000
+#define QUICK_ENDS 3
 
 int main(void) {
     struct fb_info display;
@@ -17,6 +19,7 @@ int main(void) {
         return 0;
     }
     char *argv[] = {"screens", "shell", NULL};
+    int quick = 0;
     for (;;) {
         puts("init: starting the shell (screens shell)");
         unsigned long start = uptime_us();
@@ -26,8 +29,10 @@ int main(void) {
             return 1;
         }
         int code = wait(pid);
-        if (uptime_us() - start < QUICK_END_US) {
-            printf("init: the shell ended at once (exit %d); not starting it again\n", code);
+        quick = uptime_us() - start < QUICK_END_US ? quick + 1 : 0;
+        if (quick == QUICK_ENDS) {
+            printf("init: the shell ended at once %d times (exit %d); not starting it again\n",
+                   QUICK_ENDS, code);
             return code;
         }
         printf("init: the shell ended (exit %d); starting it again\n", code);
