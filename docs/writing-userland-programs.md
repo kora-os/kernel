@@ -100,7 +100,9 @@ A program runs in EL0 with a deliberately small runtime:
   manager copies that rectangle to the display while the screen is in front.
   Meta+M brings the next screen to front; the keys go to the front screen's
   program as events, read with `screen_event` after
-  `sig_wait(screen_signal(s))`. If the manager ends, `screen_gone(s)` says so
+  `sig_wait(screen_signal(s))`. So do the mouse's (`INPUT_EVENT_MOUSE`): the
+  manager draws the pointer, and `x` and `y` are its position on your
+  screen, in pixels, with the buttons held and the wheel's turn. If the manager ends, `screen_gone(s)` says so
   (the same signal wakes you): close the screen and stop. `screen_close`, or
   the program's end, closes it. [`user/gfxdemo.c`](../user/gfxdemo.c) is the smallest example. A
   program that drives the display and the keyboard itself (`fb_claim`,
