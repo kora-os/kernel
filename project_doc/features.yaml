@@ -476,7 +476,7 @@ categories:
         name: Mouse
         status: in_progress
         description: Mouse movement, buttons and wheel, also through xterm mouse reporting.
-        prs: [111]
+        prs: [111, 112]
 
   - id: networking
     name: Networking
