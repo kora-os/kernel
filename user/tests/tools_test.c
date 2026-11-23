@@ -72,6 +72,17 @@ static const struct task_info tasks[] = {
     {.pid = 9, .ppid = 2, .core = 2, .state = 99, .name = "odd", .tid = 9},
 };
 
+// The clock: koraos.h leaves uptime_us() to the host test. Each reading is
+// `clock_step` later; init's shell runs `shell_runs` times before it stops.
+static unsigned long clock_us, clock_step;
+static int have_display, shell_runs;
+static char spawned_as[64];
+
+unsigned long uptime_us(void) {
+    clock_us += clock_step;
+    return clock_us;
+}
+
 static long kernel(long number, long a0, long a1, long a2, long a3) {
     (void)a2;
     (void)a3;
@@ -97,10 +108,24 @@ static long kernel(long number, long a0, long a1, long a2, long a3) {
         *(struct task_info *)a1 = tasks[a0];
         return 1;
     case SYS_SPAWN_FLAGS:
+        spawned_as[0] = '\0';
+        for (long i = 0; i < a1; i++) {
+            strcat(spawned_as, i ? " " : "");
+            strcat(spawned_as, ((char *const *)a2)[i]);
+        }
         if (spawn_result > 0) {
             write(1, "<shell>\n", 8);
+            if (--shell_runs == 0) {
+                clock_step = 1000;  // the next run ends at once
+            }
         }
         return spawn_result;
+    case SYS_FB_INFO:
+        if (!have_display) {
+            return -1;
+        }
+        *(struct fb_info *)a0 = (struct fb_info){0x1000, 640, 480, 2560, 32};
+        return 0;
     case SYS_WAITPID:
         *(int *)a1 = child_exit_code;
         return a0;
@@ -169,6 +194,8 @@ static void reset(void) {
     fake_set_handler(kernel);
     listing_size = listing_next = 0;
     readdir_fails = 0;
+    have_display = shell_runs = 0;
+    clock_step = 0;
 }
 
 // Runs a program's main with the given arguments (argv[0] first). main
@@ -393,15 +420,31 @@ static void test_ps(void) {
 
 static void test_init(void) {
     reset();
+    CHECK(RUN(init, "init") == 0 &&
+              printed("init: no display, so no shell; the serial line is the debug console\n", ""),
+          "without a display, no shell");
+    reset();
+    have_display = 1;
     spawn_result = 5;
     child_exit_code = 3;
-    CHECK(RUN(init, "init") == 3, "init returns the shell's exit code");
-    CHECK(screen_is("init: starting /bin/shell\n<shell>\n"), "its banner comes before the shell");
+    clock_step = 2000000;
+    shell_runs = 3;
+    CHECK(RUN(init, "init") == 3 && strcmp(spawned_as, "screens shell") == 0,
+          "with one, the shell under the screen manager");
+    CHECK(screen_is("init: starting the shell (screens shell)\n<shell>\n"
+                    "init: the shell ended (exit 3); starting it again\n"
+                    "init: starting the shell (screens shell)\n<shell>\n"
+                    "init: the shell ended (exit 3); starting it again\n"
+                    "init: starting the shell (screens shell)\n<shell>\n"
+                    "init: the shell ended at once (exit 3); not starting it again\n"),
+          "started again as it ends, until it ends at once:\n%s", fake_screen(NULL));
     reset();
+    have_display = 1;
     spawn_result = -1;
     CHECK(RUN(init, "init") == 1 &&
-              printed("init: starting /bin/shell\n", "init: cannot start /bin/shell\n"),
-          "init reports a shell that cannot start");
+              printed("init: starting the shell (screens shell)\n",
+                      "init: cannot start /bin/screens\n"),
+          "init reports a manager that cannot start");
 }
 
 TEST_MAIN(test_echo_hello, test_cat, test_ls, test_mkdir_rmdir, test_rm_mv, test_ps, test_init)
