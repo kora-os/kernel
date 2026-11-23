@@ -22,7 +22,7 @@
  *   }
  *
  * Ctrl+C calls the break callback (console_on_break): a client kills its
- * foreground program there.
+ * foreground program there. console_run() does all of that for one program.
  */
 #ifndef LIBSCREEN_CONSOLE_H
 #define LIBSCREEN_CONSOLE_H
@@ -73,6 +73,19 @@ void console_write(console_t *c, const char *text, size_t length);
 
 /* Call `fn(ctx)` on Ctrl+C. */
 void console_on_break(console_t *c, void (*fn)(void *ctx), void *ctx);
+
+/* What console_run() does on Ctrl+C: kill the program, or send it the break
+ * signal (SIG_BREAK in <libk/koraos.h>), for a program that ends its own
+ * foreground program then (the shell). */
+#define CONSOLE_BREAK_KILL 0
+#define CONSOLE_BREAK_SIGNAL 1
+
+/* Run the program `name` with its stdin, stdout and stderr on the console,
+ * and serve the console until it ends. 0 with its exit code in *code, or -1
+ * if it could not start. Sets the break callback (`on_break` says what it
+ * does) for the time it runs. */
+int console_run(console_t *c, const char *name, int argc, char *const argv[], int on_break,
+                int *code);
 
 /* Answer the reads still waiting (with an error), and free the console. The
  * screen stays the caller's. */

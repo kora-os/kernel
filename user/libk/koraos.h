@@ -167,6 +167,15 @@ int port_reply(void *msg);
  * 0), and be ready to find none. */
 #define SIG_MASK(bit) (1u << (bit))
 
+/* The break signal, a system bit nobody allocates: Ctrl+C on a console, as
+ * AmigaOS's SIGBREAKF_CTRL_C. The program serving a console sends it with
+ * sig_send to the program it runs, when that program asked for it
+ * (console_run in <libscreen/console.h>); the shell does, and ends its
+ * foreground program. Wait for it with sig_wait(SIG_MASK(SIG_BREAK)), and
+ * clear it with sig_set(0, SIG_MASK(SIG_BREAK)) before a wait that should
+ * see only a new one. */
+#define SIG_BREAK 0
+
 int sig_alloc(int bit);
 int sig_free(int bit);
 unsigned sig_wait(unsigned mask);
