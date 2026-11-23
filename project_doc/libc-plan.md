@@ -62,7 +62,8 @@ With stdio in place, the existing user programs moved from libk's helpers
 (`kputs`, `kput_int`, `kstrlen`, `kstreq`, raw `write(1, ...)`) to the libc,
 and the helpers are gone. libk keeps what is KoraOS specific: the syscall stubs, threads, jobs, `spawn`
 and `wait`, the mutex and atomics, `uptime_us`, volumes and assigns, the
-framebuffer, `kgetline` and `kheap_info`. The POSIX-shaped calls (`open`,
+framebuffer and `kheap_info` (and `kgetline`, until the consoles took over
+line editing in console step 4c2b). The POSIX-shaped calls (`open`,
 `read`, `write`, `stat`, `readdir`, ...) stay in libk as KoraOS calls; a POSIX
 layer (`<unistd.h>`, `<dirent.h>`) is a later decision, with MicroPython.
 
@@ -84,7 +85,8 @@ Rules for the migration, which come from the console plan
 - **No literal console fds in programs.** stdin and stdout become handles to
   a console instance, so programs use `stdin`, `stdout` and `stderr`, never
   `write(1, ...)` or `read(0, ...)`. `tests/check-console-fds.py` enforces it
-  with a short allow-list: `kgetline` in libk, `fpprobe` (no libc call may
+  with a short allow-list: `kgetline` in libk (gone since console step
+  4c2b), `fpprobe` (no libc call may
   run between filling and checking its FP registers, so it also starts its
   child with the raw `libk_spawn_flags`) and `threadprobe`, which tests the
   kernel itself: a thread blocked in a console read, and lines written with
@@ -96,8 +98,9 @@ Rules for the migration, which come from the console plan
   `stderr` is unbuffered, but one `fprintf` to it is one write, so a message
   stays whole while programs on other cores print.
 - **No investment in line input.** Line editing, history and the raw/cooked
-  switch move to the screen manager, which deletes `kgetline`. Until then it
-  only gains a flush of `stdout`, and the libc's `stdin` stays as it is.
+  switch move to the screen manager, which deletes `kgetline` (done in
+  console step 4c2b). Until then it only gains a flush of `stdout`, and the
+  libc's `stdin` stays as it is.
 - **Programs that draw with escape sequences flush explicitly.** `stdout` is
   line buffered, so a cursor move or a colour change with no newline waits in
   the buffer: finish a frame with `fflush(stdout)`.
@@ -209,9 +212,9 @@ Two things need the kernel, and wait for it:
 - No per-thread `TPIDR_EL0`: `errno` is shared by a program's threads.
 - No wall clock (`time()`), no `fstat`, no environment passed at spawn
   (`getenv` returns `NULL`). `isatty` answers for the standard streams only.
-- The console is raw: `stdin` gets no echo and Enter arrives as `'\r'`, so
-  line input needs the program's own editing (libk's `kgetline`). The
-  terminal design is in `console-plan.md`.
+- The kernel's console is raw: `stdin` there gets no echo and Enter arrives
+  as `'\r'`. Programs run in a console on a screen (the shell's, since
+  console step 4c2b), which edits the lines; see `console-plan.md`.
 - `lseek` cannot go past the end of a file, so neither can `fseek`.
 - A program whose main thread calls `thread_exit()` ends when its last thread
   returns, without going through `exit()`: no `atexit` handler runs and no

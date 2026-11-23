@@ -203,8 +203,9 @@ categories:
         prs: [88, 89, 90, 91, 92, 93]
       - id: console-handles
         name: Console handles
-        status: in_progress
+        status: completed
         description: A program's stdin and stdout are handles to a console instead of fixed file descriptors.
+        completed: 2026-11-23
         prs: [102]
 
   - id: shell
@@ -269,13 +270,15 @@ categories:
         description: A full-screen shell with a menu and a status bar.
       - id: line-editing
         name: Console line editing
-        status: in_progress
+        status: completed
         description: Line editing, history and a raw/cooked switch provided by the console to every program.
+        completed: 2026-11-23
         prs: [106]
       - id: break-key
         name: Ctrl+C break
-        status: in_progress
+        status: completed
         description: Ctrl+C stops the program in the foreground of a console.
+        completed: 2026-11-23
         prs: [106]
 
   - id: storage
@@ -393,13 +396,15 @@ categories:
         prs: [100]
       - id: screen-manager
         name: Screen manager
-        status: in_progress
+        status: completed
         description: A user task that owns the screen and the input queue and hosts the consoles programs run in.
+        completed: 2026-11-23
         prs: [105]
       - id: framebuffer-handoff
         name: Framebuffer hand-off
-        status: in_progress
+        status: completed
         description: The kernel hands the framebuffer to one task and takes it back when that task exits or crashes.
+        completed: 2026-11-23
         prs: [104]
       - id: console-fonts
         name: Console fonts
@@ -420,7 +425,7 @@ categories:
       - id: uart-console
         name: Serial console
         status: completed
-        description: UART kernel log and debug console alongside the shell.
+        description: UART kernel log and debug console; the shell is on the screen.
         completed: 2026-09-27
         prs: [24, 33]
       - id: usb-host-pi3

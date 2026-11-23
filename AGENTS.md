@@ -34,7 +34,7 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
   host tests of the user programs (`user/tests`) on that libc and its fake
   kernel. Programs use `stdin`, `stdout` and `stderr`, never fds 0, 1 and 2
   (`tests/check-console-fds.py`), and flush `stdout` before the console
-  changes hands (libk's `spawn` and `kgetline` do).
+  changes hands (libk's `spawn` does).
 - FAT32 writes are developed on disposable QEMU images only: virt disks
   (`tests/run-qemu-write.py`) and raspi3b/raspi4b SD and raspi3b USB scratch
   drives from a `--storage-writable` build (`tests/run-qemu-storage-write.py`),
@@ -57,7 +57,8 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
 - Signals (`src/proc/task.c`, syscalls 57 to 62) are Exec's: 32 bits per
   thread (8 to 31 allocatable), set by other threads, a port's arrivals
   (`port_signal`) and a child's end (`SPAWN_SIGNAL`), waited for together
-  with `sig_wait`. A server waits that way, never by polling.
+  with `sig_wait`. A server waits that way, never by polling. Bit 0 is the
+  break (`SIG_BREAK`): Ctrl+C, sent by a console's server (`console_run`).
 - stdin, stdout and stderr are per-process handles (`struct std_handle` in
   `proc/task.h`, `<_libc/console.h>`): the kernel console, a file or a console
   handler's port, set at spawn (`spawn_std`). The libc reads them on first
@@ -75,8 +76,12 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
 - The screen manager is the user program `screens` (`user/screens.c`); its
   clients use `user/libscreen` (`screen_open`, `screen_damage`,
   `screen_event`). Screens are the manager's memory; Meta+M is its hotkey.
-- A console on a screen (`user/libscreen/console.c`, `newcon`) serves its
-  programs' packets; line editing is `user/libconsole/edit.c` and key bytes
+  init runs `screens shell` with a display (no shell without one) and starts
+  it again when it ends. A program that claims the display or the keyboard
+  itself borrows them first (`screens_borrow`), as `inputprobe` does.
+- A console on a screen (`user/libscreen/console.c`, `newcon`, and the
+  shell's own: started on the kernel console, the shell opens one and runs
+  itself there) serves its programs' packets; line editing is `user/libconsole/edit.c` and key bytes
   `keys.c`, both pure (built into the kernel too, like `term.c`) and tested
   on the host (`tests/host/edit_test.c`).
 - The serial line is the kernel debug console (on QEMU too). With `conlog on`
