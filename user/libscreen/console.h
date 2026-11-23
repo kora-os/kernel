@@ -9,7 +9,7 @@
  * (<_libc/console.h>). Writes are shown at once; reads wait for a line in
  * cooked mode (the default) or for any key in raw mode (console_mode() in
  * <libk/koraos.h>). Shift+PageUp and Shift+PageDown scroll back through its
- * history.
+ * history, and so does the mouse's wheel.
  *
  *   screen_t *s = screen_open("my console");
  *   console_t *c = console_open(s);
@@ -34,6 +34,7 @@
 
 #define CONSOLE_HISTORY_LINES 500  /* scrollback */
 #define CONSOLE_READERS 16         /* reads waiting at once */
+#define CONSOLE_WHEEL_LINES 3      /* lines a turn of the wheel scrolls */
 
 typedef struct console {
     screen_t *screen;
