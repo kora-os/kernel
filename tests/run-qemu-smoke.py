@@ -663,16 +663,18 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         """`tasks` (tid, pid, cpu, state, stack, name) with the forbid flag and the
         BKL holder: ({name: (state, stack, forbidden)}, peak, size, holder pid
         or None)."""
+        # The shell's prompt, which ends in no newline, may come from another
+        # core just before one of the table's lines.
         q.debug("tasks")
         listed = {}
         while True:
-            m = q.expect(rb"^(?:\s+(\d+)\s+\d+\s+(\d+)\s+(\w+)\s+(\d+)\s+(\S+)( \(forbid\))?(?: \(killed\))?|"
-                         rb"kernel stack peak: (\d+) of (\d+) bytes)\r?\n")
+            m = q.expect(rb"^(?:\$ )*(?:\s+(\d+)\s+\d+\s+(\d+)\s+(\w+)\s+(\d+)\s+(\S+)( \(forbid\))?"
+                         rb"(?: \(killed\))?|kernel stack peak: (\d+) of (\d+) bytes)\r?\n")
             if m.group(7):
                 peak, size = int(m.group(7)), int(m.group(8))
                 break
             listed[m.group(5).decode()] = (m.group(3).decode(), int(m.group(4)), m.group(6) is not None)
-        m = q.expect(rb"^big kernel lock: (free|pid (\d+))\r?\n")
+        m = q.expect(rb"^(?:\$ )*big kernel lock: (free|pid (\d+))\r?\n")
         holder = int(m.group(2)) if m.group(2) else None
         return listed, peak, size, holder
 
