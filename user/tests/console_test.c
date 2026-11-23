@@ -42,6 +42,9 @@ static int damage_y, damage_height, damages;
 static struct screen_request *manager_request;
 static int ended[100], watched[100];
 static int sig_next = PORT_BIT;
+// What the console copied to the serial line (conlog).
+static char logged[4096];
+static size_t logged_length;
 
 static long kernel(long number, long a0, long a1, long a2, long a3) {
     (void)a2;
@@ -84,6 +87,11 @@ static long kernel(long number, long a0, long a1, long a2, long a3) {
         *out = (struct port_message){manager_request, PORT_REPLY, 1};
         return 1;
     }
+    case SYS_CONLOG:
+        memcpy(logged + logged_length, (const char *)a0, (size_t)a1);
+        logged_length += (size_t)a1;
+        logged[logged_length] = '\0';
+        return a1;
     case SYS_SIG_ON_END:
         if (a0 <= 0 || a0 >= 100 || ended[a0]) {
             return -1;
@@ -195,6 +203,9 @@ static void test_reads(void) {
     CHECK(answer_count == 0 && strcmp(row_text(2), "$ ab") == 0, "typing is echoed, not read yet");
     type_text("\nsecond\n");
     service(SIG_MASK(KEY_BIT));
+    CHECK(strstr(logged, "hello\nworld") != NULL && strstr(logged, "ab\nsecond\n") != NULL &&
+              strstr(logged, "\x1b") == NULL,
+          "conlog gets the writes and the lines entered, not the echo's cursor moves:\n%s", logged);
     CHECK(answer_count == 2 && answered[0] == &first && first.result == 3 &&
           memcmp(a, "ab\n", 3) == 0, "the first read gets the first line");
     CHECK(answered[1] == &second && second.result == 7 && memcmp(b, "second\n", 7) == 0,

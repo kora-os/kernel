@@ -3,6 +3,7 @@
 #include "arch/systick.h"
 #include "arch/trapframe.h"
 #include "common.h"
+#include "console.h"
 #include "fs/fat32.h"
 #include "input/input.h"
 #include "input/keylog.h"
@@ -472,6 +473,19 @@ static long sys_input_read(struct input_event *out, long max) {
     return count;
 }
 
+// conlog(text, length): with the debug console's conlog on, copy a user
+// console's text to the serial line.
+static long sys_conlog(const char *text, uint64_t length) {
+    if (!console_conlog() || length == 0) {
+        return 0;
+    }
+    if (!uptr_ok((uint64_t)text, length)) {
+        return -1;
+    }
+    tty_serial_copy(text, (size_t)length);
+    return (long)length;
+}
+
 // fb_claim(on): hand the screen to the calling process, or give it back.
 static long sys_fb_claim(long on) {
     struct process *p = proc_current();
@@ -775,6 +789,9 @@ void syscall_handle(struct trapframe *tf) {
         break;
     case SYS_gettid:
         ret = task_current()->pid;
+        break;
+    case SYS_conlog:
+        ret = sys_conlog((const char *)a0, a1);
         break;
     default:
         ret = -1;

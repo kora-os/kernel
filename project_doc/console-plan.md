@@ -1,8 +1,9 @@
 # Console and screen plan (handover)
 
 Status: **steps 1 to 3 done** (step 3 as two PRs, 3a and 3b); **step 4 in
-progress**: 4a (signals) and 4b (the screen manager) done; 4c split into
-4c1 (the console handler, in review) and 4c2 (the shell on it). It is the outcome of a design discussion on
+progress**: 4a (signals), 4b (the screen manager) and 4c1 (the console
+handler) done; 4c2 in two PRs, 4c2a (typing through the debug console, in
+review) and 4c2b (the shell on the display). It is the outcome of a design discussion on
 2026-11-12 and is the "terminal design" that `libc-plan.md` defers to koracli.
 No milestone number has been assigned yet.
 
@@ -201,12 +202,16 @@ flowchart TB
           Meta+M, input to the front screen's owner, `condemo` on a screen of
           its own.
   - [ ] 4c. The shell as the first console client, as two PRs:
-    - [ ] 4c1. The console handler: a console on a screen that serves its
+    - [x] 4c1. The console handler: a console on a screen that serves its
           programs' packets, cooked and raw modes, line editing and history,
           Ctrl+C; `newcon` runs a program in one.
-    - [ ] 4c2. The shell on it: a screen of its own, init starting
-          `screens shell` with a display, Ctrl+C to the foreground program,
-          `kgetline` gone. The kernel terminal becomes the boot and panic
+    - [ ] 4c2a. The debug console types (`type`, `key`) and copies the
+          consoles' text to the serial line (`conlog`); the smoke test drives
+          the shell that way.
+    - [ ] 4c2b. The shell on a screen of its own, init starting `screens
+          shell` with a display (no shell without one), Ctrl+C to the
+          foreground program, `kgetline` gone; Ctrl-T and the shell on the
+          serial line removed. The kernel terminal becomes the boot and panic
           fallback only.
   - Screens sliding down to show the one behind can follow, as 4d or later.
 - [ ] 5. Mouse events, then the graphics layer.
@@ -404,11 +409,9 @@ flowchart TB
 
 - **Line editing and history live in the console**, with cooked and raw
   modes; `kgetline` goes away.
-- **The serial line stays separate.** A shell on a screen takes only keys;
-  runs without a display (and the QEMU tests that drive the shell over
-  serial) use the shell on the kernel console.
-- **init starts `screens shell`** when there is a display, the plain shell
-  otherwise.
+- **The serial line stays separate.** A shell on a screen takes only keys.
+  (Revised for 4c2, below.)
+- **init starts `screens shell`** when there is a display.
 - **Ctrl+C kills** the foreground program.
 - **Two PRs**: 4c1 the console handler, 4c2 the shell on it.
 
@@ -438,6 +441,38 @@ flowchart TB
 - **Not yet**: the shell on it, init, and `kgetline`'s removal (4c2).
   Program output that arrives while a line is half typed is not redrawn
   around it.
+
+## Step 4c2 decisions (2026-11-22)
+
+- **The shell is on the display only, the serial line is the debug console
+  only**, on QEMU as on a Pi: the shell on the serial line was a stopgap
+  from before USB keyboards. Ctrl-T goes.
+- **No display, no shell**: the debug console alone.
+- **The smoke test types through the debug console**: `type TEXT` and `key
+  NAME` post key events, and `conlog on` copies what the consoles show to
+  the serial line. It works on a Pi too, and on QEMU raspi4b, which has no
+  keyboard.
+- **Two PRs**: 4c2a the debug console's typing and the harness on it, with
+  the shell still on the kernel console; 4c2b the shell moved.
+
+## Step 4c2a as built
+
+- **`type TEXT`** (`src/console.c`, `src/input/typing.c`): each character
+  as its key on a US keyboard (Shift and Ctrl as needed), posted to the input
+  queue as a keyboard's down and up events from the source `debug-console`.
+  Escapes: `\n` (Enter), `\t`, `\e`, `\s`, `\\`, `\xHH`. **`key NAME...`**
+  presses keys by QEMU's sendkey names (`ret`, `up`, `ctrl-c`, `meta_l-m`).
+  Both report events the queue dropped.
+- **`conlog [on|off]`**: the kernel console copies its output to the serial
+  line (it did that under QEMU unconditionally), user consoles copy theirs
+  through the new `conlog` syscall (69): programs' writes and the lines
+  entered, not the echo's cursor moves. With it on the debug console neither
+  echoes nor prompts. On by default under QEMU, where the serial line is now
+  the debug console from boot.
+- **The smoke test** types every command with `type` (in chunks of 32
+  characters) and sends debug console commands without Ctrl-T; a step drives
+  two screens with `key` (a key to the front, Meta+M, a probe ending with its
+  screen open), on every graphics profile.
 
 ## Safety net
 

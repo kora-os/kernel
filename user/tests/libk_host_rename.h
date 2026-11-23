@@ -60,6 +60,7 @@
 #define input_focus libk_input_focus
 #define fb_claim libk_fb_claim
 #define gettid libk_gettid
+#define conlog libk_conlog
 #define wait libk_wait
 
 #endif // LIBK_HOST_RENAME_H

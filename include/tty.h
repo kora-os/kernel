@@ -13,16 +13,16 @@
 // (input/input_tty.h). That adapter is temporary; see
 // project_doc/console-plan.md.
 //
-// Under QEMU (no USB keyboard, usually no visible screen), or when no screen is
-// up, output is mirrored to the UART so the shell stays usable over serial.
+// When no screen is up, output goes to the UART instead; with the debug
+// console's conlog on (the default under QEMU), it goes to both.
 
 #ifdef __cplusplus
 extern "C" {
 #endif
 
 // Serial input: the UART is shared by the kernel debug console (console.c) and,
-// as a fallback keyboard, this terminal; Ctrl-T switches between them. By
-// default it is the debug console on hardware and the terminal under QEMU.
+// as a fallback keyboard, this terminal; Ctrl-T switches between them. It is
+// the debug console by default.
 // tty_serial_init() hooks the UART receive interrupt; tty_poll_serial() drains
 // and routes pending bytes and is safe to call from any context.
 void tty_serial_init(void);
@@ -35,6 +35,11 @@ void tty_putc(char c);
 // builds, or no screen) going out in one piece under the serial output lock,
 // so other cores' lines never land in the middle of it.
 void tty_write(const char *buf, size_t len);
+
+// Write `len` bytes to the serial line, '\n' as CR LF, in one piece under the
+// serial output lock: the screen terminal's copy (conlog), and the consoles of
+// user programs (the conlog syscall).
+void tty_serial_copy(const char *buf, size_t len);
 void tty_flush(void);
 
 // Block until an input byte arrives from the keyboard or the UART (when routed

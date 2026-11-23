@@ -266,6 +266,14 @@ tests/run-qemu-smoke.py --target qemu_raspi4b
 tests/run-qemu-smoke.py --target qemu_virt --keyboard --disk build/userfs/aarch64/koraos.img --repeat 256
 ```
 
+The serial line is the kernel debug console, with `conlog on` (the default
+under QEMU): the test types every shell command through the debug console's
+`type` (`q.send`), presses named keys with `key` (`q.key`), sends debug
+console commands as they are (`q.debug`), and reads what the consoles show
+from the copy conlog puts on the line. A typing error (a dropped event, a
+character no key types) fails the step at once. Steps that test a keyboard
+itself type with QEMU's `sendkey` instead.
+
 The test checks the boot line's build identifier (the git commit), the
 boot-time kernel heap self-test, and that every core came online (`--smp N`
 on virt, 1 to 4; raspi3b always has four; `--gic 3` for a GICv3 and, on an
@@ -330,9 +338,10 @@ while it holds it, and the step checks that the console redrew it. With
 `--keyboard`, the debug console's `keylog` traces typed keys to the shell,
 then Meta+M to `inputprobe keys 4`, which claims the queue. The screen
 manager runs two `screenprobe`s, each filling a screen with a colour, in the
-background: the front screen fills the display, each probe killed from the
-shell closes its screen at once and brings the other to front, and the
-console gets the display back at the end. With `--keyboard`, a key goes to the
+background: the front screen fills the display, a key typed with `key` goes
+to the front probe only, Meta+M switches, a probe ending with its screen open
+(x) has it closed at once and the other brought to front, and the console
+gets the display back at the end. With `--keyboard`, a key goes to the
 front probe only, Meta+M switches, Escape closes each, and `condemo` and
 `gfxdemo` show on screens of their own. With `--keyboard`, `newcon conprobe`
 runs a program in a console: a line edited with an arrow, recalled with Up,

@@ -8,7 +8,7 @@
 // Commands execute in that context: they must not block, and may use the kernel
 // heap (it is interrupt safe) only briefly.
 
-#define CONSOLE_MAX_CMD_LEN 64
+#define CONSOLE_MAX_CMD_LEN 128
 
 // Command handler function type
 typedef void (*console_cmd_handler_t)(const char *args);
@@ -29,6 +29,10 @@ void console_prompt(void);
 
 // Feed one received byte: line editing, and command execution on Enter.
 void console_input(char c);
+
+// Whether conlog is on: the consoles copy what they show to the serial line,
+// and this console neither echoes nor prompts (console.c).
+bool console_conlog(void);
 
 // Print a log message (for system logging)
 void console_log(const char *message);
