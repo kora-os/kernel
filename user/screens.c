@@ -3,9 +3,11 @@
  *   screens program [args] [+ program [args]]...
  *
  * Starts the programs and serves screens to any program that opens one (libscreen,
- * <libscreen/screen.h>): full-size pixel buffers in its own memory. The one
- * in front is copied to the display as its program reports what changed, and
- * gets the keys. Meta+M (Command or the Windows key) brings the next screen
+ * <libscreen/screen.h>): full-size pixel buffers in the program's memory,
+ * which screens only reads. The one in front is copied to the display as its
+ * program reports what changed, and gets the keys, as messages from screens'
+ * memory on the screen's port. So neither side writes into the other's
+ * memory, and either may end, crashed or not. Meta+M (Command or the Windows key) brings the next screen
  * to front; a newly opened screen comes to front by itself.
  *
  * While a screen is open, screens holds the display and the keyboard, taken
@@ -25,6 +27,34 @@
 #define MAX_SCREENS 16
 #define MAX_PROGRAMS 8
 #define BLACK 0x00000000u
+#define SCREEN_PENDING 256      /* events waiting for a screen's program: a power of two */
+#define MAX_BATCHES (2 * MAX_SCREENS)
+
+/* A screen, the manager's own record of it; programs name it by its address. */
+struct screen {
+    int id;                 /* 1, 2, ... in the order they were opened */
+    int owner;              /* the pid of the program that opened it */
+    int port;               /* the program's port its events go to */
+    unsigned width, height;
+    unsigned pitch;         /* bytes a row */
+    const unsigned *pixels; /* the program's memory: only read */
+    char title[SCREEN_TITLE_MAX];
+    /* Events not sent yet, oldest first; more are dropped and counted. */
+    struct input_event pending[SCREEN_PENDING];
+    unsigned head, tail;
+    unsigned lost;
+    struct batch *out;      /* the message the program has, or NULL */
+};
+
+/* A message of events. It stays the manager's until the program replies (or
+ * the kernel returns it), even after its screen has closed. */
+struct batch {
+    struct screen_events events;  /* first: the message's address */
+    struct screen *screen;        /* whose, or NULL once that screen closed */
+    int busy;
+};
+static struct batch batches[MAX_BATCHES];
+static int reply_port;      /* the batches come back here */
 
 static struct fb_info display;
 static struct screen *screens[MAX_SCREENS];  /* in the order they were opened */
@@ -136,9 +166,12 @@ static void unwatch(int owner) {
     sig_on_end(owner, -1);
 }
 
-static struct screen *open_screen(int owner, int tid, int bit, const char *title) {
+static struct screen *open_screen(int owner, const struct screen_request *request) {
     /* Watch its program, which may have ended since it asked. */
-    if (screen_count == MAX_SCREENS || lent_to != 0 || sig_on_end(owner, end_bit) != 0) {
+    if (screen_count == MAX_SCREENS || lent_to != 0 || request->pixels == NULL ||
+        request->width != (int)display.width || request->height != (int)display.height ||
+        request->pitch < display.width * 4 || request->port <= 0 ||
+        sig_on_end(owner, end_bit) != 0) {
         return NULL;
     }
     if (!holding && hold(1) != 0) {
@@ -147,13 +180,7 @@ static struct screen *open_screen(int owner, int tid, int bit, const char *title
         return NULL;
     }
     struct screen *screen = calloc(1, sizeof(*screen));
-    size_t bytes = (size_t)display.width * display.height * 4;
-    unsigned *pixels = alloc_pages((bytes + KORAOS_PAGE_SIZE - 1) / KORAOS_PAGE_SIZE);
-    if (screen == NULL || pixels == NULL) {
-        free(screen);
-        if (pixels != NULL) {
-            free_pages(pixels);
-        }
+    if (screen == NULL) {
         unwatch(owner);
         if (screen_count == 0 && holding) {
             hold(0);
@@ -162,13 +189,12 @@ static struct screen *open_screen(int owner, int tid, int bit, const char *title
     }
     screen->id = next_id++;
     screen->owner = owner;
-    screen->owner_tid = tid;
-    screen->owner_bit = bit;
+    screen->port = request->port;
     screen->width = display.width;
     screen->height = display.height;
-    screen->pitch = display.width * 4;
-    screen->pixels = pixels;  /* zeroed pages: black */
-    snprintf(screen->title, sizeof(screen->title), "%s", title != NULL ? title : "");
+    screen->pitch = request->pitch;
+    screen->pixels = request->pixels;
+    snprintf(screen->title, sizeof(screen->title), "%s", request->title != NULL ? request->title : "");
     screens[screen_count++] = screen;
     printf("screens: screen %d open for %s (pid %d)\n", screen->id, screen->title, owner);
     to_front(screen);
@@ -195,7 +221,9 @@ static void close_screen(struct screen *screen, const char *why) {
         to_front(screens[i < screen_count ? i : 0]);
     }
     unwatch(screen->owner);
-    free_pages(screen->pixels);
+    if (screen->out != NULL) {
+        screen->out->screen = NULL;  /* it comes back later, to an empty pool slot */
+    }
     free(screen);
 }
 
@@ -262,8 +290,11 @@ static void close_ended(void) {
 static void serve(struct screen_request *request, int sender) {
     request->result = -1;
     if (request->op == SCREEN_OPEN) {
-        request->screen = open_screen(sender, request->tid, request->bit, request->title);
-        request->result = request->screen != NULL ? 0 : -1;
+        struct screen *screen = open_screen(sender, request);
+        request->screen = screen;
+        request->id = screen != NULL ? screen->id : 0;
+        request->pid = getpid();
+        request->result = screen != NULL ? 0 : -1;
         return;
     }
     if (request->op == SCREEN_LEND) {
@@ -327,15 +358,63 @@ static int hotkey(const struct input_event *event) {
     return 0;
 }
 
+/* Send the screen's program its waiting events, a message at a time: the
+ * next once it has replied to the last. */
+static void send_events(struct screen *screen) {
+    if (screen->out != NULL || screen->head == screen->tail) {
+        return;
+    }
+    struct batch *b = NULL;
+    for (int i = 0; i < MAX_BATCHES && b == NULL; i++) {
+        b = batches[i].busy ? NULL : &batches[i];
+    }
+    if (b == NULL) {
+        return;  /* all out: when one comes back */
+    }
+    int n = 0;
+    while (n < SCREEN_BATCH && screen->tail != screen->head) {
+        b->events.events[n++] = screen->pending[screen->tail++ % SCREEN_PENDING];
+    }
+    b->events.count = n;
+    b->screen = screen;
+    b->busy = 1;
+    if (port_put(screen->port, &b->events, reply_port) != 0) {
+        b->busy = 0;  /* its program has ended: the screen closes at its end signal */
+        return;
+    }
+    screen->out = b;
+}
+
+/* A message of events back from a program, replied or returned. */
+static void batch_back(void *msg) {
+    for (int i = 0; i < MAX_BATCHES; i++) {
+        struct batch *b = &batches[i];
+        if (b->busy && &b->events == msg) {
+            struct screen *screen = b->screen;
+            b->busy = 0;
+            b->screen = NULL;
+            if (screen != NULL) {
+                screen->out = NULL;
+                send_events(screen);
+            }
+            return;
+        }
+    }
+}
+
+/* Fill any free batches the screens waited for. */
+static void send_all(void) {
+    for (int i = 0; i < screen_count; i++) {
+        send_events(screens[i]);
+    }
+}
+
 static void deliver(struct screen *screen, const struct input_event *event) {
-    unsigned head = screen->head;
-    if (head - __atomic_load_n(&screen->tail, __ATOMIC_ACQUIRE) == SCREEN_EVENTS) {
+    if (screen->head - screen->tail == SCREEN_PENDING) {
         screen->lost++;
         return;
     }
-    screen->events[head % SCREEN_EVENTS] = *event;
-    __atomic_store_n(&screen->head, head + 1, __ATOMIC_RELEASE);
-    sig_send(screen->owner_tid, SIG_MASK(screen->owner_bit));
+    screen->pending[screen->head++ % SCREEN_PENDING] = *event;
 }
 
 static void route(const struct input_event *event) {
@@ -391,11 +470,12 @@ int main(int argc, char **argv) {
         return 1;
     }
     int port = port_create(SCREENS_PORT);
+    reply_port = port_create(NULL);
     int port_bit = sig_alloc(-1), child_bit = sig_alloc(-1);
     input_bit = sig_alloc(-1);
     end_bit = sig_alloc(-1);
-    if (port < 0 || port_bit < 0 || input_bit < 0 || child_bit < 0 || end_bit < 0 ||
-        port_signal(port, port_bit) != 0) {
+    if (port < 0 || reply_port < 0 || port_bit < 0 || input_bit < 0 || child_bit < 0 ||
+        end_bit < 0 || port_signal(port, port_bit) != 0 || port_signal(reply_port, port_bit) != 0) {
         fputs("screens: no port\n", stderr);
         return 1;
     }
@@ -409,6 +489,9 @@ int main(int argc, char **argv) {
     while (screen_count > 0 || program_count > 0 || lent_to != 0) {
         unsigned got = sig_wait(all);
         struct port_message message;
+        while (port_get(reply_port, &message) == 1) {
+            batch_back(message.msg);  /* replied, or returned by a program that ended */
+        }
         while (port_get(port, &message) == 1) {
             if (message.kind == PORT_MESSAGE) {
                 serve(message.msg, message.sender);
@@ -428,10 +511,12 @@ int main(int argc, char **argv) {
         if (got & SIG_MASK(child_bit)) {
             reap_programs();
         }
+        send_all();
         reclaim();
         fflush(stdout);
     }
     printf("screens: done\n");
     port_delete(port);
+    port_delete(reply_port);
     return 0;
 }

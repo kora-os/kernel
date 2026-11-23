@@ -59,8 +59,11 @@ console_t *console_open(screen_t *s);
 /* Its port, for the STD_PORT handles of its programs. */
 int console_port(const console_t *c);
 
-/* The signals to wait for: its port, its screen's keys and its readers'
- * ends. */
+/* Whether its screen is gone: the screen manager has ended. */
+int console_gone(const console_t *c);
+
+/* The signals to wait for: its port, its screen's keys (and the manager's
+ * end) and its readers' ends. */
 unsigned console_signals(const console_t *c);
 
 /* Do what the signals in `got` (sig_wait's answer) ask: take the screen's
@@ -83,7 +86,8 @@ void console_on_break(console_t *c, void (*fn)(void *ctx), void *ctx);
 /* Run the program `name` with its stdin, stdout and stderr on the console,
  * and serve the console until it ends. 0 with its exit code in *code, or -1
  * if it could not start. Sets the break callback (`on_break` says what it
- * does) for the time it runs. */
+ * does) for the time it runs. If the screen is gone (the manager ended), the
+ * program is killed: nothing would show its output or reach it. */
 int console_run(console_t *c, const char *name, int argc, char *const argv[], int on_break,
                 int *code);
 

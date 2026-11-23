@@ -163,6 +163,10 @@ int main(int argc, char **argv) {
                 screen = NULL;
             }
         }
+        if (screen != NULL && screen_gone(screen)) {  /* the manager ended */
+            screen_close(screen);
+            screen = NULL;
+        }
     }
     return 0;
 }

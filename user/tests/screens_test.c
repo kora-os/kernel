@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// Host test of the screen manager (user/screens.c) on the fake kernel, with
-// libscreen's reading side: its requests, what it copies to the display (host
-// memory with padding that must stay untouched), Meta+M, where the keys go,
-// a full event ring, screens closed by their programs or by their ends, and
-// how it starts its programs.
+// Host test of the screen manager (user/screens.c) on the fake kernel: its
+// requests, what it copies to the display (host memory with padding that must
+// stay untouched) from the programs' own pixels, Meta+M, where the keys go
+// (messages on the screen's port, one out at a time, the rest waiting, a
+// full queue), messages back after their screen closed or their program
+// ended, screens closed by their programs or by their ends, lending, and how
+// it starts its programs.
 
 #include "test.h"
 
@@ -29,8 +31,15 @@ static unsigned display_pixels[HEIGHT * STRIDE];
 #define MAX_PIDS 200
 static int watched[MAX_PIDS], ended[MAX_PIDS];
 static int focus = -1;
-static int last_signal_tid;
-static unsigned last_signal_mask, signals_sent;
+// The programs' side: each pid's pixels, and the messages of events sent to
+// its port (100 + pid), the last one not taken yet.
+#define EVENT_PORT(pid) (100 + (pid))
+#define MAX_PIXEL_SETS 24
+static unsigned pixel_sets[MAX_PIXEL_SETS][WIDTH * HEIGHT];
+static int pixel_sets_used;
+static struct screen_events *sent[MAX_PIDS];
+static unsigned messages_sent;
+static int dead_port;  // a port whose program has ended: messages to it fail
 static char spawned[8][64];
 static int spawn_count, spawn_flags_seen;
 static int reaped_pid = -1;
@@ -56,13 +65,20 @@ static long kernel(long number, long a0, long a1, long a2, long a3) {
         CHECK(a0 == -1 || a0 == input_bit, "the keyboard is claimed on the input signal");
         input_held_bit = (int)a0;
         return 0;
+    case SYS_GETPID:
+        return 2;
     case SYS_INPUT_FOCUS:
         focus = (int)a0;
         return 0;
-    case SYS_SIG_SEND:
-        last_signal_tid = (int)a0;
-        last_signal_mask = (unsigned)a1;
-        signals_sent++;
+    case SYS_PORT_PUT:
+        CHECK(a0 >= 100 && a0 < 100 + MAX_PIDS && a2 == reply_port,
+              "events go to a screen's port, coming back to the manager");
+        if (a0 == dead_port) {
+            return -1;
+        }
+        CHECK(sent[a0 - 100] == NULL, "one message out at a time");
+        sent[a0 - 100] = (struct screen_events *)a1;
+        messages_sent++;
         return 0;
     case SYS_SPAWN_FLAGS: {
         char *const *argv = (char *const *)a2;
@@ -95,6 +111,7 @@ static void reset_display(void) {
     display = (struct fb_info){(unsigned long)display_pixels, WIDTH, HEIGHT, STRIDE * 4, 32};
     end_bit = 20;
     input_bit = 21;
+    reply_port = 7;
 }
 
 static unsigned shown(int x, int y) {
@@ -116,12 +133,22 @@ static int display_is(const struct screen *screen) {
     return 1;
 }
 
+// The program draws into its own pixels.
 static void fill(struct screen *screen, int x0, int y0, int width, int height, unsigned colour) {
+    unsigned *pixels = (unsigned *)screen->pixels;
     for (int y = y0; y < y0 + height; y++) {
         for (int x = x0; x < x0 + width; x++) {
-            screen->pixels[y * (screen->pitch / 4) + x] = colour;
+            pixels[y * (screen->pitch / 4) + x] = colour;
         }
     }
+}
+
+// The events sent to pid's screen since the last look, and the message to
+// reply with; NULL for none.
+static struct screen_events *taken(int pid) {
+    struct screen_events *e = sent[pid];
+    sent[pid] = NULL;
+    return e;
 }
 
 static struct screen_request ask(int op, struct screen *screen, int sender) {
@@ -131,7 +158,11 @@ static struct screen_request ask(int op, struct screen *screen, int sender) {
 }
 
 static struct screen *open_for(int pid, const char *title) {
-    struct screen_request request = {.op = SCREEN_OPEN, .tid = pid + 1, .bit = 9, .title = title};
+    unsigned *pixels = pixel_sets[pixel_sets_used++ % MAX_PIXEL_SETS];
+    memset(pixels, 0, sizeof(pixel_sets[0]));
+    struct screen_request request = {.op = SCREEN_OPEN, .title = title, .pixels = pixels,
+                                     .width = WIDTH, .height = HEIGHT, .pitch = WIDTH * 4,
+                                     .port = EVENT_PORT(pid)};
     serve(&request, pid);
     return request.result == 0 ? request.screen : NULL;
 }
@@ -156,13 +187,34 @@ static void test_open_and_damage(void) {
           input_held_bit == -1 && !watched[10], "no screen without the display");
     refuse_display = 0;
     CHECK(!fb_held && input_held_bit == -1, "nothing is held before the first screen");
+    struct screen_request bad_open = {.op = SCREEN_OPEN, .pixels = pixel_sets[0], .width = WIDTH - 1,
+                                      .height = HEIGHT, .pitch = WIDTH * 4, .port = EVENT_PORT(10)};
+    serve(&bad_open, 10);
+    struct screen_request no_pixels = {.op = SCREEN_OPEN, .width = WIDTH, .height = HEIGHT,
+                                       .pitch = WIDTH * 4, .port = EVENT_PORT(10)};
+    serve(&no_pixels, 10);
+    struct screen_request no_port = {.op = SCREEN_OPEN, .pixels = pixel_sets[0], .width = WIDTH,
+                                     .height = HEIGHT, .pitch = WIDTH * 4};
+    serve(&no_port, 10);
+    CHECK(bad_open.result == -1 && no_pixels.result == -1 && no_port.result == -1 &&
+              screen_count == 0 && !fb_held,
+          "a screen needs pixels as large as the display, and a port");
 
     struct screen *a = open_for(10, "first");
     CHECK(fb_held && input_held_bit == input_bit, "the first screen takes the display and keys");
-    CHECK(a != NULL && a->id == 1 && a->owner == 10 && a->owner_tid == 11 && a->owner_bit == 9,
-          "a screen for pid 10, its thread and its bit");
-    CHECK(a->width == WIDTH && a->height == HEIGHT && a->pitch == WIDTH * 4,
-          "as large as the display, rows without padding");
+    CHECK(a != NULL && a->id == 1 && a->owner == 10 && a->port == EVENT_PORT(10),
+          "a screen for pid 10, and the port its events go to");
+    struct screen_request named = {.op = SCREEN_OPEN, .title = "named", .pixels = pixel_sets[23],
+                                   .width = WIDTH, .height = HEIGHT, .pitch = WIDTH * 4,
+                                   .port = EVENT_PORT(11)};
+    serve(&named, 11);
+    CHECK(named.result == 0 && named.pid == 2 && named.id == 2,
+          "the reply names the manager's pid, for the program to watch, and the screen's id");
+    ask(SCREEN_CLOSE, named.screen, 11);
+    CHECK(front == a && screen_count == 1, "closed again");
+    CHECK(a->width == WIDTH && a->height == HEIGHT && a->pitch == WIDTH * 4 &&
+              a->pixels == pixel_sets[pixel_sets_used - 1],
+          "as large as the display, on the program's pixels");
     CHECK(strcmp(a->title, "first") == 0 && front == a && focus == 10 && watched[10],
           "a new screen comes to front, its program gets the keys and is watched");
     CHECK(display_is(a), "and is shown");
@@ -195,7 +247,7 @@ static void test_open_and_damage(void) {
 static void test_two_screens_and_keys(void) {
     struct screen *a = screens[0];
     struct screen *b = open_for(20, "second");
-    CHECK(b != NULL && b->id == 2 && front == b && focus == 20 && display_is(b),
+    CHECK(b != NULL && b->id == 3 && front == b && focus == 20 && display_is(b),
           "the second screen comes to front, black");
     fill(b, 0, 0, WIDTH, HEIGHT, BLUE);
     damage(b, 20, 0, 0, WIDTH, HEIGHT, 0);
@@ -204,14 +256,16 @@ static void test_two_screens_and_keys(void) {
     damage(a, 10, 0, 0, 4, 4, 0);
     CHECK(display_is(b), "a screen behind is not copied");
 
-    // Keys go to the front screen's program, which is signalled.
-    signals_sent = 0;
+    // Keys go to the front screen's program, as messages on its port.
     struct input_event meta = key(INPUT_EVENT_KEY_DOWN, KEY_LEFT_GUI, INPUT_MOD_LEFT_GUI);
     route(&meta);
-    CHECK(b->head == 1 && b->events[0].keycode == KEY_LEFT_GUI && a->head == 0,
-          "Meta alone goes to the front screen");
-    CHECK(signals_sent == 1 && last_signal_tid == 21 && last_signal_mask == SIG_MASK(9),
-          "its thread is signalled on its bit");
+    CHECK(b->head - b->tail == 1 && a->head == 0 && messages_sent == 0,
+          "Meta alone waits for the front screen's program");
+    send_all();
+    struct screen_events *first = taken(20);
+    CHECK(first != NULL && first->count == 1 && first->events[0].keycode == KEY_LEFT_GUI &&
+              taken(10) == NULL,
+          "and goes to it as a message on its port");
 
     // Meta+M: the next screen, wrapping round; the M is the manager's.
     struct input_event m_down = key(INPUT_EVENT_KEY_DOWN, KEY_M, INPUT_MOD_LEFT_GUI);
@@ -219,40 +273,55 @@ static void test_two_screens_and_keys(void) {
     route(&m_down);
     CHECK(front == a && focus == 10 && display_is(a), "Meta+M brings the next screen to front");
     route(&m_up);
-    CHECK(a->head == 0 && b->head == 1, "neither the M nor its key up is delivered");
+    send_all();
+    CHECK(taken(10) == NULL && taken(20) == NULL, "neither the M nor its key up is delivered");
     struct input_event meta_up = key(INPUT_EVENT_KEY_UP, KEY_LEFT_GUI, 0);
     route(&meta_up);
-    CHECK(a->head == 1 && a->events[0].type == INPUT_EVENT_KEY_UP, "Meta's key up goes to a");
+    send_all();
+    struct screen_events *up = taken(10);
+    CHECK(up != NULL && up->count == 1 && up->events[0].type == INPUT_EVENT_KEY_UP,
+          "Meta's key up goes to a");
+    batch_back(up);
     struct input_event right_meta_m = key(INPUT_EVENT_KEY_DOWN, KEY_M, INPUT_MOD_RIGHT_GUI);
     route(&right_meta_m);
     CHECK(front == b && display_is(b), "right Meta works too, and wraps round");
     route(&m_up);
     struct input_event plain_m = key(INPUT_EVENT_KEY_DOWN, KEY_M, INPUT_MOD_LEFT_SHIFT);
     route(&plain_m);
-    CHECK(front == b && b->head == 2 && b->events[1].keycode == KEY_M,
-          "M without Meta is an ordinary key");
+    send_all();
+    CHECK(taken(20) == NULL && b->head - b->tail == 1,
+          "M without Meta is an ordinary key; it waits while b's program has a message");
+    batch_back(first);
+    struct screen_events *m = taken(20);
+    CHECK(m != NULL && m->count == 1 && m->events[0].keycode == KEY_M,
+          "and is sent once that message is replied");
 
-    // The program's side reads them in order.
-    screen_t handle = {.screen = b};
-    struct input_event got;
-    CHECK(screen_event(&handle, &got) && got.keycode == KEY_LEFT_GUI && screen_event(&handle, &got) &&
-          got.keycode == KEY_M && !screen_event(&handle, &got), "libscreen reads them in order");
-
-    // A full ring drops the newest and counts them.
-    for (int i = 0; i < SCREEN_EVENTS + 3; i++) {
+    // Many keys: a message carries SCREEN_BATCH of them, the queue holds
+    // SCREEN_PENDING, and more are dropped and counted.
+    for (int i = 0; i < SCREEN_PENDING + 3; i++) {
         struct input_event k = key(INPUT_EVENT_KEY_DOWN, KEY_A + i % 26, 0);
         route(&k);
     }
     CHECK(b->lost == 3, "three events lost (%u)", b->lost);
-    int read = 0;
-    while (screen_event(&handle, &got)) {
-        CHECK(got.keycode == KEY_A + read % 26, "event %d in order", read);
-        read++;
+    batch_back(m);
+    int read = 0, messages = 0;
+    struct screen_events *e;
+    while ((e = taken(20)) != NULL) {
+        CHECK(e->count == SCREEN_BATCH, "full messages (%d)", e->count);
+        for (int i = 0; i < e->count; i++, read++) {
+            CHECK(e->events[i].keycode == KEY_A + read % 26, "event %d in order", read);
+        }
+        messages++;
+        batch_back(e);
     }
-    CHECK(read == SCREEN_EVENTS, "a full ring's events are all read (%d)", read);
+    CHECK(read == SCREEN_PENDING && messages == SCREEN_PENDING / SCREEN_BATCH,
+          "a full queue's events all arrive (%d in %d messages)", read, messages);
     struct input_event again = key(INPUT_EVENT_KEY_DOWN, KEY_ENTER, 0);
     route(&again);
-    CHECK(screen_event(&handle, &got) && got.keycode == KEY_ENTER, "and it takes more");
+    send_all();
+    e = taken(20);
+    CHECK(e != NULL && e->count == 1 && e->events[0].keycode == KEY_ENTER, "and it takes more");
+    batch_back(e);
 
     // To front by request.
     struct screen_request r = ask(SCREEN_FRONT, a, 20);
@@ -280,9 +349,41 @@ static void test_closing(void) {
           "a program's end closes its screen; the next one comes to front");
 
     struct input_event k = key(INPUT_EVENT_KEY_DOWN, KEY_A, 0);
-    unsigned head = a->head;
     route(&k);
-    CHECK(a->head == head + 1, "keys go to the new front");
+    send_all();
+    struct screen_events *to_a = taken(10);
+    CHECK(to_a != NULL && to_a->events[0].keycode == KEY_A, "keys go to the new front");
+
+    // A screen that closes with its message out: the message comes back later
+    // and is free again, and nothing is sent to the closed screen.
+    struct screen *fourth = open_for(30, "fourth");
+    route(&k);
+    send_all();
+    struct screen_events *to_d = taken(30);
+    CHECK(to_d != NULL, "a message out to a new front");
+    route(&k);
+    ask(SCREEN_CLOSE, fourth, 30);
+    batch_back(to_d);
+    send_all();
+    CHECK(taken(30) == NULL && front == a, "back after its screen closed: nothing more goes there");
+    batch_back(to_a);
+    int busy = 0;
+    for (int i = 0; i < MAX_BATCHES; i++) {
+        busy += batches[i].busy;
+    }
+    CHECK(busy == 0, "every message is free again (%d busy)", busy);
+
+    // A program that ended: a message to its port fails, and is free again.
+    struct screen *dead = open_for(40, "dead");
+    dead_port = EVENT_PORT(40);
+    route(&k);
+    send_all();
+    CHECK(dead->out == NULL && dead->head == dead->tail, "nothing out to an ended program");
+    ended[40] = 1;
+    close_ended();
+    dead_port = 0;
+    ended[40] = 0;
+    watched[40] = 0;
 
     CHECK(open_for(20, "late") == NULL && screen_count == 1, "an ended program gets no screen");
 
