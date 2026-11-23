@@ -463,15 +463,14 @@ function(add_circle_library NAME BOARD)
         # runs in its multi-core mode: real spinlocks and per-core critical
         # sections. Its interrupts still all arrive on core 0.
         -DARM_ALLOW_MULTI_CORE
-        # Build only the keyboard and mass storage drivers from Circle's USB
-        # device factory; every other class (mouse, gamepads, audio, net, ...)
-        # is excluded so we do not have to vendor those drivers and their
-        # dependencies.
+        # Build only the keyboard, mouse and mass storage drivers from
+        # Circle's USB device factory; every other class (gamepads, audio,
+        # net, ...) is excluded so we do not have to vendor those drivers and
+        # their dependencies.
         -DEXCLUDE_USB_AUDIO
         -DEXCLUDE_USB_BLUETOOTH
         -DEXCLUDE_USB_GAMEPAD
         -DEXCLUDE_USB_MIDI
-        -DEXCLUDE_USB_MOUSE
         -DEXCLUDE_USB_NET
         -DEXCLUDE_USB_PRINTER
         -DEXCLUDE_USB_SERIAL
