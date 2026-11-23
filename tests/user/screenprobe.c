@@ -6,7 +6,10 @@
 //                        prints each key the screen gets ("screenprobe
 //                        COLOUR: key down 0x04 mods 0x0000 char 0x61") until
 //                        Escape, closes the screen and prints "screenprobe:
-//                        COLOUR closed". Exit 1 when no screen manager runs.
+//                        COLOUR closed"; or until x, and ends without closing
+//                        it ("screenprobe: COLOUR ends, screen open"), as a
+//                        program that crashes. Exit 1 when no screen manager
+//                        runs.
 #include "../../user/libk/koraos.h"
 #include "../../user/libscreen/screen.h"
 
@@ -43,6 +46,10 @@ int main(int argc, char **argv) {
             printf("screenprobe %s: key %s 0x%02x mods 0x%04x char 0x%x\n", name,
                    event.type == INPUT_EVENT_KEY_DOWN ? "down" : "up", event.keycode,
                    event.modifiers, event.codepoint);
+            if (event.type == INPUT_EVENT_KEY_DOWN && event.codepoint == 'x') {
+                printf("screenprobe: %s ends, screen open\n", name);
+                return 0;  // the manager closes it when it sees the end
+            }
             if (event.type == INPUT_EVENT_KEY_DOWN && event.keycode == KEY_ESCAPE) {
                 screen_close(s);
                 printf("screenprobe: %s closed\n", name);

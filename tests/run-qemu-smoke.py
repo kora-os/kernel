@@ -65,6 +65,8 @@ class Qemu:
             if match:
                 self.pending = self.pending[match.end():]
                 return match
+            if DROPPED.search(self.pending):
+                raise Failure("typing through the debug console failed:\n" + self.tail())
             if FAULT.search(self.pending):
                 self.drain(0.5)  # the rest of the fault report
                 raise Failure("kernel fault:\n" + self.tail())
@@ -96,7 +98,24 @@ class Qemu:
             self.pending += data
 
     def send(self, text):
-        self.proc.stdin.write(text.encode())
+        """Type `text` on the keyboard, through the debug console's `type`
+        (the serial line is the debug console): it goes to whoever takes the
+        keys, the shell. '\\r' is Enter. Long text goes in a few commands, a
+        little apart, so the input queue never fills."""
+        chunks = [text[i:i + TYPE_CHUNK] for i in range(0, len(text), TYPE_CHUNK)]
+        for n, chunk in enumerate(chunks):
+            if n:
+                time.sleep(0.05)
+            self.debug("type " + type_escape(chunk))
+
+    def key(self, *names):
+        """Press keys by name (QEMU's sendkey names) through the debug console."""
+        self.debug("key " + " ".join(names))
+
+    def debug(self, command):
+        """A command for the kernel debug console, on the serial line. With
+        conlog on (the default under QEMU) it neither echoes nor prompts."""
+        self.proc.stdin.write((command + "\r").encode())
         self.proc.stdin.flush()
 
     def tail(self, n=1500):
@@ -188,6 +207,26 @@ def near(actual, expected, tolerance=8):
 
 
 PROMPT = rb"^\$ "
+TYPE_CHUNK = 32  # characters per `type` command: 64 events of the queue's 256
+DROPPED = re.compile(rb"^(?:type|key): the input queue dropped \d+ events|^(?:type|key): (?:no key|unknown|a broken)", re.M)
+
+
+def type_escape(text):
+    """`text` for the debug console's `type`: Enter, backslashes, control
+    bytes and a leading space escaped."""
+    out = []
+    for i, c in enumerate(text):
+        if c in "\r\n":
+            out.append("\\n")
+        elif c == "\\":
+            out.append("\\\\")
+        elif c == " " and i == 0:
+            out.append("\\s")
+        elif ord(c) < 0x20 or ord(c) >= 0x7f:
+            out.append("\\x%02x" % ord(c))
+        else:
+            out.append(c)
+    return "".join(out)
 
 
 def ps_table(q, tids=False):
@@ -491,21 +530,18 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
                "child"), redirection
 
     def debug_console():
-        q.send("\x14")  # Ctrl-T
-        q.expect(rb"\[serial -> kernel console")
-        q.expect(rb"koraos> ")
-        q.send("version\r")
-        q.expect(rb"KoraOS version \d")
-        q.send("\x14")
-        q.expect(rb"\[serial -> screen terminal")
-    yield "Ctrl-T reaches the kernel debug console and back", debug_console
+        # The serial line is the debug console; conlog is on, so it answers
+        # without echo or prompt, and the consoles' text comes along.
+        q.debug("version")
+        q.expect(rb"^KoraOS version \d")
+        q.debug("conlog")
+        q.expect(rb"^conlog: on")
+    yield "the serial line is the kernel debug console, with conlog on", debug_console
 
     def irqs():
-        q.send("\x14")
-        q.expect(rb"koraos> ")
         deadline = time.monotonic() + 5
         while True:
-            q.send("irqs\r")
+            q.debug("irqs")
             q.expect(rb"^controller: (?:BCM2835 legacy|GIC-400|GICv[23] \(virt\))")
             m = q.expect(rb"^systick: (\d+) ticks, uptime (\d+)\.(\d+) s")
             ticks = int(m.group(1))
@@ -515,19 +551,16 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
             m = q.expect(rb"^\s+\d+\s+(\d+)\s+uart \(PL011\)")
             if int(m.group(1)) == 0:
                 raise Failure("the UART receive interrupt never fired")
-            q.expect(rb"koraos> ")
             if ticks >= 5:
                 break
             if time.monotonic() >= deadline:
                 raise Failure("system tick never advanced to five interrupts")
             time.sleep(0.05)
-        q.send("\x14")
-        q.expect(rb"\[serial -> screen terminal")
     yield "irqs shows the system tick and the UART interrupt", irqs
 
     def per_core_ticks():
         def read_cpus():
-            q.send("cpus\r")
+            q.debug("cpus")
             ticks = {}
             while True:
                 m = q.expect(rb"^\s+(\d+)\s+(online|offline)(?:\s+(\d+)\s+(\S+))?\r?\n|"
@@ -539,15 +572,10 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
                     break
                 if m.group(2) == b"online":
                     ticks[int(m.group(1))] = (int(m.group(3)), m.group(4).decode())
-            q.expect(rb"koraos> ")
             return ticks
-        q.send("\x14")
-        q.expect(rb"koraos> ")
         first = read_cpus()
         time.sleep(0.3)
         second = read_cpus()
-        q.send("\x14")
-        q.expect(rb"\[serial -> screen terminal")
         if sorted(second) != list(range(cores)):
             raise Failure("online cores %s, want 0..%d" % (sorted(second), cores - 1))
         for core in range(cores):
@@ -560,22 +588,18 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
 
     def kernel_heap():
         def heap_stats():
-            q.send("heap\r")
+            q.debug("heap")
             m = q.expect(rb"^heap: (\d+) live, \d+ allocated, (\d+) failed, (\d+) bad frees")
             live, failed, bad = (int(g) for g in m.groups())
             m = q.expect(rb"^pages: (\d+) of (\d+) free")
-            q.expect(rb"koraos> ")
             return live, failed, bad, int(m.group(1))
 
-        q.send("\x14")
-        q.expect(rb"koraos> ")
         live, failed, bad, pages = heap_stats()
         for _ in range(4):  # each run seeds from the uptime
-            q.send("heaptest 3000\r")
+            q.debug("heaptest 3000")
             m = q.expect(rb"^heaptest: (?:3000 rounds ok|FAILED check (\d+))", timeout=60)
             if m.group(1):
                 raise Failure("heaptest failed check %s" % m.group(1).decode())
-            q.expect(rb"koraos> ")
         live2, failed2, bad2, pages2 = heap_stats()
         if (live2, failed2, bad2) != (live, failed, bad):
             raise Failure("heap changed across heaptest: live/failed/bad %s -> %s"
@@ -585,8 +609,6 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         # At most one cached empty slab per size class may stay behind.
         if pages2 < pages - 9:
             raise Failure("heaptest leaked pages: %d -> %d free" % (pages, pages2))
-        q.send("\x14")
-        q.expect(rb"\[serial -> screen terminal")
     yield "kernel heap stress leaves no leaks", kernel_heap
 
     def fp_context():
@@ -617,9 +639,7 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         """`tasks` (tid, pid, cpu, state, stack, name) with the forbid flag and the
         BKL holder: ({name: (state, stack, forbidden)}, peak, size, holder pid
         or None)."""
-        q.send("\x14")
-        q.expect(rb"koraos> ")
-        q.send("tasks\r")
+        q.debug("tasks")
         listed = {}
         while True:
             m = q.expect(rb"^(?:\s+(\d+)\s+\d+\s+(\d+)\s+(\w+)\s+(\d+)\s+(\S+)( \(forbid\))?(?: \(killed\))?|"
@@ -630,9 +650,6 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
             listed[m.group(5).decode()] = (m.group(3).decode(), int(m.group(4)), m.group(6) is not None)
         m = q.expect(rb"^big kernel lock: (free|pid (\d+))\r?\n")
         holder = int(m.group(2)) if m.group(2) else None
-        q.expect(rb"koraos> ")
-        q.send("\x14")
-        q.expect(rb"\[serial -> screen terminal")
         return listed, peak, size, holder
 
     def tasks():
@@ -860,15 +877,10 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
 
     def kernel_counts():
         """(live kernel heap allocations, free pages) from the debug console."""
-        q.send("\x14")
-        q.expect(rb"koraos> ")
-        q.send("heap\r")
+        q.debug("heap")
         m = q.expect(rb"^heap: (\d+) live")
         live = int(m.group(1))
         m = q.expect(rb"^pages: (\d+) of \d+ free")
-        q.expect(rb"koraos> ")
-        q.send("\x14")
-        q.expect(rb"\[serial -> screen terminal")
         return live, int(m.group(1))
 
     def probe(command, ok, code=0, timeout=60):
@@ -1130,12 +1142,8 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
             # (front: itself), not to the shell.
             gap = 0.1 if keyboard == "USB" else 0.02
             device = rb"(?:virtio|usb)-keyboard"
-            q.send("\x14")
-            q.expect(rb"koraos> ")
-            q.send("keylog on\r")
+            q.debug("keylog on")
             q.expect(rb"^keylog: on, events go to the kernel console")
-            q.send("\x14")
-            q.expect(rb"\[serial -> screen terminal")
             q.monitor("sendkey shift-k 10")
             q.expect(rb"^KeyDown from " + device + rb" to kernel console \(read by shell \(pid \d+\)\)\r?\n"
                      rb"    time \d+ ms, keycode 0x0e \(K\), modifiers 0x0002 \(LShift\)\r?\n"
@@ -1159,12 +1167,8 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
                 raise Failure(m.group(1).decode(errors="replace"))
             q.expect(rb"\] exited with 0")
             q.expect(PROMPT)
-            q.send("\x14")
-            q.expect(rb"koraos> ")
-            q.send("keylog off\r")
+            q.debug("keylog off")
             q.expect(rb"^keylog: off")
-            q.send("\x14")
-            q.expect(rb"\[serial -> screen terminal")
         yield "keylog traces %s keys to the console and to a claimer (Meta+M)" % keyboard, keylog
 
     if not graphics:
@@ -1286,10 +1290,11 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         return screens
 
     def screen_manager():
-        # screens hosts two screenprobes in the background; the shell, on the
-        # serial line, kills them one by one. Each end closes its screen at
-        # once and the other comes to front; after the last, screens ends and
-        # the console gets the display back.
+        # screens hosts two screenprobes in the background. Keys typed through
+        # the debug console go to the front screen's probe; Meta+M switches;
+        # x ends a probe without closing its screen, as a crash would, and the
+        # manager closes it at once and brings the other to front. After the
+        # last, screens ends and the console gets the display back.
         # Its lines may follow the shell's prompt, which it prints meanwhile.
         LINE = rb"(?:^|\$ )"
         q.send("screens screenprobe red + screenprobe green &\r")
@@ -1300,20 +1305,29 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         # Each probe printed after its damage was copied: screen 2, opened
         # last, is in front.
         uniform("screens-two", COLOURS[screens[2][0]])
-        q.send("kill %s\r" % screens[2][1])
-        q.expect(LINE + rb"screens: screen 2 closed \(screenprobe \w+\), its program ended")
+        q.key("a")
+        m = q.expect(LINE + rb"screenprobe (\w+): key down 0x04 mods 0x0000 char 0x61")
+        if m.group(1) != screens[2][0]:
+            raise Failure("a key went to %s, not the front screen" % m.group(1).decode())
+        q.key("meta_l-m")
         q.expect(LINE + rb"screens: screen 1 in front")
         time.sleep(0.2)
         uniform("screens-one", COLOURS[screens[1][0]])
-        q.send("kill %s\r" % screens[1][1])
+        q.key("x")
+        q.expect(LINE + rb"screenprobe: " + screens[1][0] + rb" ends, screen open")
         q.expect(LINE + rb"screens: screen 1 closed \(screenprobe \w+\), its program ended")
+        q.expect(LINE + rb"screens: screen 2 in front")
+        time.sleep(0.2)
+        uniform("screens-again", COLOURS[screens[2][0]])
+        q.key("x")
+        q.expect(LINE + rb"screens: screen 2 closed \(screenprobe \w+\), its program ended")
         q.expect(LINE + rb"screens: done")
         q.send("\r")
         q.expect(PROMPT)
         time.sleep(0.2)
         console_back("screens-done")
-    yield "screens: two screens, each closed as its program is killed, the console back", \
-        screen_manager
+    yield ("screens: keys to the front screen, Meta+M, each screen closed as its program ends, "
+           "the console back"), screen_manager
 
     if keyboard:
         gap = 0.1 if keyboard == "USB" else 0.02
