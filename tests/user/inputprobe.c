@@ -16,7 +16,11 @@
 //                             screen ("screen") is someone else's (its claim
 //                             fails)
 //   inputprobe holder         claims both and exits without giving them back
+// Under a screen manager (the shell runs under one) it first borrows the
+// display and the keyboard (screens_borrow): the full run returns them, the
+// keys run ends with them.
 #include "../../user/libk/koraos.h"
+#include "../../user/libscreen/screen.h"
 
 static int failures;
 
@@ -176,6 +180,15 @@ static void screen(void) {
     printf("inputprobe: the screen, claimed and given back\n");
 }
 
+// Borrow the display and the keyboard from a screen manager, if one runs.
+static int borrow(void) {
+    if (port_find(SCREENS_PORT) >= 0 && screens_borrow() != 0) {
+        printf("inputprobe: FAIL borrow the display and the keyboard\n");
+        return -1;
+    }
+    return port_find(SCREENS_PORT) >= 0;
+}
+
 // --- Keys ----------------------------------------------------------------------
 
 static int timeout_bit;
@@ -187,6 +200,9 @@ static long timeout_main(void *arg) {
 }
 
 static int keys(int wanted) {
+    if (borrow() < 0) {
+        return 1;
+    }
     int key_bit = sig_alloc(-1);
     timeout_bit = sig_alloc(-1);
     if (input_claim(key_bit) != 0 || input_focus(getpid()) != 0) {
@@ -228,9 +244,17 @@ int main(int argc, char **argv) {
         if (!strcmp(argv[1], "holder")) return holder();
         return 2;
     }
+    int borrowed = borrow();
+    if (borrowed < 0) {
+        return 1;
+    }
     end_signals();
     input_queue();
     screen();
+    if (borrowed) {
+        check(screens_return() == 0, "return the display and the keyboard");
+        check(screens_return() == -1, "only once");
+    }
     if (failures == 0) {
         printf("inputprobe: all passed\n");
     }

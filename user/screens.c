@@ -10,11 +10,14 @@
  *
  * While a screen is open, screens holds the display and the keyboard, taken
  * from the kernel's console; with none, the console has them back, so a
- * program that opens no screen (a shell, say) works as it would without
- * screens. A screen closes when its program closes it or ends, crashed or
- * not. When the last screen has closed and the programs it started have
- * ended, screens ends. It reports what it does on its stdout, the kernel console, which
- * shows it then.
+ * program that opens no screen works as it would without screens. A program
+ * may also borrow them (screens_borrow): screens gives them back to the
+ * console until the program returns them or ends, so it can claim them
+ * itself, as a program that drives the hardware does without screens.
+ * A screen closes when its program closes it or ends, crashed or not. When
+ * the last screen has closed, the programs it started have ended and nothing
+ * is lent, screens ends. It reports what it does on its stdout, the kernel
+ * console, which shows it then.
  */
 #include "libk/koraos.h"
 #include "libscreen/screen.h"
@@ -32,6 +35,8 @@ static int end_bit;          /* set when a screen's program ends */
 static int input_bit;        /* set when a key event is queued for us */
 static int holding;          /* the display and the keyboard are ours */
 static int meta_m_held;      /* an M swallowed as Meta+M: swallow its key up */
+static int lent_to;          /* the pid the display and the keyboard are lent to */
+static int reclaim_failed;   /* taking them back failed, and was reported */
 
 static int programs[MAX_PROGRAMS];  /* the children still running */
 static int program_count;
@@ -40,7 +45,7 @@ static int program_count;
 
 /* Copy a rectangle of the front screen to the display, clipped to it. */
 static void copy_rect(int x, int y, int width, int height) {
-    if (front == NULL) {
+    if (front == NULL || !holding) {
         return;
     }
     if (x < 0) {
@@ -79,8 +84,10 @@ static void clear_display(void) {
 
 static void to_front(struct screen *screen) {
     front = screen;
-    copy_rect(0, 0, (int)screen->width, (int)screen->height);
-    input_focus(screen->owner);
+    if (holding) {
+        copy_rect(0, 0, (int)screen->width, (int)screen->height);
+        input_focus(screen->owner);
+    }
     printf("screens: screen %d in front (%s)\n", screen->id, screen->title);
 }
 
@@ -116,8 +123,11 @@ static int index_of(const struct screen *screen) {
     return -1;
 }
 
-/* Stop watching a program that has no screen left. */
+/* Stop watching a program that has no screen left and borrows nothing. */
 static void unwatch(int owner) {
+    if (owner == lent_to) {
+        return;
+    }
     for (int i = 0; i < screen_count; i++) {
         if (screens[i]->owner == owner) {
             return;
@@ -128,7 +138,7 @@ static void unwatch(int owner) {
 
 static struct screen *open_screen(int owner, int tid, int bit, const char *title) {
     /* Watch its program, which may have ended since it asked. */
-    if (screen_count == MAX_SCREENS || sig_on_end(owner, end_bit) != 0) {
+    if (screen_count == MAX_SCREENS || lent_to != 0 || sig_on_end(owner, end_bit) != 0) {
         return NULL;
     }
     if (!holding && hold(1) != 0) {
@@ -145,7 +155,7 @@ static struct screen *open_screen(int owner, int tid, int bit, const char *title
             free_pages(pixels);
         }
         unwatch(owner);
-        if (screen_count == 0) {
+        if (screen_count == 0 && holding) {
             hold(0);
         }
         return NULL;
@@ -177,7 +187,9 @@ static void close_screen(struct screen *screen, const char *why) {
     printf("screens: screen %d closed (%s), %s\n", screen->id, screen->title, why);
     if (screen_count == 0) {
         front = NULL;
-        hold(0);
+        if (holding) {
+            hold(0);
+        }
     } else if (screen == front) {
         /* The next one opened after it, or the first. */
         to_front(screens[i < screen_count ? i : 0]);
@@ -187,9 +199,53 @@ static void close_screen(struct screen *screen, const char *why) {
     free(screen);
 }
 
-/* The screens of programs that have ended: sig_on_end refuses a process that
- * is gone (and watches again one that is not). */
+/* --- Lending ------------------------------------------------------------------ */
+
+/* Take the display and the keyboard back once nothing is lent and a screen
+ * is open, and show the front screen. A borrower that returned them still
+ * claimed keeps them: then this is tried again at the manager's next wake. */
+static void reclaim(void) {
+    if (holding || lent_to != 0 || screen_count == 0) {
+        return;
+    }
+    if (hold(1) != 0) {
+        if (!reclaim_failed) {
+            printf("screens: the display or the keyboard is still taken\n");
+        }
+        reclaim_failed = 1;
+        return;
+    }
+    reclaim_failed = 0;
+    to_front(front);
+}
+
+static int lend(int borrower) {
+    if (lent_to != 0 || sig_on_end(borrower, end_bit) != 0) {
+        return -1;
+    }
+    if (holding) {
+        hold(0);  /* the console redraws */
+    }
+    lent_to = borrower;
+    printf("screens: the display and the keyboard lent to pid %d\n", borrower);
+    return 0;
+}
+
+static void lend_ends(const char *why) {
+    int borrower = lent_to;
+    lent_to = 0;
+    unwatch(borrower);
+    printf("screens: the display and the keyboard back, %s\n", why);
+    reclaim();
+}
+
+/* The screens of programs that have ended, and a borrower that ended:
+ * sig_on_end refuses a process that is gone (and watches again one that is
+ * not). */
 static void close_ended(void) {
+    if (lent_to != 0 && sig_on_end(lent_to, end_bit) != 0) {
+        lend_ends("their borrower ended");
+    }
     for (int i = 0; i < screen_count;) {
         struct screen *screen = screens[i];
         if (sig_on_end(screen->owner, end_bit) != 0) {
@@ -208,6 +264,17 @@ static void serve(struct screen_request *request, int sender) {
     if (request->op == SCREEN_OPEN) {
         request->screen = open_screen(sender, request->tid, request->bit, request->title);
         request->result = request->screen != NULL ? 0 : -1;
+        return;
+    }
+    if (request->op == SCREEN_LEND) {
+        request->result = lend(sender);
+        return;
+    }
+    if (request->op == SCREEN_RETURN) {
+        if (sender == lent_to) {
+            lend_ends("returned");
+            request->result = 0;
+        }
         return;
     }
     struct screen *screen = request->screen;
@@ -339,7 +406,7 @@ int main(int argc, char **argv) {
 
     unsigned all = SIG_MASK(port_bit) | SIG_MASK(input_bit) | SIG_MASK(child_bit) |
                    SIG_MASK(end_bit);
-    while (screen_count > 0 || program_count > 0) {
+    while (screen_count > 0 || program_count > 0 || lent_to != 0) {
         unsigned got = sig_wait(all);
         struct port_message message;
         while (port_get(port, &message) == 1) {
@@ -361,6 +428,7 @@ int main(int argc, char **argv) {
         if (got & SIG_MASK(child_bit)) {
             reap_programs();
         }
+        reclaim();
         fflush(stdout);
     }
     printf("screens: done\n");

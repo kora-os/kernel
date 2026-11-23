@@ -59,6 +59,8 @@ struct screen {
 #define SCREEN_DAMAGE 2  /* screen, x, y, width, height in */
 #define SCREEN_FRONT 3   /* screen in */
 #define SCREEN_CLOSE 4   /* screen in */
+#define SCREEN_LEND 5    /* nothing in: the sender borrows the display and keys */
+#define SCREEN_RETURN 6  /* nothing in: the sender returns them */
 
 struct screen_request {
     int op;
@@ -103,5 +105,15 @@ void screen_to_front(screen_t *s);
 
 /* Close the screen and free the handle. */
 void screen_close(screen_t *s);
+
+/* Borrow the display and the keyboard from the screen manager, as a program
+ * that drives them itself does (fb_claim, input_claim): the manager gives
+ * them back to the kernel's console, and the program claims them from there.
+ * Screens stay open out of sight, and no screen opens meanwhile. They go back
+ * to the manager when the program calls screens_return(), after giving up
+ * its own claims, or ends. 0, or -1: no screen manager runs, or it has lent
+ * them already. */
+int screens_borrow(void);
+int screens_return(void);
 
 #endif
