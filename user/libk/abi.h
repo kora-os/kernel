@@ -72,3 +72,4 @@
 #define SYS_INPUT_FOCUS  66
 #define SYS_FB_CLAIM     67
 #define SYS_GETTID   68
+#define SYS_CONLOG   69

@@ -4,6 +4,7 @@
 #include "common.h"
 #include "input/input.h"
 #include "input/keylog.h"
+#include "input/typing.h"
 #include "lib/timer.h"
 #include "lib/printf.h"
 #include "lib/string.h"
@@ -16,7 +17,25 @@
 #include "proc/task.h"
 #include "utils.h"
 
+// conlog: the consoles copy what they show to the serial line (tty.c, and
+// user consoles through the conlog syscall), and this console stops echoing
+// and prompting so its own text does not mix in. On under QEMU, where the
+// smoke test reads the serial line.
+#ifdef QEMU_TESTING
+static bool conlog = true;
+#else
+static bool conlog = false;
+#endif
+
+bool console_conlog(void) {
+  return conlog;
+}
+
+// The input source `type` and `key` post their events as.
+static unsigned typing_source;
+
 void console_init(void) {
+  typing_source = input_source_register("debug-console");
 
   // Print welcome banner
   uart_puts("\n");
@@ -37,6 +56,9 @@ void console_cmd_help(const char *args) {
   uart_puts("  tasks - List tasks with their state and kernel stack use\n");
   uart_puts("  cpus - List cores with their timer ticks and current task\n");
   uart_puts("  keylog [on|off] - Trace input events: device, receiver, key\n");
+  uart_puts("  type TEXT - Type TEXT as keys (\\n Enter, \\t, \\e, \\s, \\\\, \\xHH)\n");
+  uart_puts("  key NAME... - Press keys by name: ret, esc, up, ctrl-c, meta_l-m...\n");
+  uart_puts("  conlog [on|off] - Copy the consoles' text to this line; no echo\n");
   uart_puts("Ctrl-T switches the serial line between this console and the\n");
   uart_puts("screen terminal (the shell).\n");
 }
@@ -177,6 +199,81 @@ void console_cmd_keylog(const char *args) {
   }
 }
 
+// Post one key's down and up events, as a keyboard would. Returns how many
+// of the two the input queue dropped.
+static unsigned press(const struct typed_key *key) {
+  struct input_event down = {.type = INPUT_EVENT_KEY_DOWN, .modifiers = key->modifiers,
+                             .keycode = key->keycode, .source = (uint8_t)typing_source,
+                             .codepoint = key->codepoint};
+  struct input_event up = down;
+  up.type = INPUT_EVENT_KEY_UP;
+  up.codepoint = 0;
+  return (unsigned)!input_post(&down) + (unsigned)!input_post(&up);
+}
+
+static void report_dropped(const char *command, unsigned dropped) {
+  if (dropped != 0) {
+    printf("%s: the input queue dropped %u events\n", command, dropped);
+  }
+}
+
+// type TEXT: type the text on the keyboard, as it were: each character as its
+// key on a US layout, into whoever takes the keys (the front screen's program,
+// or the kernel console's reader).
+void console_cmd_type(const char *args) {
+  char text[CONSOLE_MAX_CMD_LEN];
+  int length = typing_unescape(args, text, sizeof(text));
+  if (length < 0) {
+    uart_puts("type: a broken escape (\\n \\t \\e \\s \\\\ \\xHH)\n");
+    return;
+  }
+  unsigned dropped = 0;
+  for (int i = 0; i < length; i++) {
+    struct typed_key key;
+    if (!typing_key_for_char((unsigned char)text[i], &key)) {
+      printf("type: no key types 0x%02x\n", (unsigned)(unsigned char)text[i]);
+      break;
+    }
+    dropped += press(&key);
+  }
+  report_dropped("type", dropped);
+}
+
+// key NAME...: press keys by their names (input/typing.h).
+void console_cmd_key(const char *args) {
+  unsigned dropped = 0;
+  while (*args) {
+    size_t length = 0;
+    while (args[length] && args[length] != ' ') {
+      length++;
+    }
+    struct typed_key key;
+    if (!typing_key_for_name(args, length, &key)) {
+      uart_puts("key: unknown key (ret, esc, up, pgup, f1, ctrl-c, shift-a, meta_l-m...)\n");
+      break;
+    }
+    dropped += press(&key);
+    args += length;
+    while (*args == ' ') {
+      args++;
+    }
+  }
+  report_dropped("key", dropped);
+}
+
+// conlog on|off (see console_conlog).
+void console_cmd_conlog(const char *args) {
+  if (strcmp(args, "on") == 0) {
+    conlog = true;
+  } else if (strcmp(args, "off") == 0) {
+    conlog = false;
+  } else if (args[0] != '\0') {
+    uart_puts("usage: conlog [on|off]\n");
+    return;
+  }
+  printf("conlog: %s\n", conlog ? "on" : "off");
+}
+
 console_command_t commands[] = {
     {"help", "Show available commands", console_cmd_help},
     {"get_el", "Get the current Exception Level", console_cmd_get_el},
@@ -187,6 +284,9 @@ console_command_t commands[] = {
     {"tasks", "List tasks and kernel stack use", console_cmd_tasks},
     {"cpus", "List cores, their ticks and current tasks", console_cmd_cpus},
     {"keylog", "Trace input events (on or off)", console_cmd_keylog},
+    {"type", "Type text as keys", console_cmd_type},
+    {"key", "Press keys by name", console_cmd_key},
+    {"conlog", "Copy the consoles' text to the serial line (on or off)", console_cmd_conlog},
     {NULL, NULL, NULL},
 };
 
@@ -221,6 +321,9 @@ static bool last_was_cr;
 // The prompt and the echo go out through uart_puts, in whole pieces under
 // the serial output lock, so other cores' lines never split them.
 void console_prompt(void) {
+  if (conlog) {
+    return;  // quiet: the serial line carries the consoles' text
+  }
   char prompt[sizeof("koraos> ") + CONSOLE_MAX_CMD_LEN];
   int n = 0;
   for (const char *p = "koraos> "; *p; p++) {
@@ -243,7 +346,9 @@ void console_input(char c) {
   last_was_cr = (c == '\r');
 
   if (c == '\r' || c == '\n') {
-    uart_puts("\n");
+    if (!conlog) {
+      uart_puts("\n");
+    }
     line[line_len] = '\0';
     if (line_len > 0) {
       console_parse_and_execute(line);
@@ -255,14 +360,18 @@ void console_input(char c) {
   if (c == 8 || c == 127) {  // backspace / delete
     if (line_len > 0) {
       line_len--;
-      uart_puts("\b \b");
+      if (!conlog) {
+        uart_puts("\b \b");
+      }
     }
     return;
   }
   if (c >= 32 && c < 127 && line_len < CONSOLE_MAX_CMD_LEN - 1) {
     line[line_len++] = c;
-    char echo[2] = {c, '\0'};
-    uart_puts(echo);
+    if (!conlog) {
+      char echo[2] = {c, '\0'};
+      uart_puts(echo);
+    }
   }
 }
 

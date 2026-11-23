@@ -91,11 +91,7 @@ static int input_pop(char *c) {
 // (console.c) or, as a fallback keyboard, to this terminal; Ctrl-T switches.
 #define SERIAL_SWITCH_KEY 0x14  // Ctrl-T
 
-#ifdef QEMU_TESTING
-static bool serial_to_tty = true;   // no USB keyboard: the UART drives the shell
-#else
 static bool serial_to_tty = false;  // the UART is the kernel debug console
-#endif
 
 static void announce_serial_route(void) {
     if (serial_to_tty) {
@@ -210,19 +206,7 @@ static void screen_out(char c) {
     screen_putc(c);
 }
 
-void tty_write(const char *buf, size_t len) {
-#ifndef QEMU_TESTING
-    if (screen_framebuffer() != NULL) {
-        for (size_t i = 0; i < len; i++) {
-            screen_out(buf[i]);
-        }
-        return;
-    }
-#else
-    for (size_t i = 0; i < len; i++) {
-        screen_out(buf[i]);
-    }
-#endif
+void tty_serial_copy(const char *buf, size_t len) {
     unsigned long flags = serial_out_begin();
     for (size_t i = 0; i < len; i++) {
         if (buf[i] == '\n') {
@@ -231,6 +215,20 @@ void tty_write(const char *buf, size_t len) {
         uart_putc((unsigned char)buf[i]);
     }
     serial_out_end(flags);
+}
+
+void tty_write(const char *buf, size_t len) {
+    bool screen = screen_framebuffer() != NULL;
+    if (screen) {
+        for (size_t i = 0; i < len; i++) {
+            screen_out(buf[i]);
+        }
+    }
+    // With no screen the serial line is the terminal; with conlog on, it
+    // carries a copy (console.c).
+    if (!screen || console_conlog()) {
+        tty_serial_copy(buf, len);
+    }
 }
 
 void tty_putc(char c) {

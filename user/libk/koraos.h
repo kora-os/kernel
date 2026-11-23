@@ -353,6 +353,11 @@ static inline int console_mode(int mode) {
 int waitpid(int pid, int *code, int flags);
 int getpid(void);  /* the program's pid, the same in all its threads */
 int gettid(void);  /* the calling thread's id (the pid in the main thread) */
+/* With the debug console's conlog on, copy a console's text to the serial
+ * line ('\n' as CR LF), as the kernel console's is: what console handlers
+ * show (libscreen/console.c), for whoever reads the line (the smoke test).
+ * Returns the bytes copied, 0 with conlog off. */
+long conlog(const char *text, size_t length);
 void yield(void);
 void msleep(unsigned long ms);  /* at least ms milliseconds (up to a 10 ms tick more) */
 

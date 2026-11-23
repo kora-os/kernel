@@ -228,3 +228,7 @@ int fb_claim(int on) {
 int gettid(void) {
     return (int)CALL(SYS_GETTID, 0, 0, 0, 0);
 }
+
+long conlog(const char *text, size_t length) {
+    return CALL(SYS_CONLOG, text, length, 0, 0);
+}

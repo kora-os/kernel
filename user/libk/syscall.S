@@ -67,6 +67,7 @@ SYSCALL input_read, SYS_INPUT_READ
 SYSCALL input_focus, SYS_INPUT_FOCUS
 SYSCALL fb_claim, SYS_FB_CLAIM
 SYSCALL gettid, SYS_GETTID
+SYSCALL conlog, SYS_CONLOG
 
 // exit(), rename() and the program entry point come from the libc (user/libc).
 

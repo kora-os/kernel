@@ -68,6 +68,7 @@
 #define SYS_input_focus  66
 #define SYS_fb_claim     67
 #define SYS_gettid       68
+#define SYS_conlog       69
 
 // Dispatch a syscall described by a trap frame from EL0. The return value is
 // written back into the frame's x0.
