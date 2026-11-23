@@ -23,6 +23,11 @@ static unsigned spawn_calls, assign_calls, background_reaps;
 static int last_argc, last_spawn_flags;
 static bool background_job_live;
 static bool last_argument_terminated, maximal_assign_received;
+// The break signal: with signals on, a foreground child's end is a signal
+// (bit 20), and the first wait sees Ctrl+C instead.
+static bool signals_on, child_killed;
+static unsigned waits, cleared;
+#define END_BIT 20
 
 static int kernel_getcwd(char *buffer, size_t size) {
     if (size < 6) return -1;
@@ -54,7 +59,7 @@ static int kernel_spawn(const char *name, int argc, char *const argv[], int flag
     write(out, "<", 1);
     write(out, name, strlen(name));
     write(out, ">\n", 2);
-    if (flags & SPAWN_NOWAIT) {
+    if ((flags & SPAWN_NOWAIT) && (flags & (0x3f << 12)) == 0) {  // no end signal
         background_job_live = true;
         return 124;
     }
@@ -69,6 +74,14 @@ static int kernel_waitpid(int pid, int *code, int flags) {
         background_reaps++;
         *code = 7;
         return 124;
+    }
+    if (signals_on) {
+        CHECK(pid == 123 && flags == WNOHANG, "a foreground child is reaped at its end signal");
+        if (!child_killed || waits < 2) {
+            return 0;  // it ends once killed, and its end is signalled
+        }
+        *code = -9;
+        return pid;
     }
     CHECK(pid == 123 && flags == 0, "foreground wait matches child");
     *code = 0;
@@ -114,7 +127,16 @@ static long kernel(long number, long a0, long a1, long a2, long a3) {
         return 1;
     }
     case SYS_KILL:
+        child_killed |= a0 == 123;
         return a0 == 999 ? -1 : 0;
+    case SYS_SIG_ALLOC:
+        return signals_on ? END_BIT : -1;
+    case SYS_SIG_SET:
+        cleared |= (unsigned)a1 & ~(unsigned)a0;
+        return 0;
+    case SYS_SIG_WAIT:
+        CHECK(a0 == (SIG_MASK(END_BIT) | SIG_MASK(SIG_BREAK)), "it waits for the end or Ctrl+C");
+        return waits++ == 0 ? SIG_MASK(SIG_BREAK) : SIG_MASK(END_BIT);
     default:
         return -1;
     }
@@ -122,6 +144,7 @@ static long kernel(long number, long a0, long a1, long a2, long a3) {
 
 static void reset(void) {
     fflush(stdout);
+    clearerr(stdin);  // an earlier test's end of input
     fake_reset_console();
     fake_reset_files();
     fake_set_handler(kernel);
@@ -131,6 +154,8 @@ static void reset(void) {
     last_argc = last_spawn_flags = 0;
     background_job_live = false;
     last_argument_terminated = maximal_assign_received = false;
+    signals_on = child_killed = false;
+    waits = cleared = 0;
 }
 // The console input so far; the next read starts at its first byte again.
 static void feed(void) {
@@ -166,7 +191,8 @@ static void fragmented_reads(void) {
     CHECK(read_command_line() == 1 && strcmp(line, "exit\n") == 0, "next fragmented command intact");
     reset();
     append("echo a");
-    CHECK(read_command_line() == 0 && spawn_calls == 0, "EOF before newline cannot dispatch prefix");
+    CHECK(read_command_line() == -1 && spawn_calls == 0,
+          "EOF before newline cannot dispatch prefix, and ends the input");
 }
 static void line_boundaries(void) {
     reset();
@@ -195,7 +221,7 @@ static void drained_line_not_dispatched(void) {
     append("echo a ");
     while (input_size < LINE_MAX + 133) append(" ");
     append("\necho a\nexit\n");
-    CHECK(shell_test_main() == 0 && spawn_calls == 1 && last_argc == 2,
+    CHECK(session() == 0 && spawn_calls == 1 && last_argc == 2,
           "oversized command never dispatches its prefix and following command runs once");
     CHECK(error_contains("shell: line too long"), "dispatch path reports drained line");
 }
@@ -204,14 +230,14 @@ static void argument_boundaries(void) {
     append("echo");
     for (unsigned i = 0; i < 16; i++) append(" a");
     append("\necho a\nexit\n");
-    CHECK(shell_test_main() == 0 && spawn_calls == 1 && last_argc == 2,
+    CHECK(session() == 0 && spawn_calls == 1 && last_argc == 2,
           "seventeenth token rejected without dispatch, next command runs");
     CHECK(error_contains("shell: too many arguments"), "excess arguments diagnostic");
     reset();
     append("echo");
     for (unsigned i = 0; i < 15; i++) append(" a");
     append(" \t\nexit\n");
-    CHECK(shell_test_main() == 0 && spawn_calls == 1 && last_argc == 16,
+    CHECK(session() == 0 && spawn_calls == 1 && last_argc == 16,
           "sixteen tokens accepted with trailing whitespace");
     CHECK(last_argument_terminated, "last accepted token excludes trailing whitespace/newline");
 }
@@ -223,7 +249,7 @@ static void maximal_assign_line(void) {
     fill('t', KORA_PATH_MAX - 1);
     append("\nexit\n");
     set_read_chunk(97);
-    CHECK(shell_test_main() == 0 && assign_calls == 1 && maximal_assign_received,
+    CHECK(session() == 0 && assign_calls == 1 && maximal_assign_received,
           "maximum assign name and qualified target reach syscall intact");
     CHECK(spawn_calls == 0, "assign built-in never dispatches as an ELF command");
 }
@@ -251,28 +277,28 @@ static void quoted_tokens(void) {
     }
     reset();
     append("echo 'unterminated\necho a\nexit\n");
-    CHECK(shell_test_main() == 0 && spawn_calls == 1 && error_contains("shell: invalid quoting"),
+    CHECK(session() == 0 && spawn_calls == 1 && error_contains("shell: invalid quoting"),
           "malformed quoting never dispatches its prefix and next command runs");
 }
 static void background_jobs(void) {
     reset();
     append("echo a &\nexit\n");
-    CHECK(shell_test_main() == 0 && spawn_calls == 1 && last_argc == 2 &&
+    CHECK(session() == 0 && spawn_calls == 1 && last_argc == 2 &&
           last_spawn_flags == SPAWN_NOWAIT && last_argument_terminated,
           "separate & starts a background job without passing \"&\" as an argument");
     CHECK(output_contains("[124] started") && output_contains("[124] done, exit 7") &&
           background_reaps == 1, "background job announced and reaped at the next prompt");
     reset();
     append("echo a&\necho a\nexit\n");
-    CHECK(shell_test_main() == 0 && spawn_calls == 2 && last_spawn_flags == 0 &&
+    CHECK(session() == 0 && spawn_calls == 2 && last_spawn_flags == 0 &&
           last_argument_terminated, "trailing & is stripped; the next command runs in front");
     CHECK(output_contains("[123] exited with 0"), "foreground job still waited for");
     reset();
     append("&\nexit\n");
-    CHECK(shell_test_main() == 0 && spawn_calls == 0, "a lone & runs nothing");
+    CHECK(session() == 0 && spawn_calls == 0, "a lone & runs nothing");
     reset();
     append("echo '&'\necho a\\&\nexit\n");
-    CHECK(shell_test_main() == 0 && spawn_calls == 2 && last_spawn_flags == 0 &&
+    CHECK(session() == 0 && spawn_calls == 2 && last_spawn_flags == 0 &&
           !background_reaps && !output_contains("started"),
           "quoted and escaped ampersands are arguments, not background jobs");
 }
@@ -280,24 +306,24 @@ static void background_jobs(void) {
 static void core_pinning(void) {
     reset();
     append("echo a @2\nexit\n");
-    CHECK(shell_test_main() == 0 && spawn_calls == 1 && last_argc == 2 &&
+    CHECK(session() == 0 && spawn_calls == 1 && last_argc == 2 &&
           last_spawn_flags == SPAWN_CORE(2) && last_argument_terminated,
           "trailing @2 pins to core 2 and is not an argument");
     reset();
     append("echo a @3 &\nexit\n");
-    CHECK(shell_test_main() == 0 && last_argc == 2 &&
+    CHECK(session() == 0 && last_argc == 2 &&
           last_spawn_flags == (SPAWN_NOWAIT | SPAWN_CORE(3)), "@N combines with &");
     reset();
     append("echo a '@2'\necho a \\@2\nexit\n");
-    CHECK(shell_test_main() == 0 && spawn_calls == 2 && last_argc == 3 && last_spawn_flags == 0,
+    CHECK(session() == 0 && spawn_calls == 2 && last_argc == 3 && last_spawn_flags == 0,
           "quoted and escaped @2 are arguments");
     reset();
     append("echo a @x\necho a @\necho a @12345\nexit\n");
-    CHECK(shell_test_main() == 0 && spawn_calls == 0 &&
+    CHECK(session() == 0 && spawn_calls == 0 &&
           error_contains("shell: @N needs a core number"), "malformed @N rejected, nothing run");
     reset();
     append("echo a @9\nexit\n");
-    CHECK(shell_test_main() == 0 && spawn_calls == 1 &&
+    CHECK(session() == 0 && spawn_calls == 1 &&
           error_contains("shell: cannot run echo on cpu 9"), "spawn failure on a pinned core reported");
 }
 
@@ -310,7 +336,7 @@ static bool file_is(const char *path, const char *text) {
 static void redirection(void) {
     reset();
     append("echo a > out.txt\nexit\n");
-    CHECK(shell_test_main() == 0 && std_spawns == 1 && last_argc == 2 && last_argument_terminated,
+    CHECK(session() == 0 && std_spawns == 1 && last_argc == 2 && last_argument_terminated,
           "> takes the file out of argv");
     CHECK(last_std[0].kind == STD_CONSOLE && last_std[1].kind == STD_FILE && last_std[2].kind == STD_CONSOLE,
           "only stdout is the file");
@@ -321,13 +347,13 @@ static void redirection(void) {
     reset();
     fake_put_file("out.txt", "old\n", 4);
     append("echo a >out.txt\necho a >> out.txt\necho a >>out.txt\nexit\n");
-    CHECK(shell_test_main() == 0 && std_spawns == 3, "glued and separate operators");
+    CHECK(session() == 0 && std_spawns == 3, "glued and separate operators");
     CHECK(file_is("out.txt", "<echo>\n<echo>\n<echo>\n"), "> truncates, >> appends");
 
     reset();
     fake_put_file("in.txt", "data\n", 5);
     append("cat < in.txt > out.txt &\nexit\n");
-    CHECK(shell_test_main() == 0 && std_spawns == 1 && last_argc == 1 &&
+    CHECK(session() == 0 && std_spawns == 1 && last_argc == 1 &&
           last_spawn_flags == SPAWN_NOWAIT, "input and output together, in the background");
     CHECK(last_std[0].kind == STD_FILE && last_std[1].kind == STD_FILE &&
           last_std[0].value != last_std[1].value && fake_open_fds() == 0,
@@ -335,18 +361,18 @@ static void redirection(void) {
 
     reset();
     append("echo a > out.txt @2\nexit\n");
-    CHECK(shell_test_main() == 0 && std_spawns == 1 && last_argc == 2 &&
+    CHECK(session() == 0 && std_spawns == 1 && last_argc == 2 &&
           last_spawn_flags == SPAWN_CORE(2), "redirection combines with @N");
 
     reset();
     append("echo '>' a\necho \\> a\nexit\n");
-    CHECK(shell_test_main() == 0 && spawn_calls == 2 && std_spawns == 0 && last_argc == 3,
+    CHECK(session() == 0 && spawn_calls == 2 && std_spawns == 0 && last_argc == 3,
           "quoted and escaped > are arguments");
 
     reset();
     fake_mkdir("dir");
     append("echo a < missing\necho a >\necho a > x > y\necho a < x < y\necho a > dir\nexit\n");
-    CHECK(shell_test_main() == 0 && spawn_calls == 0, "nothing runs with a bad redirection");
+    CHECK(session() == 0 && spawn_calls == 0, "nothing runs with a bad redirection");
     CHECK(error_contains("shell: cannot open missing") && error_contains("shell: > needs a file") &&
           error_contains("shell: more than one output redirection") &&
           error_contains("shell: more than one input redirection") &&
@@ -354,55 +380,48 @@ static void redirection(void) {
     CHECK(fake_open_fds() == 0, "and leaves no file open");
 }
 
-// What the screen shows for a short session: the echo of what was typed, the
-// child's own output, and the shell's lines, in that order.
+// What the shell writes for a short session: its prompts, the child's own
+// output, and its lines, in that order. (The console echoes what is typed:
+// on the screen each command follows its prompt.)
 static void session_transcript(void) {
     reset();
     append("echo a\necho a &\nexit\n");
-    CHECK(shell_test_main() == 0, "a short session");
+    CHECK(session() == 0, "a short session");
     fflush(stdout);
     CHECK(strcmp(fake_screen(NULL), "\nKoraOS shell. Type 'help'.\n"
-                                    "$ echo a\n"
-                                    "<echo>\n"
+                                    "$ <echo>\n"
                                     "[123] exited with 0\n"
-                                    "$ echo a &\n"
-                                    "<echo>\n"
+                                    "$ <echo>\n"
                                     "[124] started\n"
                                     "[124] done, exit 7\n"
-                                    "$ exit\n"
-                                    "bye\n") == 0,
-          "prompt, typed line, child output and job lines in order");
+                                    "$ bye\n") == 0,
+          "prompt, child output and job lines in order:\n%s", fake_screen(NULL));
     CHECK(strcmp(fake_output(2, NULL), "") == 0, "nothing on stderr");
 }
 
 static void builtins(void) {
     reset();
     append("pwd\ncd\ncd there\nother:\nvolumes\nassign\nsync\nkill 124\nexit\n");
-    CHECK(shell_test_main() == 0 && spawn_calls == 0, "built-ins run no program");
+    CHECK(session() == 0 && spawn_calls == 0, "built-ins run no program");
     fflush(stdout);
     CHECK(strcmp(fake_screen(NULL), "\nKoraOS shell. Type 'help'.\n"
-                                    "$ pwd\n"
-                                    "boot:\n"
-                                    "$ cd\n"
-                                    "boot:\n"
-                                    "$ cd there\n"
-                                    "$ other:\n"
-                                    "$ volumes\n"
-                                    "sd0: KORA [boot]\n"
+                                    "$ boot:\n"           // pwd
+                                    "$ boot:\n"           // cd
+                                    "$ "                  // cd there
+                                    "$ "                  // other:
+                                    "$ sd0: KORA [boot]\n" // volumes
                                     "usb0: (unlabelled) [read-only]\n"
-                                    "$ assign\n"
-                                    "sys: = boot:/ [fixed]\n"
-                                    "$ sync\n"
-                                    "$ kill 124\n"
-                                    "$ exit\n"
-                                    "bye\n") == 0,
-          "pwd, cd, volumes and assign print their listings");
+                                    "$ sys: = boot:/ [fixed]\n"  // assign
+                                    "$ "                  // sync
+                                    "$ "                  // kill 124
+                                    "$ bye\n") == 0,
+          "pwd, cd, volumes and assign print their listings:\n%s", fake_screen(NULL));
     CHECK(strcmp(fake_output(2, NULL), "") == 0 && fake_syncs() == 1, "quietly, and sync syncs");
 
     reset();
     append("help\nexit\n");
-    CHECK(shell_test_main() == 0 && output_contains("$ help\nKoraOS shell commands:\n  help ") &&
-              output_contains("  (try 'ls /bin')\n$ exit\n"),
+    CHECK(session() == 0 && output_contains("$ KoraOS shell commands:\n  help ") &&
+              output_contains("  (try 'ls /bin')\n$ bye\n"),
           "help prints the command list");
 }
 
@@ -411,7 +430,7 @@ static void builtin_errors(void) {
     append("pwd x\ncd a b\ncd nowhere\nnowhere:\nvolumes x\nsync x\nassign a b c\n"
            "kill\nkill 12x\nkill 999\nnosuch\nexit\n");
     fake_fail_sync(1);
-    CHECK(shell_test_main() == 0, "bad built-in commands");
+    CHECK(session() == 0, "bad built-in commands");
     CHECK(strcmp(fake_output(2, NULL), "usage: pwd\n"
                                        "usage: cd [path]\n"
                                        "cd: cannot change directory to nowhere\n"
@@ -429,9 +448,40 @@ static void builtin_errors(void) {
     reset();
     append("sync\nexit\n");
     fake_fail_sync(1);
-    CHECK(shell_test_main() == 0 && error_contains("sync: failed\n"), "a failed sync is reported");
+    CHECK(session() == 0 && error_contains("sync: failed\n"), "a failed sync is reported");
+}
+
+static void end_of_input(void) {
+    reset();
+    append("echo a\n");
+    CHECK(session() == 0 && spawn_calls == 1, "the end of input ends the shell");
+    CHECK(output_contains("[123] exited with 0\n$ \nbye\n"), "after the last command");
+}
+
+static void break_ends_the_foreground(void) {
+    reset();
+    signals_on = true;
+    append("echo a\nexit\n");
+    CHECK(session() == 0 && spawn_calls == 1, "a foreground program");
+    CHECK(last_spawn_flags == (SPAWN_NOWAIT | SPAWN_SIGNAL(END_BIT)),
+          "starts at once, its end a signal (flags %#x)", last_spawn_flags);
+    CHECK(cleared & SIG_MASK(SIG_BREAK), "an earlier Ctrl+C is forgotten first");
+    CHECK(child_killed && waits == 2 && output_contains("[123] exited with -9"),
+          "Ctrl+C kills it, and its end is reported");
+    reset();
+    signals_on = true;
+    append("echo a &\nexit\n");
+    CHECK(session() == 0 && last_spawn_flags == SPAWN_NOWAIT && waits == 0 && !child_killed,
+          "a background job is not waited for");
+}
+
+static void host_needs_a_manager(void) {
+    reset();
+    CHECK(shell_test_main() == 1 && error_contains("shell: no screen manager runs"),
+          "on the kernel's console with no screen manager, the shell says so");
 }
 
 TEST_MAIN(fragmented_reads, line_boundaries, drained_line_not_dispatched,
           argument_boundaries, maximal_assign_line, quoted_tokens, background_jobs, core_pinning,
-          redirection, session_transcript, builtins, builtin_errors)
+          redirection, session_transcript, builtins, builtin_errors, end_of_input,
+          break_ends_the_foreground, host_needs_a_manager)

@@ -45,7 +45,7 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
         -nostdlib -fuse-ld=lld -Wl,-pie -Wl,-e,_start -Wl,--pack-dyn-relocs=none
         -Wl,-z,norelro -Wl,-z,noexecstack -Wl,-z,max-page-size=4096)
     set(USER_PROGRAM_ELVES "")
-    foreach(name hello init shell echo termdemo ls cat)
+    foreach(name hello init echo termdemo ls cat)
         koraos_add_user_program(${name} "${USER_DIR}/${name}.c")
     endforeach()
     foreach(name cp rm mkdir rmdir mv ps jobdemo pindemo)
@@ -64,6 +64,8 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
     koraos_add_user_program(screens "${USER_DIR}/screens.c" FLAGS -Wextra -Werror)
     koraos_add_user_program(newcon "${USER_DIR}/newcon.c" ${CONSOLE_SOURCES}
         FLAGS -Wextra -Werror)
+    # The shell serves its own console (user/shell.c).
+    koraos_add_user_program(shell "${USER_DIR}/shell.c" ${CONSOLE_SOURCES})
     koraos_add_user_program(gfxdemo "${USER_DIR}/gfxdemo.c" ${LIBSCREEN_SOURCES})
     koraos_add_user_program(condemo "${USER_DIR}/condemo.c" ${LIBCONSOLE_SOURCES}
         ${LIBSCREEN_SOURCES} FLAGS -Wextra -Werror)

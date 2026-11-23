@@ -31,8 +31,10 @@
 /* The manager's public message port. */
 #define SCREENS_PORT "screens"
 
-/* Events a screen holds for its program; more are dropped and counted. */
-#define SCREEN_EVENTS 64  /* a power of two */
+/* Events a screen holds for its program; more are dropped and counted. A
+ * line typed at once (the debug console's `type`) is two events a key, four
+ * with Shift. */
+#define SCREEN_EVENTS 256  /* a power of two */
 
 #define SCREEN_TITLE_MAX 32
 

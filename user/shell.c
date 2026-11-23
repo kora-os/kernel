@@ -1,9 +1,17 @@
 /* KoraOS shell: a tiny interactive command line running in EL0. It reads a
  * line, splits it into argv, and spawns the named program with those arguments
- * (so, e.g., "echo hello world" runs the echo program with two args). The
- * kernel starts this as the first user program.
+ * (so, e.g., "echo hello world" runs the echo program with two args).
+ *
+ * The shell lives on a console of its own, on a screen of the screen manager
+ * (init runs `screens shell`). Started on the kernel's console, it opens that
+ * screen and console and runs itself there, as AmigaOS's NewShell opens a CON:
+ * window for its shell: the first shell serves the console, the second reads
+ * the commands. The console edits the lines (libconsole/edit.h); Ctrl+C there
+ * ends the program running in front. Started on a console already, or with a
+ * file for its stdin, it reads the commands at once.
  */
 #include "libk/koraos.h"
+#include "libscreen/console.h"
 
 #define MAX_ARGV 16
 #define LINE_MAX (2 * KORA_PATH_MAX + 64)
@@ -14,30 +22,28 @@ static char line[LINE_MAX];
 static char cwd_buffer[KORA_PATH_MAX];
 static struct assign_info assign_buffer;
 
-// Read a whole command before dispatch. A full buffer without a newline is
-// drained and rejected so its prefix cannot become a separate command.
+// Read a whole command before dispatch: 1, or 0 for a line rejected, or -1 at
+// the end of input (Ctrl+D on the console, or the end of a file). A full
+// buffer without a newline is drained and rejected so its prefix cannot
+// become a separate command; so is a last line the input ends in the middle
+// of.
 static int read_command_line(void) {
-    size_t used = 0;
-    while (used < sizeof(line) - 1) {
-        long n = kgetline(line + used, sizeof(line) - 1 - used);
-        if (n <= 0) {
-            return 0;
-        }
-        used += (size_t)n;
-        if (line[used - 1] == '\n') {
-            line[used] = 0;
-            return 1;
-        }
+    fflush(stdout);  // the prompt
+    if (fgets(line, sizeof(line), stdin) == NULL) {
+        return -1;
     }
-    char discard[64];
-    for (;;) {
-        long n = kgetline(discard, sizeof(discard));
-        if (n <= 0 || discard[n - 1] == '\n') {
-            break;
-        }
+    size_t used = strlen(line);
+    if (used > 0 && line[used - 1] == '\n') {
+        return 1;
+    }
+    if (feof(stdin)) {
+        return -1;
+    }
+    int c;
+    while ((c = getc(stdin)) != EOF && c != '\n') {
     }
     fputs("shell: line too long\n", stderr);
-    return 0;
+    return c == EOF ? -1 : 0;
 }
 
 // Whether each token was quoted or escaped: such a token is never an operator
@@ -116,6 +122,7 @@ static void help(void) {
           "                  to one (>> appends); the shell's console otherwise\n"
           "  ps              list tasks and the core each runs on\n"
           "  kill <pid>      end a program (a background job)\n"
+          "  Ctrl+C ends the program in front; Ctrl+D (or exit) ends the shell\n"
           "programs in /bin: hello, echo, gfxdemo, termdemo, condemo, jobdemo, pindemo,\n"
           "  ls, cat\n"
           "  (try 'ls /bin')\n",
@@ -300,15 +307,61 @@ static int open_redirection(const char *path, int flags) {
     return fd;
 }
 
-int main(void) {
-    fputs("\nKoraOS shell. Type 'help'.\n", stdout);
+// The signal a foreground program's end sets, or -1 to wait for it plainly
+// (no signal free: Ctrl+C cannot reach it then).
+static int end_bit = -1;
+
+// Start a program in front and wait for it: its pid and its exit code, or -1
+// if it did not start. Ctrl+C on the console (the break signal) ends it.
+static int run_foreground(const char *name, int argc, char **argv, int flags,
+                          const struct std_handle *std, int *code) {
+    if (end_bit < 0) {
+        int pid = std != NULL ? spawn_std(name, argc, argv, flags, std)
+                              : spawn_flags(name, argc, argv, flags);
+        if (pid >= 0) {
+            *code = wait(pid);
+        }
+        return pid;
+    }
+    sig_set(0, SIG_MASK(SIG_BREAK) | SIG_MASK(end_bit));  // an old Ctrl+C is not for it
+    flags |= SPAWN_NOWAIT | SPAWN_SIGNAL(end_bit);
+    int pid = std != NULL ? spawn_std(name, argc, argv, flags, std)
+                          : spawn_flags(name, argc, argv, flags);
+    if (pid < 0) {
+        return pid;
+    }
+    for (;;) {
+        unsigned got = sig_wait(SIG_MASK(end_bit) | SIG_MASK(SIG_BREAK));
+        if (got & SIG_MASK(SIG_BREAK)) {
+            kill(pid);
+        }
+        if (waitpid(pid, code, WNOHANG) == pid) {
+            return pid;
+        }
+    }
+}
+
+// Read and run commands until `exit` or the end of input.
+static int session(void) {
+    int console = isatty(0);
+    if (console) {
+        fputs("\nKoraOS shell. Type 'help'.\n", stdout);
+    }
+    end_bit = sig_alloc(-1);
 
     char *argv[MAX_ARGV];
 
     for (;;) {
         reap_jobs();
-        fputs("$ ", stdout);  // no newline: kgetline flushes it
-        if (!read_command_line()) {
+        if (console) {
+            fputs("$ ", stdout);
+        }
+        int got = read_command_line();
+        if (got < 0) {
+            fputs(console ? "\nbye\n" : "", stdout);
+            return 0;
+        }
+        if (got == 0) {
             continue;
         }
 
@@ -397,6 +450,7 @@ int main(void) {
         }
         int flags = (background ? SPAWN_NOWAIT : 0) | (core >= 0 ? SPAWN_CORE(core) : 0);
         int pid;
+        int code = 0;
         if (redirect.in != NULL || redirect.out != NULL) {
             // The child gets the shell's own handles but for the files named;
             // the shell closes its copies once the child has them.
@@ -423,7 +477,8 @@ int main(void) {
             if (out >= 0) {
                 std[1] = (struct std_handle){STD_FILE, out};
             }
-            pid = spawn_std(argv[0], argc, argv, flags, std);
+            pid = background ? spawn_std(argv[0], argc, argv, flags, std)
+                             : run_foreground(argv[0], argc, argv, flags, std, &code);
             if (in >= 0) {
                 close(in);
             }
@@ -431,7 +486,8 @@ int main(void) {
                 close(out);
             }
         } else {
-            pid = spawn_flags(argv[0], argc, argv, flags);
+            pid = background ? spawn_flags(argv[0], argc, argv, flags)
+                             : run_foreground(argv[0], argc, argv, flags, NULL, &code);
         }
         if (pid < 0) {
             if (core >= 0) {
@@ -446,6 +502,38 @@ int main(void) {
             printf("[%d] started\n", pid);
             continue;
         }
-        print_job_end(pid, "] exited with ", wait(pid));
+        print_job_end(pid, "] exited with ", code);
     }
+}
+
+// On the kernel's console: open a screen with a console on it, and run a shell
+// there until it ends.
+static int host(void) {
+    screen_t *screen = screen_open("shell");
+    if (screen == NULL) {
+        fputs("shell: no screen manager runs (start one with: screens shell)\n", stderr);
+        return 1;
+    }
+    console_t *console = console_open(screen);
+    if (console == NULL) {
+        fputs("shell: out of memory\n", stderr);
+        screen_close(screen);
+        return 1;
+    }
+    char *argv[] = {"shell", NULL};
+    int code = 1;
+    if (console_run(console, "shell", 1, argv, CONSOLE_BREAK_SIGNAL, &code) != 0) {
+        fputs("shell: cannot start the shell on its console\n", stderr);
+    }
+    console_close(console);
+    screen_close(screen);
+    return code;
+}
+
+int main(void) {
+    struct std_handle std[3];
+    if (std_handles(std) == 0 && std[0].kind == STD_CONSOLE) {
+        return host();
+    }
+    return session();
 }
