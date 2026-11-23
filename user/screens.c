@@ -418,6 +418,9 @@ static void deliver(struct screen *screen, const struct input_event *event) {
 }
 
 static void route(const struct input_event *event) {
+    if (event->type == INPUT_EVENT_MOUSE) {
+        return;  /* the pointer, and mouse events for programs, come with step 5b */
+    }
     if (!hotkey(event) && front != NULL) {
         deliver(front, event);
     }

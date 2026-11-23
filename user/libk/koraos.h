@@ -207,10 +207,21 @@ int sig_on_end(int pid, int bit);
  *                      console redraws it: 0, or -1 if another holds it
  *
  * An event is what a key did: its position (a USB HID usage, KEY_*), the
- * modifiers after it, and the character it types under the layout. */
+ * modifiers after it, and the character it types under the layout. Or what a
+ * mouse did (INPUT_EVENT_MOUSE): a movement (x, y), the buttons held after it
+ * and a turn of the wheel; the screen manager keeps the pointer's position. */
 #define INPUT_EVENT_KEY_DOWN 1
 #define INPUT_EVENT_KEY_UP 2
-#define INPUT_FLAG_REPEAT 0x01  /* key down: an auto-repeat */
+#define INPUT_EVENT_MOUSE 3
+#define INPUT_FLAG_REPEAT 0x01    /* key down: an auto-repeat */
+#define INPUT_FLAG_ABSOLUTE 0x02  /* mouse: x, y are a position, 0..INPUT_ABS_MAX */
+#define INPUT_ABS_MAX 32767
+
+#define INPUT_BUTTON_LEFT 0x01
+#define INPUT_BUTTON_RIGHT 0x02
+#define INPUT_BUTTON_MIDDLE 0x04
+#define INPUT_BUTTON_SIDE 0x08
+#define INPUT_BUTTON_EXTRA 0x10
 
 #define INPUT_MOD_LEFT_CTRL 0x0001
 #define INPUT_MOD_LEFT_SHIFT 0x0002
@@ -239,10 +250,23 @@ struct input_event {
     unsigned char flags;      /* INPUT_FLAG_* */
     unsigned short modifiers; /* INPUT_MOD_* after the event */
     unsigned int time_ms;     /* uptime when it was queued */
-    unsigned short keycode;   /* KEY_*: the key's position */
+    union {
+        unsigned short keycode;   /* KEY_*: the key's position */
+        short x;                  /* mouse: the movement right, or the position */
+    };
     unsigned char source;     /* the device that sent it */
-    unsigned char reserved;
-    unsigned int codepoint;   /* key down: the Unicode character, or 0 */
+    union {
+        unsigned char reserved;
+        unsigned char buttons;    /* mouse: INPUT_BUTTON_* held after it */
+    };
+    union {
+        unsigned int codepoint;   /* key down: the Unicode character, or 0 */
+        struct {
+            short y;              /* mouse: the movement down, or the position */
+            signed char wheel;    /* mouse: the wheel's turn, away from you > 0 */
+            unsigned char unused;
+        };
+    };
 };
 
 #define INPUT_READ_MAX 32

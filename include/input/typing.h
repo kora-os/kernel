@@ -2,6 +2,7 @@
 #pragma once
 
 #include "common.h"
+#include "input/event.h"
 
 // Keys from text, for the debug console's `type` and `key` (console.c): what
 // a US keyboard would do to type a character or press a named key, as the
@@ -31,3 +32,15 @@ bool typing_key_for_name(const char *name, size_t length, struct typed_key *out)
 // space, for a leading one) and \xHH. Returns how many were written to `out`
 // (at most `size`), or -1 for a broken escape.
 int typing_unescape(const char *text, char *out, size_t size);
+
+// A mouse from text, for the debug console's `mouse`: what a mouse would
+// report for one of
+//   DX DY        a movement (each -32768 to 32767)
+//   to X Y       a position, as a tablet reports it (each 0 to INPUT_ABS_MAX)
+//   down B, up B, click B   a button pressed, released, or both (B: left,
+//                right, middle, side or extra)
+//   wheel N      a turn of the wheel (-128 to 127, away from the user > 0)
+// `*buttons` holds the buttons held, before and after. Fills `events` (room
+// for 2) as INPUT_EVENT_MOUSE (but for their time and source) and returns
+// how many, or 0 for a command it does not know (`*buttons` untouched).
+unsigned typing_mouse(const char *args, uint8_t *buttons, struct input_event events[2]);

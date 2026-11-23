@@ -15,7 +15,8 @@ mkdir -p "$OUT"
     -DKORAOS_VIRT -DKORAOS_VIRTIO_INPUT -DVIRTIO_INPUT_HOST_TEST \
     -I "$ROOT/include" -I "$ROOT/tests/host" \
     "$ROOT/tests/host/virtio_input_test.c" "$ROOT/src/drivers/virtio_input.c" \
-    "$ROOT/src/drivers/virtio_keymap.c" -o "$OUT/virtio_input_test"
-for scenario in normal pointer bad-config queue-failure; do
+    "$ROOT/src/drivers/virtio_keymap.c" "$ROOT/src/drivers/virtio_pointer.c" \
+    -o "$OUT/virtio_input_test"
+for scenario in normal devices pointer bad-config queue-failure; do
     "$OUT/virtio_input_test" "$scenario"
 done

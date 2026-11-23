@@ -35,7 +35,8 @@ const char *input_source_name(unsigned source);
 // the claiming thread's signal, or input_consumer_wake(). Safe from interrupt
 // handlers on any core. A full queue drops the event and counts it: after
 // that a consumer may have missed a key up, which is why every event carries
-// the whole modifier state. Returns whether the event was queued.
+// the whole modifier state. A mouse event gets the modifiers of the last key
+// event, from any keyboard. Returns whether the event was queued.
 bool input_post(const struct input_event *event);
 
 // The tty adapter's take: the oldest event, unless a thread has claimed the

@@ -53,11 +53,20 @@ static void wake_consumer(int tid, int bit) {
     }
 }
 
+// The modifiers after the last key event of any keyboard: a mouse event
+// carries them, so Shift+click can be told from a click. Under queue_lock.
+static uint16_t key_modifiers;
+
 bool input_post(const struct input_event *event) {
     struct input_event stamped = *event;
     stamped.time_ms = (uint32_t)(timer_us() / 1000);
 
     uint64_t flags = spin_lock_irqsave(&queue_lock);
+    if (stamped.type == INPUT_EVENT_MOUSE) {
+        stamped.modifiers = key_modifiers;
+    } else {
+        key_modifiers = stamped.modifiers;
+    }
     bool queued = queue_head - queue_tail != INPUT_QUEUE_EVENTS;
     if (queued) {
         queue[queue_head % INPUT_QUEUE_EVENTS] = stamped;

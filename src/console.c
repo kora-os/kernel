@@ -58,6 +58,7 @@ void console_cmd_help(const char *args) {
   uart_puts("  keylog [on|off] - Trace input events: device, receiver, key\n");
   uart_puts("  type TEXT - Type TEXT as keys (\\n Enter, \\t, \\e, \\s, \\\\, \\xHH)\n");
   uart_puts("  key NAME... - Press keys by name: ret, esc, up, ctrl-c, meta_l-m...\n");
+  uart_puts("  mouse DX DY | to X Y | down|up|click BUTTON | wheel N - Be a mouse\n");
   uart_puts("  conlog [on|off] - Copy the consoles' text to this line; no echo\n");
 }
 
@@ -272,6 +273,26 @@ void console_cmd_conlog(const char *args) {
   printf("conlog: %s\n", conlog ? "on" : "off");
 }
 
+// mouse ...: what a mouse would report (input/typing.h's typing_mouse), into
+// whoever takes the events: a movement, a position, a button or the wheel.
+static uint8_t mouse_buttons;  // held, between commands
+
+void console_cmd_mouse(const char *args) {
+  struct input_event events[2];
+  unsigned count = typing_mouse(args, &mouse_buttons, events);
+  if (count == 0) {
+    uart_puts("usage: mouse DX DY | to X Y | down|up|click left|right|middle|side|extra"
+              " | wheel N\n");
+    return;
+  }
+  unsigned dropped = 0;
+  for (unsigned i = 0; i < count; i++) {
+    events[i].source = (uint8_t)typing_source;
+    dropped += (unsigned)!input_post(&events[i]);
+  }
+  report_dropped("mouse", dropped);
+}
+
 console_command_t commands[] = {
     {"help", "Show available commands", console_cmd_help},
     {"get_el", "Get the current Exception Level", console_cmd_get_el},
@@ -284,6 +305,7 @@ console_command_t commands[] = {
     {"keylog", "Trace input events (on or off)", console_cmd_keylog},
     {"type", "Type text as keys", console_cmd_type},
     {"key", "Press keys by name", console_cmd_key},
+    {"mouse", "Move, click or turn the wheel of a mouse", console_cmd_mouse},
     {"conlog", "Copy the consoles' text to the serial line (on or off)", console_cmd_conlog},
     {NULL, NULL, NULL},
 };

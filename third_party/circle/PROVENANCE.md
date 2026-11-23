@@ -25,7 +25,9 @@ HID/keyboard drivers + their leaf utilities:
   `machineinfo`, `bcmmailbox`, `bcmpropertytags`, `koptions`, `time`,
   `synchronize`, `synchronize64`, `spinlock`.
 - `lib/input/` — cooked keyboard input: `keymap`, `keyboardbehaviour`,
-  `keyboardbuffer`.
+  `keyboardbuffer`; the generic mouse device `mouse` and `mousebehaviour`
+  (added for console step 5; KoraOS uses the mouse's raw mode only, and
+  draws its own pointer).
 - `include/circle/` — the header closure of the above.
 
 Added for the Raspberry Pi 4 (VL805 xHCI behind PCIe), again as the `#include`
@@ -65,8 +67,8 @@ bridge adapters in `src/circle/` (`-DAARCH=64 -DRASPPI=<board> -DSTDLIB_SUPPORT=
 where the board is `RPI_VERSION`). Circle's USB core is built for one host
 controller family, so the Pi 3 build leaves out the xHCI/PCIe/device-tree
 sources and the Pi 4 build leaves out the DWC2 (`dwhci*`) sources.
-Circle's USB device factory is built with only the keyboard and mass storage
-drivers via `-DEXCLUDE_USB_*` for every other class (mouse, gamepads, audio,
+Circle's USB device factory is built with only the keyboard, mouse and mass
+storage drivers via `-DEXCLUDE_USB_*` for every other class (gamepads, audio,
 net, serial, printer, bluetooth, midi, touchscreen), so their drivers need not
 be vendored.
 

@@ -18,6 +18,7 @@
 #include <circle/timer.h>
 #include <circle/usb/usbhcidevice.h>
 #include <circle/usb/usbkeyboard.h>
+#include <circle/input/mouse.h>
 
 #include "drivers/usb_storage.h"
 #include "input/hid_keyboard.h"
@@ -90,6 +91,27 @@ void key_status_raw(unsigned char ucModifiers, const unsigned char RawKeys[6]) {
     hid_keyboard_report(&usb_keyboard, ucModifiers, RawKeys, key_changed, 0);
 }
 
+// The USB mouse, in Circle's raw mode: each report (IRQ context, core 0) is a
+// movement, the buttons held (Circle's MOUSE_BUTTON_* are INPUT_BUTTON_*) and
+// a turn of the wheel (away from the user > 0, as in HID).
+static u8 usb_mouse_source;
+
+int16_t clamp16(int v) {
+    return (int16_t)(v < -32768 ? -32768 : v > 32767 ? 32767 : v);
+}
+
+void mouse_status(unsigned nButtons, int nDisplacementX, int nDisplacementY, int nWheelMove,
+                  void *) {
+    struct input_event event = {};
+    event.type = INPUT_EVENT_MOUSE;
+    event.source = usb_mouse_source;
+    event.x = clamp16(nDisplacementX);
+    event.y = clamp16(nDisplacementY);
+    event.buttons = (u8)(nButtons & 0x1F);
+    event.wheel = (int8_t)(nWheelMove < -128 ? -128 : nWheelMove > 127 ? 127 : nWheelMove);
+    input_post(&event);
+}
+
 }  // namespace
 
 void circle_usb_init(int enumerate) {
@@ -151,6 +173,13 @@ void circle_usb_init(int enumerate) {
         return;
     }
     usb_storage_collect();
+
+    CMouseDevice *pMouse = (CMouseDevice *)DeviceNameService.GetDevice("mouse", 1, FALSE);
+    if (pMouse != 0) {
+        usb_mouse_source = (u8)input_source_register("usb-mouse");
+        pMouse->RegisterStatusHandler(mouse_status, 0);
+        tfp_printf("circle: USB mouse ready\n");
+    }
 
     CUSBKeyboardDevice *pKeyboard =
         (CUSBKeyboardDevice *)DeviceNameService.GetDevice("ukbd", 1, FALSE);

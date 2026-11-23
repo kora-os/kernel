@@ -267,6 +267,12 @@ static void test_two_screens_and_keys(void) {
               taken(10) == NULL,
           "and goes to it as a message on its port");
 
+    // Mouse events go to no program yet (step 5b).
+    struct input_event click = {.type = INPUT_EVENT_MOUSE, .buttons = INPUT_BUTTON_LEFT, .x = 4};
+    unsigned before = b->head;
+    route(&click);
+    CHECK(b->head == before && a->head == 0, "a mouse event is delivered to nobody");
+
     // Meta+M: the next screen, wrapping round; the M is the manager's.
     struct input_event m_down = key(INPUT_EVENT_KEY_DOWN, KEY_M, INPUT_MOD_LEFT_GUI);
     struct input_event m_up = key(INPUT_EVENT_KEY_UP, KEY_M, INPUT_MOD_LEFT_GUI);

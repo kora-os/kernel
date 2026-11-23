@@ -169,6 +169,14 @@ void kernel_main(uintptr_t dtb) {
   tty_serial_init();
 #ifdef KORAOS_VIRTIO_INPUT
   printf("[virtio-input] keyboard %s\n", virtio_input_init() ? "ready" : "absent");
+  unsigned mice, tablets;
+  virtio_input_pointers(&mice, &tablets);
+  if (mice > 0) {
+    printf("[virtio-input] mouse ready\n");
+  }
+  if (tablets > 0) {
+    printf("[virtio-input] tablet ready\n");
+  }
 #endif
 
   // Start /bin/init as the first (and only) user program the kernel launches.

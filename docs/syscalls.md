@@ -456,19 +456,41 @@ struct port_message {      /* filled by port_get() and port_wait() */
 
 #define INPUT_EVENT_KEY_DOWN 1
 #define INPUT_EVENT_KEY_UP 2
+#define INPUT_EVENT_MOUSE 3      /* a mouse's report */
 #define INPUT_FLAG_REPEAT 0x01   /* key down: an auto-repeat */
+#define INPUT_FLAG_ABSOLUTE 0x02 /* mouse: x, y are a position, 0..INPUT_ABS_MAX */
+#define INPUT_ABS_MAX 32767
+#define INPUT_BUTTON_LEFT 0x01   /* then RIGHT 0x02, MIDDLE 0x04, SIDE 0x08, EXTRA 0x10 */
 #define INPUT_MOD_LEFT_GUI 0x0008  /* and the other INPUT_MOD_* of koraos.h */
 
 struct input_event {       /* filled by input_read() */
     unsigned char  type;   /* INPUT_EVENT_* */
     unsigned char  flags;  /* INPUT_FLAG_* */
-    unsigned short modifiers;  /* INPUT_MOD_* after the event */
+    unsigned short modifiers;  /* INPUT_MOD_* after the event (a mouse's: the
+                                  keyboard's, as of the last key event) */
     unsigned int   time_ms;    /* uptime when it was queued */
-    unsigned short keycode;    /* a USB HID usage (KEY_*) */
+    union {
+        unsigned short keycode;    /* a USB HID usage (KEY_*) */
+        short          x;          /* mouse: the movement right, or the position */
+    };
     unsigned char  source;     /* the device that sent it */
-    unsigned char  reserved;
-    unsigned int   codepoint;  /* key down: the Unicode character, or 0 */
+    union {
+        unsigned char  reserved;
+        unsigned char  buttons;    /* mouse: INPUT_BUTTON_* held after it */
+    };
+    union {
+        unsigned int   codepoint;  /* key down: the Unicode character, or 0 */
+        struct {
+            short       y;         /* mouse: the movement down, or the position */
+            signed char wheel;     /* mouse: the wheel's turn, away from you > 0 */
+            unsigned char unused;
+        };
+    };
 };
+
+/* A mouse reports movements, in its own units; a tablet (QEMU's) positions,
+   with INPUT_FLAG_ABSOLUTE. The pointer's position on the display is the
+   consumer's to keep: the screen manager's. */
 
 struct fb_info {           /* filled by fb_info() */
     unsigned long addr;    /* framebuffer base (physical == virtual) */

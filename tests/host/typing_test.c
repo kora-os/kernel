@@ -115,4 +115,41 @@ static void test_escapes(void) {
     CHECK(typing_unescape("", out, sizeof(out)) == 0, "nothing");
 }
 
-TEST_MAIN(test_characters, test_names, test_escapes)
+static void test_mouse(void) {
+    struct input_event e[2];
+    uint8_t buttons = 0;
+    CHECK(typing_mouse("5 -3", &buttons, e) == 1 && e[0].type == INPUT_EVENT_MOUSE &&
+              e[0].flags == 0 && e[0].x == 5 && e[0].y == -3 && e[0].buttons == 0 && e[0].wheel == 0,
+          "a movement");
+    CHECK(typing_mouse("  -32768   32767 ", &buttons, e) == 1 && e[0].x == -32768 && e[0].y == 32767,
+          "the widest movement, spaces anywhere");
+    CHECK(typing_mouse("to 0 32767", &buttons, e) == 1 && e[0].flags == INPUT_FLAG_ABSOLUTE &&
+              e[0].x == 0 && e[0].y == INPUT_ABS_MAX, "a position");
+    CHECK(typing_mouse("down left", &buttons, e) == 1 && e[0].buttons == INPUT_BUTTON_LEFT &&
+              buttons == INPUT_BUTTON_LEFT, "a button pressed, and held");
+    CHECK(typing_mouse("3 4", &buttons, e) == 1 && e[0].buttons == INPUT_BUTTON_LEFT,
+          "moving with it held: a drag");
+    CHECK(typing_mouse("click right", &buttons, e) == 2 &&
+              e[0].buttons == (INPUT_BUTTON_LEFT | INPUT_BUTTON_RIGHT) &&
+              e[1].buttons == INPUT_BUTTON_LEFT && buttons == INPUT_BUTTON_LEFT,
+          "a click: down then up, the other button still held");
+    CHECK(typing_mouse("up left", &buttons, e) == 1 && e[0].buttons == 0 && buttons == 0,
+          "released");
+    CHECK(typing_mouse("click extra", &buttons, e) == 2 && e[0].buttons == INPUT_BUTTON_EXTRA &&
+              typing_mouse("down middle", &buttons, e) == 1 && e[0].buttons == INPUT_BUTTON_MIDDLE &&
+              typing_mouse("up middle", &buttons, e) == 1 && typing_mouse("click side", &buttons, e) == 2 &&
+              e[0].buttons == INPUT_BUTTON_SIDE, "every button");
+    CHECK(typing_mouse("wheel -1", &buttons, e) == 1 && e[0].wheel == -1 && e[0].x == 0,
+          "the wheel, towards the user");
+    CHECK(typing_mouse("wheel 127", &buttons, e) == 1 && e[0].wheel == 127, "and away");
+    buttons = INPUT_BUTTON_LEFT;
+    const char *bad[] = {"", "5", "5 x", "1 2 3", "to 1", "to -1 5", "to 1 32768", "wheel",
+                         "wheel 128", "wheel 1 2", "down", "down thumb", "click left now",
+                         "32768 0", "- 1", "jump"};
+    for (unsigned i = 0; i < sizeof(bad) / sizeof(bad[0]); i++) {
+        CHECK(typing_mouse(bad[i], &buttons, e) == 0, "\"%s\" is not a mouse command", bad[i]);
+    }
+    CHECK(buttons == INPUT_BUTTON_LEFT, "and leaves the buttons alone");
+}
+
+TEST_MAIN(test_characters, test_names, test_escapes, test_mouse)

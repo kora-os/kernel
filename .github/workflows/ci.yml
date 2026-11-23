@@ -84,7 +84,7 @@ jobs:
       - name: Kernels never touch FP/SIMD registers
         run: tests/check-kernel-fp.py build/debug/*/kernel.elf build/release/*/kernel.elf
       - name: QEMU raspi3b smoke, writing to the ramdisk root
-        run: tests/run-qemu-smoke.py --target qemu_raspi3b --ramdisk 16 --stress 3 --keyboard
+        run: tests/run-qemu-smoke.py --target qemu_raspi3b --ramdisk 16 --stress 3 --keyboard --mouse
       - name: Create boot image with both hardware targets
         run: ./create-sd-image.sh --target all --release --output build/koraos-boot.img
       - name: Verify both hardware boot files
@@ -122,7 +122,7 @@ jobs:
           - profile: embedded-graphics
             args: --ramdisk 16 --repeat 64 --smp 4 --stress 3
           - profile: disk-keyboard
-            args: --ramdisk 16 --ram 128M --disk build/userfs/aarch64/koraos.img --keyboard --repeat 256
+            args: --ramdisk 16 --ram 128M --disk build/userfs/aarch64/koraos.img --keyboard --mouse --repeat 256
           - profile: mbr-disk
             args: --ramdisk 16 --disk build/mbr-root.img --repeat 64
           - profile: multi-volume

@@ -209,7 +209,8 @@ def near(actual, expected, tolerance=8):
 
 PROMPT = rb"^\$ "
 TYPE_CHUNK = 32  # characters per `type` command: 64 events of the queue's 256
-DROPPED = re.compile(rb"^(?:type|key): the input queue dropped \d+ events|^(?:type|key): (?:no key|unknown|a broken)", re.M)
+DROPPED = re.compile(rb"^(?:type|key|mouse): the input queue dropped \d+ events|"
+                     rb"^(?:type|key): (?:no key|unknown|a broken)", re.M)
 
 
 def type_escape(text):
@@ -415,9 +416,10 @@ def kernel_steps(q, cores):
 
 
 def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_test=False, cores=1,
-        stress=0, media=()):
+        stress=0, media=(), mouse=None):
     """Yield (name, check) steps; each check raises Failure on error. `keyboard`
-    names the keyboard to type on ("VirtIO" or "USB"), if any. `media` lists
+    names the keyboard to type on ("VirtIO" or "USB"), if any; `mouse` the
+    mouse ("VirtIO", with a tablet too, or "USB"). `media` lists
     the attached scratch drives as (what, volume label, writable) tuples."""
 
     if not graphics:
@@ -1211,6 +1213,63 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
             q.expect(rb"^keylog: off")
         yield "keylog traces %s keys to the console and to a claimer (Meta+M)" % keyboard, keylog
 
+    MOUSE_TO = rb"^Mouse from %s to screens \(pid \d+\) -> front: shell \(pid \d+\)\r?\n    time \d+ ms, "
+
+    def debug_mouse():
+        # The debug console is a mouse too: its events go to the screen
+        # manager like any mouse's, and keylog traces them as it takes them.
+        # (It may not hold the queue yet, just after a program borrowed it:
+        # the events wait for it.)
+        q.debug("keylog on")
+        q.expect(rb"^keylog: on")
+        source = rb"debug-console"
+        q.debug("mouse 5 -3")
+        q.expect(MOUSE_TO % source + rb"move 5,-3, buttons 0x00 \(none\), wheel 0, modifiers 0x0000 \(none\)")
+        q.debug("mouse click left")
+        q.expect(MOUSE_TO % source + rb"move 0,0, buttons 0x01 \(Left\)")
+        q.expect(MOUSE_TO % source + rb"move 0,0, buttons 0x00 \(none\)")
+        q.debug("mouse down right")
+        q.debug("mouse -2 7")
+        q.expect(MOUSE_TO % source + rb"move 0,0, buttons 0x02 \(Right\)")
+        q.expect(MOUSE_TO % source + rb"move -2,7, buttons 0x02 \(Right\)")
+        q.debug("mouse up right")
+        q.expect(MOUSE_TO % source + rb"move 0,0, buttons 0x00")
+        q.debug("mouse to 16384 0")
+        q.expect(MOUSE_TO % source + rb"at 16384,0, buttons 0x00")
+        q.debug("mouse wheel -2")
+        q.expect(MOUSE_TO % source + rb"move 0,0, buttons 0x00 \(none\), wheel -2")
+        q.debug("keylog off")
+        q.expect(rb"^keylog: off")
+    yield "the debug console's mouse: moves, clicks, a drag, a position and the wheel", debug_mouse
+
+    if mouse:
+        def device_mouse():
+            # QEMU's monitor moves and clicks the mouse: a VirtIO one on virt,
+            # the USB one (Circle's driver) on raspi3b. (The tablet beside it
+            # on virt, found at boot, takes positions, which the monitor only
+            # sends with a display window: the host tests cover it.)
+            gap = 0.1 if mouse == "USB" else 0.02
+            source = rb"virtio-mouse" if mouse == "VirtIO" else rb"usb-mouse"
+            q.debug("keylog on")
+            q.expect(rb"^keylog: on")
+            if mouse == "VirtIO":
+                mice = q.monitor("info mice").decode(errors="replace")
+                relative = re.search(r"Mouse #(\d+): [^\n]*Virtio Mouse", mice, re.I)
+                if relative is None:
+                    raise Failure("QEMU lists no VirtIO mouse: %r" % mice)
+                q.monitor("mouse_set " + relative.group(1))
+            q.monitor("mouse_move 7 4")
+            q.expect(MOUSE_TO % source + rb"move 7,4, buttons 0x00", timeout=20)
+            time.sleep(gap)
+            q.monitor("mouse_button 1")
+            q.expect(MOUSE_TO % source + rb"move 0,0, buttons 0x01 \(Left\)", timeout=20)
+            time.sleep(gap)
+            q.monitor("mouse_button 0")
+            q.expect(MOUSE_TO % source + rb"move 0,0, buttons 0x00", timeout=20)
+            q.debug("keylog off")
+            q.expect(rb"^keylog: off")
+        yield "%s mouse: moves and a click" % mouse, device_mouse
+
     def termdemo():
         # Its escape sequences go to the shell's console, which draws them.
         q.send("termdemo\r")
@@ -1628,6 +1687,8 @@ def main():
                              "--disk) a kernel without a ramdisk finding no volume with /bin/init")
     parser.add_argument("--keyboard", action="store_true",
                         help="type on a keyboard: VirtIO on virt, USB on raspi3b")
+    parser.add_argument("--mouse", action="store_true",
+                        help="a mouse: VirtIO (and a tablet) on virt, USB on raspi3b")
     parser.add_argument("--disk", help="external bare FAT32 or MBR FAT32 disk for virt")
     parser.add_argument("--multi-volume", action="store_true", help="require scratch BOOT/EXTRAS partitions")
     parser.add_argument("--write-test", action="store_true", help="mutate a disposable writable FAT32 root")
@@ -1712,6 +1773,14 @@ def main():
             extra += ["-device", "virtio-keyboard-device"]
         elif not args.usb_stick:  # which brings a keyboard with it
             extra += ["-device", "usb-kbd"]
+    if args.mouse:
+        # QEMU's raspi4b has no PCIe, so no xHCI and no USB mouse.
+        if args.machine == "raspi4b":
+            parser.error("--mouse requires virt or raspi3b")
+        if args.machine == "virt":
+            extra += ["-device", "virtio-mouse-device", "-device", "virtio-tablet-device"]
+        else:
+            extra += ["-device", "usb-mouse"]
     if args.disk:
         if args.machine != "virt" or not os.path.isfile(args.disk):
             parser.error("--disk requires virt and an existing image")
@@ -1753,14 +1822,20 @@ def main():
         if args.usb_stick:
             # Circle enumerates before the block layer comes up.
             m = q.expect(rb"^\[usb\] drive umsd1: (\d+) MB, (read-only|writable)")
+            if args.mouse:
+                q.expect(rb"^circle: USB mouse ready")
             q.expect(rb"^circle: USB keyboard ready")
             want = (str(os.path.getsize(args.usb_stick) // (1024 * 1024)).encode(),
                     b"writable" if args.usb_stick_writable else b"read-only")
             if m.groups() != want:
                 raise Failure("USB drive line %r, want %s" % (m.group(0), want))
             print("ok   - USB drive: %s MB, %s" % (m.group(1).decode(), m.group(2).decode()))
-        elif args.keyboard and args.machine == "raspi3b":
-            q.expect(rb"^circle: USB keyboard ready")
+        elif args.machine == "raspi3b" and (args.keyboard or args.mouse):
+            if args.mouse:
+                q.expect(rb"^circle: USB mouse ready")
+                print("ok   - USB mouse ready")
+            if args.keyboard:
+                q.expect(rb"^circle: USB keyboard ready")
         if args.ramdisk:
             # After Circle's USB lines, before the SD card and VirtIO probes.
             m = q.expect(rb"^\[ramdisk\] (\d+) MB at 0x[0-9a-f]+, read-write")
@@ -1793,12 +1868,17 @@ def main():
             return
         if args.keyboard and args.machine == "virt":
             q.expect(rb"\[virtio-input\] keyboard ready")
+        if args.mouse and args.machine == "virt":
+            q.expect(rb"\[virtio-input\] mouse ready")
+            q.expect(rb"\[virtio-input\] tablet ready")
+            print("ok   - VirtIO mouse and tablet ready")
         media = ([("SD card", "SDCARD", args.sd_writable)] if args.sd else []) + \
             ([("USB drive", "USBSTICK", args.usb_stick_writable)] if args.usb_stick else [])
         keyboard = ("VirtIO" if args.machine == "virt" else "USB") if args.keyboard else None
+        mouse = ("VirtIO" if args.machine == "virt" else "USB") if args.mouse else None
         for name, check in run(q, not args.no_graphics, keyboard, args.repeat, args.multi_volume,
                                args.write_test or (args.ramdisk and not args.disk), cores, args.stress,
-                               media):
+                               media, mouse):
             try:
                 check()
                 print("ok   - " + name)

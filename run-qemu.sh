@@ -16,6 +16,8 @@ Usage: ./run-qemu.sh [options] [-- QEMU arguments...]
 Environment: KORA_QEMU_TARGET, KORA_QEMU_SMP, KORA_QEMU_RAM, KORA_QEMU_RAMFB,
  KORA_QEMU_KEYBOARD, KORA_QEMU_DISK, KORA_QEMU_DISK_READONLY,
  KORA_QEMU_FB and KORA_QEMU_DISPLAY retain their existing meanings.
+ KORA_QEMU_MOUSE: on virt (default 1) a VirtIO tablet, so the host's pointer
+ moves the guest's in a QEMU window; on raspi3b (default 0) a USB mouse.
  KORA_QEMU_SD=IMAGE puts an SD card in a raspi machine's slot, and on raspi3b
  KORA_QEMU_USB=IMAGE plugs in a USB drive (QEMU snapshots: an image is never
  changed unless KORA_QEMU_SD_WRITABLE=1 or KORA_QEMU_USB_WRITABLE=1; the
@@ -70,6 +72,11 @@ kernel_img="$build_root/$configuration/$target/kernel.img"
 [[ -s "$kernel_img" && -f "$kernel_img" ]] || fail "Missing $kernel_img; build with --target $target first"
 if [[ "$target" == qemu_raspi* ]]; then
     machine_args=(-M "${target#qemu_}")
+    if [[ "${KORA_QEMU_MOUSE:-0}" == 1 ]]; then
+        # QEMU's raspi4b has no PCIe, so no xHCI for the Pi 4's USB ports.
+        [[ "$target" == qemu_raspi3b ]] || fail "KORA_QEMU_MOUSE requires --target qemu_raspi3b on a Pi"
+        machine_args+=(-device usb-mouse)
+    fi
     if [[ -n "${KORA_QEMU_SD:-}" ]]; then
         card=$(normalize_path "$KORA_QEMU_SD")
         [[ -f "$card" ]] || fail "Missing SD card image: $card"
@@ -97,6 +104,7 @@ else
         -global virtio-mmio.force-legacy=false -m "${KORA_QEMU_RAM:-256M}")
     if [[ "${KORA_QEMU_RAMFB:-1}" == 1 ]]; then machine_args+=(-device ramfb); fi
     if [[ "${KORA_QEMU_KEYBOARD:-1}" == 1 ]]; then machine_args+=(-device virtio-keyboard-device); fi
+    if [[ "${KORA_QEMU_MOUSE:-1}" == 1 ]]; then machine_args+=(-device virtio-tablet-device); fi
     if [[ -n "${KORA_QEMU_DISK:-}" ]]; then
         disk=$(normalize_path "$KORA_QEMU_DISK")
         [[ -f "$disk" ]] || fail "Missing disk: $disk"

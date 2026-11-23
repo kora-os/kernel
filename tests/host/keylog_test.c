@@ -107,6 +107,24 @@ static void test_format(void) {
     keylog_format(text, &n, "s", "r", NULL);
     CHECK(strstr(text, "char U+001B, repeat no") != NULL, "a control character is not quoted");
 
+    n = note(INPUT_EVENT_MOUSE, 0, INPUT_MOD_LEFT_SHIFT, 0);
+    n.event.x = 3;
+    n.event.y = -12;
+    n.event.buttons = INPUT_BUTTON_LEFT | INPUT_BUTTON_MIDDLE;
+    n.event.wheel = -1;
+    keylog_format(text, &n, "virtio-mouse", "screens (pid 2)", "shell (pid 3)");
+    TEXT_IS("Mouse from virtio-mouse to screens (pid 2) -> front: shell (pid 3)\n"
+            "    time 123456 ms, move 3,-12, buttons 0x05 (Left+Middle), wheel -1, "
+            "modifiers 0x0002 (LShift)\n");
+    n = note(INPUT_EVENT_MOUSE, 0, 0, 0);
+    n.event.flags = INPUT_FLAG_ABSOLUTE;
+    n.event.x = 16384;
+    n.event.y = INPUT_ABS_MAX;
+    keylog_format(text, &n, "virtio-tablet", "r", NULL);
+    TEXT_IS("Mouse from virtio-tablet to r\n"
+            "    time 123456 ms, at 16384,32767, buttons 0x00 (none), wheel 0, "
+            "modifiers 0x0000 (none)\n");
+
     n = note(INPUT_EVENT_KEY_DOWN, 0xFF, 0x03FF, 0x10FFFF);
     n.event.type = 9;
     keylog_format(text, &n, "unknown", "a receiver with a long name (pid 1234567)",
