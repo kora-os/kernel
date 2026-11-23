@@ -380,6 +380,7 @@ flowchart TB
 - **The client side is a library**, `user/libscreen`, beside libconsole.
 - **The manager allocates the screens**, in its own memory: a crashed
   client's pages are reclaimed, its screen stays valid until it is closed.
+  (Revised after 4c2b: the program allocates its pixels, below.)
 
 ## Step 4b2 as built
 
@@ -510,7 +511,34 @@ flowchart TB
   console drops the line, the shell keeps waiting for one); keys typed while
   the display is lent wait for the manager. A crashed manager leaves the
   shell running with nothing on the display, drawing into pixels that were
-  the manager's memory, and init does not notice.
+  the manager's memory. (init does start the shell again: `screens` is its
+  child. Both are fixed next.)
+
+## Screens that survive a crash, as built (after 4c2b)
+
+Without memory protection, neither side of a screen may write into the
+other's memory: a crash frees the crashed side's pages, and the other side
+would write into pages that may belong to another program by then.
+
+- **The pixels are the program's.** `screen_open` allocates them (as large
+  as the display, from `fb_info`) and gives them in `SCREEN_OPEN`; the manager
+  only reads them. A crashed client costs at worst a moment of garbage on the
+  display, never a write into freed memory.
+- **Keys are messages**, `struct screen_events` (up to 32 events) in the
+  manager's memory, sent to the screen's own port and replied by the
+  program: one out at a time, the rest waiting in the manager (256, then
+  dropped and counted). Ports keep an ended sender's memory until its
+  messages are replied, so a crashed manager's events stay readable; a
+  crashed client's messages come back, and so does a closed screen's.
+- **Clients notice the manager's end**: `SCREEN_OPEN`'s reply names the
+  manager's pid (a reply's sender is the requester), which the program
+  watches on the screen's signal (`sig_on_end`). `screen_gone` says so;
+  requests stop. `console_run` kills its program then, so the shell's console
+  ends the shell and itself; gfxdemo, condemo, jobdemo and screenprobe end.
+- **init** gives up only after three quick ends in a row, not one: someone
+  may exit a new shell within a second.
+- **The smoke test** kills `screens` from the shell, with gfxdemo running:
+  the old shell and gfxdemo end, and init starts a new shell.
 
 ## Safety net
 

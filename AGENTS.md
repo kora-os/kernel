@@ -75,7 +75,10 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
   held, so keep its notes and its printing apart.
 - The screen manager is the user program `screens` (`user/screens.c`); its
   clients use `user/libscreen` (`screen_open`, `screen_damage`,
-  `screen_event`). Screens are the manager's memory; Meta+M is its hotkey.
+  `screen_event`, `screen_gone`). Neither side writes into the other's memory
+  (no MMU to catch it): a screen's pixels are its program's, which the
+  manager only reads; keys are the manager's messages on the screen's port.
+  Meta+M is its hotkey.
   init runs `screens shell` with a display (no shell without one) and starts
   it again when it ends. A program that claims the display or the keyboard
   itself borrows them first (`screens_borrow`), as `inputprobe` does.
