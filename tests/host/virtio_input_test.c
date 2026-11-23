@@ -38,9 +38,10 @@ unsigned input_source_register(const char *name) {
     (void)name;
     return 3;
 }
-void input_post(const struct input_event *event) {
+bool input_post(const struct input_event *event) {
     CHECK(output_length < sizeof(output) / sizeof(output[0]), "output test capture fits");
     if (output_length < sizeof(output) / sizeof(output[0])) output[output_length++] = *event;
+    return true;
 }
 static bool posted_key(unsigned index, uint8_t type, uint8_t flags, uint16_t modifiers,
                        uint16_t keycode, uint32_t codepoint) {

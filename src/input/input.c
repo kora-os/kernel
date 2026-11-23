@@ -53,7 +53,7 @@ static void wake_consumer(int tid, int bit) {
     }
 }
 
-void input_post(const struct input_event *event) {
+bool input_post(const struct input_event *event) {
     struct input_event stamped = *event;
     stamped.time_ms = (uint32_t)(timer_us() / 1000);
 
@@ -71,6 +71,7 @@ void input_post(const struct input_event *event) {
     if (queued) {
         wake_consumer(tid, bit);
     }
+    return queued;
 }
 
 // Under queue_lock.
