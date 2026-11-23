@@ -847,11 +847,13 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
             time.sleep(0.1)
         raise Failure("%d background jobs were never reaped: %s" % (count, ps_table(q)))
 
-    def spin_gaps(placements, ms=1500):
+    def spin_gaps(placements, ms=1500, after=1500):
         """Run one spinner per @core (None: unpinned), wait, return their
-        longest gaps in us."""
+        longest gaps in us. They spin `after` ms after they start, once every
+        command has been typed: the shell, its console and the screen
+        manager, which handle the typing, run on cores of their own."""
         for core in placements:
-            q.send("schedprobe spin %d%s &\r" % (ms, "" if core is None else " @%d" % core))
+            q.send("schedprobe spin %d %d%s &\r" % (ms, after, "" if core is None else " @%d" % core))
             q.expect(rb"^\[\d+\] started")
             q.expect(PROMPT)
         gaps = [int(q.expect(rb"schedprobe: spun \d+ ms, longest gap (\d+) us", timeout=60).group(1))
