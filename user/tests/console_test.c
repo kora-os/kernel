@@ -46,6 +46,12 @@ static int sig_next = PORT_BIT;
 static char logged[4096];
 static size_t logged_length;
 
+// console_run's program, and what was done to it.
+#define RUN_PID 77
+static int run_flags, run_std_ok, waits, sent_to, killed;
+static unsigned sent_mask;
+static void type_key(unsigned keycode, unsigned modifiers, unsigned codepoint);
+
 static long kernel(long number, long a0, long a1, long a2, long a3) {
     (void)a2;
     (void)a3;
@@ -92,6 +98,39 @@ static long kernel(long number, long a0, long a1, long a2, long a3) {
         logged_length += (size_t)a1;
         logged[logged_length] = '\0';
         return a1;
+    case SYS_SPAWN_STD: {  // console_run's program
+        const struct spawn_request *r = (const struct spawn_request *)a0;
+        run_flags = r->flags;
+        run_std_ok = 1;
+        for (int i = 0; i < 3; i++) {
+            run_std_ok &= r->std[i].kind == STD_PORT && r->std[i].value == CONSOLE_PORT;
+        }
+        return strcmp(r->name, "nosuch") == 0 ? -1 : RUN_PID;
+    }
+    case SYS_SIG_WAIT: {  // while console_run serves: Ctrl+C, a stray end, its end
+        int end = ((run_flags >> 12) & 0x3f) - 1;
+        CHECK((a0 & SIG_MASK(end)) && (a0 & SIG_MASK(KEY_BIT)), "it waits for keys and the end");
+        waits++;
+        if (waits == 1) {
+            type_key(0x06, INPUT_MOD_LEFT_CTRL, 'c');
+            return SIG_MASK(KEY_BIT);
+        }
+        return SIG_MASK(end);
+    }
+    case SYS_WAITPID:
+        CHECK(a0 == RUN_PID && a2 == WNOHANG, "it reaps its program without blocking");
+        if (waits < 3) {
+            return 0;
+        }
+        *(int *)a1 = 5;
+        return RUN_PID;
+    case SYS_SIG_SEND:
+        sent_to = (int)a0;
+        sent_mask = (unsigned)a1;
+        return 0;
+    case SYS_KILL:
+        killed = (int)a0;
+        return 0;
     case SYS_SIG_ON_END:
         if (a0 <= 0 || a0 >= 100 || ended[a0]) {
             return -1;
@@ -291,6 +330,28 @@ static void test_modes_and_keys(void) {
     CHECK(shared.tail == shared.head, "every key was taken");
 }
 
+static void test_run(void) {
+    int code = 0;
+    CHECK(console_run(c, "nosuch", 1, (char *[]){"nosuch", NULL}, CONSOLE_BREAK_KILL, &code) == -1,
+          "a program that cannot start");
+    char *argv[] = {"shell", NULL};
+    waits = 0;
+    CHECK(console_run(c, "shell", 1, argv, CONSOLE_BREAK_SIGNAL, &code) == 0 && code == 5,
+          "console_run serves until its program ends, and gives its exit code");
+    CHECK(run_std_ok && (run_flags & SPAWN_NOWAIT) && (run_flags >> 12) != 0,
+          "the program has the console for its handles, and its end is a signal");
+    CHECK(sent_to == RUN_PID && sent_mask == SIG_MASK(SIG_BREAK) && killed == 0,
+          "Ctrl+C sends it the break signal");
+    CHECK(c->on_break == NULL && broke == 1, "the break callback is the console's own again");
+
+    waits = 0;
+    sent_to = 0;
+    CHECK(console_run(c, "shell", 1, argv, CONSOLE_BREAK_KILL, &code) == 0 && code == 5,
+          "again, killing on Ctrl+C");
+    CHECK(killed == RUN_PID && sent_to == 0, "Ctrl+C kills it");
+    CHECK(shared.tail == shared.head, "every key was taken");
+}
+
 static void test_close(void) {
     int left = c->waiting_count;
     answer_count = 0;
@@ -302,4 +363,4 @@ static void test_close(void) {
     fake_set_handler(NULL);
 }
 
-TEST_MAIN(setup, test_writes, test_reads, test_modes_and_keys, test_close)
+TEST_MAIN(setup, test_writes, test_reads, test_modes_and_keys, test_run, test_close)

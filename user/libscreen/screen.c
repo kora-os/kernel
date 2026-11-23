@@ -2,20 +2,48 @@
  * screen.h. */
 #include "libscreen/screen.h"
 
-/* Send the handle's request and wait for it to come back. A request returned
- * unhandled (the manager ended) fails. */
-static int request(screen_t *s) {
-    s->request.result = -1;
-    if (port_put(s->manager, &s->request, s->reply_port) != 0) {
+/* Send a request and wait for it to come back. A request returned unhandled
+ * (the manager ended) fails. */
+static int transact(int manager, int reply_port, struct screen_request *r) {
+    r->result = -1;
+    if (port_put(manager, r, reply_port) != 0) {
         return -1;
     }
     struct port_message got;
-    while (port_wait(s->reply_port, &got) == 1) {
-        if (got.msg == &s->request) {
-            return got.kind == PORT_REPLY ? s->request.result : -1;
+    while (port_wait(reply_port, &got) == 1) {
+        if (got.msg == r) {
+            return got.kind == PORT_REPLY ? r->result : -1;
         }
     }
     return -1;
+}
+
+static int request(screen_t *s) {
+    return transact(s->manager, s->reply_port, &s->request);
+}
+
+/* A request that needs no screen, with a reply port of its own. */
+static int ask_manager(int op) {
+    int manager = port_find(SCREENS_PORT);
+    if (manager < 0) {
+        return -1;
+    }
+    int reply_port = port_create(NULL);
+    if (reply_port < 0) {
+        return -1;
+    }
+    struct screen_request r = {.op = op};
+    int result = transact(manager, reply_port, &r);
+    port_delete(reply_port);
+    return result;
+}
+
+int screens_borrow(void) {
+    return ask_manager(SCREEN_LEND);
+}
+
+int screens_return(void) {
+    return ask_manager(SCREEN_RETURN);
 }
 
 screen_t *screen_open(const char *title) {

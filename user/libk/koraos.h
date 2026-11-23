@@ -167,6 +167,15 @@ int port_reply(void *msg);
  * 0), and be ready to find none. */
 #define SIG_MASK(bit) (1u << (bit))
 
+/* The break signal, a system bit nobody allocates: Ctrl+C on a console, as
+ * AmigaOS's SIGBREAKF_CTRL_C. The program serving a console sends it with
+ * sig_send to the program it runs, when that program asked for it
+ * (console_run in <libscreen/console.h>); the shell does, and ends its
+ * foreground program. Wait for it with sig_wait(SIG_MASK(SIG_BREAK)), and
+ * clear it with sig_set(0, SIG_MASK(SIG_BREAK)) before a wait that should
+ * see only a new one. */
+#define SIG_BREAK 0
+
 int sig_alloc(int bit);
 int sig_free(int bit);
 unsigned sig_wait(unsigned mask);
@@ -505,63 +514,3 @@ static inline unsigned long uptime_us(void) {
 
 /* Graphics */
 int fb_info(struct fb_info *out);
-
-/* Read a line from stdin: a console hands over raw bytes, so this does the
- * editing. It echoes on stdout as it goes, honours backspace and turns CR into
- * '\n'; other control bytes are dropped and escape sequences (cursor keys, the
- * terminal's status replies) are swallowed whole. Returns at a newline or when
- * the buffer fills, with no NUL added: the byte count, 0 at the end of input,
- * or -1 on an error, if nothing was read. A console's stdin reads one byte at
- * a time, so typed-ahead lines stay queued for the next call. stdout is
- * flushed first, so a prompt printed without a newline is shown before the
- * line is read, and after each echo. */
-static inline ssize_t kgetline(char *buf, size_t len) {
-    size_t i = 0;
-    fflush(stdout);
-    enum { ESC_NONE, ESC_START, ESC_BODY } esc = ESC_NONE;
-    while (i < len) {
-        int ch = getc(stdin);
-        if (ch == EOF) {
-            ssize_t end = ferror(stdin) ? -1 : 0;
-            clearerr(stdin);  /* a console may have more later */
-            return i > 0 ? (ssize_t)i : end;
-        }
-        char c = (char)ch;
-        if (c == 0x1b) {
-            esc = ESC_START;
-            continue;
-        }
-        if (esc == ESC_START) {
-            /* ESC [ ... and ESC O x run to a final byte; other ESC x are done. */
-            esc = (c == '[' || c == 'O') ? ESC_BODY : ESC_NONE;
-            continue;
-        }
-        if (esc == ESC_BODY) {
-            if (c >= 0x40 && c <= 0x7e) {
-                esc = ESC_NONE;
-            }
-            continue;
-        }
-        if (c == '\r') {
-            c = '\n';
-        }
-        if (c == 0x7f || c == '\b') { /* delete / backspace */
-            if (i > 0) {
-                i--;
-                fputs("\b \b", stdout);
-                fflush(stdout);
-            }
-            continue;
-        }
-        if (c != '\n' && (c < 0x20 || c > 0x7e)) {
-            continue;
-        }
-        putc(c, stdout); /* echo */
-        fflush(stdout);
-        buf[i++] = c;
-        if (c == '\n') {
-            break;
-        }
-    }
-    return (ssize_t)i;
-}

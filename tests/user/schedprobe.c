@@ -7,6 +7,11 @@
 //                          keeps running meanwhile if the timer preempts us
 //                          (or it runs on another core). Reports the longest
 //                          gap the loop saw: time slices lost to others.
+//   schedprobe spin <ms> <after>  the same after sleeping <after> ms: several
+//                          spinners started one by one then measure the
+//                          same stretch, after the commands that started them
+//                          were typed and shown (the shell and its console
+//                          run on cores of their own, a spinner's too).
 #include "../../user/libk/koraos.h"
 
 static unsigned long parse_ms(const char *s) {
@@ -18,11 +23,14 @@ static unsigned long parse_ms(const char *s) {
 }
 
 int main(int argc, char **argv) {
-    if (argc != 3) {
-        fputs("usage: schedprobe sleep|spin <ms>\n", stderr);
+    if (argc != 3 && !(argc == 4 && strcmp(argv[1], "spin") == 0)) {
+        fputs("usage: schedprobe sleep <ms> | spin <ms> [after]\n", stderr);
         return 2;
     }
     unsigned long ms = parse_ms(argv[2]);
+    if (argc == 4) {
+        msleep(parse_ms(argv[3]));
+    }
     unsigned long start = uptime_us();
     if (strcmp(argv[1], "sleep") == 0) {
         msleep(ms);
@@ -47,6 +55,6 @@ int main(int argc, char **argv) {
                longest);
         return 0;
     }
-    fputs("usage: schedprobe sleep|spin <ms>\n", stderr);
+    fputs("usage: schedprobe sleep <ms> | spin <ms> [after]\n", stderr);
     return 2;
 }

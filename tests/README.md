@@ -164,13 +164,13 @@ header in step with `user/libk/syscall.S`.
 
 | Test | Covers |
 |------|--------|
-| `libk_console_test.c` | `kgetline`: backspace, CR as newline, escape sequences and control bytes dropped, echo, typed-ahead input left queued, a full buffer, EOF. The flush rules: a prompt printed without a newline is on the console before `kgetline` reads and echoes, and a program's buffered text comes out before its child's (`spawn`, `spawn_flags`) |
+| `libk_console_test.c` | The flush rule: a program's buffered text comes out before its child's (`spawn`, `spawn_flags`) |
 | `libk_threads_test.c` | libk under threads, with pthreads standing in for KoraOS threads behind the fake kernel's handler: every atomic operation hammered by 8 threads with no lost update, the mutex excluding and `mutex_trylock`, 16 jobs across cores with their results, a job on a core that does not exist, and no heap block left behind (`kheap_info`) |
-| `tools_test.c` | The small tools, each run with an argv and checked for its exit status, stdout, stderr (messages go there) and effect on the filesystem. `echo` and `hello`; `cat` (several files, a missing one reported in order with the output around it, a directory, binary data through short reads and writes); `ls` (directories with a slash, UTF-8 names, missing directory, failing `readdir`); `mkdir`, `rmdir`, `rm` (never a directory) and `mv` (never over an existing file), each carrying on after a failure, syncing once and reporting a failed sync; `ps` (aligned columns, unknown state); `init` (banner before the shell, the shell's exit code, a shell that cannot start) |
-| `demos_test.c` | The demos, with the test standing in for a framebuffer (host memory), the clock (`uptime_us`, which `koraos.h` leaves to the test under `LIBK_HOST_TEST`), threads (run to completion when created) and child programs (recorded). `gfxdemo`: gradient and colour fills inside the picture's width, no framebuffer. `termdemo`: its escape sequence stream is byte for byte the one of the original `write()`-per-piece version, in a few dozen writes. `jobdemo`: the result line (cores, times, two decimals of speedup, "1 core"), one job then one per core, bands adding up, the picture and the wait for Enter, a job that cannot start, usage. `pindemo`: rounds and flags of each worker, one line per worker in one write, a worker on the wrong core or killed, a worker that cannot start, the defaults on four and two cores, bad specs, worker mode |
+| `tools_test.c` | The small tools, each run with an argv and checked for its exit status, stdout, stderr (messages go there) and effect on the filesystem. `echo` and `hello`; `cat` (several files, a missing one reported in order with the output around it, a directory, binary data through short reads and writes); `ls` (directories with a slash, UTF-8 names, missing directory, failing `readdir`); `mkdir`, `rmdir`, `rm` (never a directory) and `mv` (never over an existing file), each carrying on after a failure, syncing once and reporting a failed sync; `ps` (aligned columns, unknown state); `init` (no shell without a display; with one, `screens shell`, started again as it ends until it ends within a second, and its exit code; a manager that cannot start) |
+| `demos_test.c` | The demos, with the test standing in for a framebuffer (host memory), the clock (`uptime_us`, which `koraos.h` leaves to the test under `LIBK_HOST_TEST`), threads (run to completion when created) and child programs (recorded). `gfxdemo`: gradient and colour fills inside the picture's width, no framebuffer. `termdemo`: its escape sequence stream is byte for byte the one of the original `write()`-per-piece version, in a few dozen writes. `jobdemo`: the result line (cores, times, two decimals of speedup, "1 core"), one job then one per core, bands adding up, the picture on a screen of a stand-in screen manager inside its width, the whole screen damaged and closed at Enter, a job that cannot start, usage. `pindemo`: rounds and flags of each worker, one line per worker in one write, a worker on the wrong core or killed, a worker that cannot start, the defaults on four and two cores, bad specs, worker mode |
 | `condemo_test.c` | `condemo` with the console library built as user programs build it (the libc's headers). As a console handler: the program spawned in the background with condemo's stdin and its port for stdout and stderr, write packets answered with their length and drawn (a newline starts a line), reads refused, every packet replied and the port deleted, a program that cannot start. The two-window demo: its report line, the left console's blue screen, DEC box, 16 colours, attributes and cursor where it reported it, the right console filling its window and clipped at it, frames, and no pixel drawn anywhere else; no framebuffer, a 16-bit one, a screen too small |
 | `cp_test.c` | The actual `cp`, on file streams: short reads and writes, an existing destination refused and left untouched, a refused write leaving a partial destination, a failing sync, missing and directory sources, usage; both files closed and one sync on every path |
-| `shell_input_test.c` | The actual shell, parser and main loop: redirection (`<`, `>`, `>>`, glued or not, with `&` and `@N`, quoted operators as arguments, the files closed after the spawn, each mistake reported and nothing run); fragmented reads, maximal complete lines, oversized-line draining, next-command preservation, 16/17-token boundary, terminated arguments, maximal assign target, quoted/escaped/empty tokens, literal operator provenance, malformed quoting, background jobs and their reaping, `@N` core pinning; the exact screen of a short session (prompt, typed line, child output and job lines in order); the built-ins (`pwd`, `cd`, `name:`, `volumes`, `assign`, `sync`, `kill`, `help`) and their usage and failure messages, which go to stderr |
+| `shell_input_test.c` | The actual shell, parser and main loop: redirection (`<`, `>`, `>>`, glued or not, with `&` and `@N`, quoted operators as arguments, the files closed after the spawn, each mistake reported and nothing run); fragmented reads, maximal complete lines, oversized-line draining, next-command preservation, 16/17-token boundary, terminated arguments, maximal assign target, quoted/escaped/empty tokens, literal operator provenance, malformed quoting, background jobs and their reaping, `@N` core pinning; what a short session writes (prompts, child output and job lines in order; the console echoes the typed lines); the end of input ending the shell; Ctrl+C (the break signal) killing the program in front, an old one forgotten first, a background job not waited for; the refusal to start on the kernel's console with no screen manager; the built-ins (`pwd`, `cd`, `name:`, `volumes`, `assign`, `sync`, `kill`, `help`) and their usage and failure messages, which go to stderr |
 
 ## Console fd check
 
@@ -277,7 +277,11 @@ itself type with QEMU's `sendkey` instead.
 The test checks the boot line's build identifier (the git commit), the
 boot-time kernel heap self-test, and that every core came online (`--smp N`
 on virt, 1 to 4; raspi3b always has four; `--gic 3` for a GICv3 and, on an
-Apple Silicon Mac, `--accel hvf` to run on the host's cores), boots to the ELF shell,
+Apple Silicon Mac, `--accel hvf` to run on the host's cores). Without a
+display (`--no-graphics`) init starts no shell: the test checks that and runs
+the debug console's checks only (`version`, `irqs`, `cpus`, `heap` and
+`heaptest`, below). With one it boots to the shell, which init runs under the
+screen manager on a screen of its own (`screens shell`), then
 runs filesystem/argv/exit-code checks plus an EL0 namespace probe (child cwd
 inheritance and isolation, failed path handling, descriptors retained across
 chdir, volume/assign enumeration and assign syscall updates), checks shell
@@ -316,7 +320,7 @@ and checks terminal
 colors and graphics pixels using QEMU screenshots (`condemo`: two consoles
 of the console library in windows, with the right one clipped). `--keyboard` types a
 command through a keyboard, a VirtIO one on virt and QEMU's USB keyboard
-(the Circle path of the Pi) on raspi3b: Shift/release, an arrow, Backspace,
+(the Circle path of the Pi) on raspi3b: Shift/release, Left, Backspace,
 Enter and scrollback, all of it travelling through the kernel's input event
 queue. UART observes output. With a writable root, the shell's redirections
 write and append to a file and read one back (`libcprobe handles` reports
@@ -333,22 +337,31 @@ when there is one), 50 messages and a child's end served from one
 `inputprobe` checks what a screen manager takes from the kernel: a signal at
 any process's end (a child, another program's orphan, a watch stopped or
 whose bit is freed), the input queue and the screen, each claimed, refused to
-another program and taken back at the holder's end; it paints the screen red
-while it holds it, and the step checks that the console redrew it. With
-`--keyboard`, the debug console's `keylog` traces typed keys to the shell,
-then Meta+M to `inputprobe keys 4`, which claims the queue. The screen
-manager runs two `screenprobe`s, each filling a screen with a colour, in the
-background: the front screen fills the display, a key typed with `key` goes
-to the front probe only, Meta+M switches, a probe ending with its screen open
-(x) has it closed at once and the other brought to front, and the console
-gets the display back at the end. With `--keyboard`, a key goes to the
-front probe only, Meta+M switches, Escape closes each, and `condemo` and
-`gfxdemo` show on screens of their own. With `--keyboard`, `newcon conprobe`
-runs a program in a console: a line edited with an arrow, recalled with Up,
-edited with Backspace and Home, Ctrl+D as the end of input and raw mode's
-bytes, each reported by `conprobe` on the serial line; then Ctrl+C kills
-`conprobe hang`, and `cat` copies typed lines until Ctrl+D. `cat` alone on
-the kernel console prints its usage, and `cat < file` copies the file. `--repeat N` runs `allocprobe` N times: page runs, a `malloc`
+another program and taken back at the holder's end; it borrows the display
+and the keyboard from the screen manager first, paints the screen red while
+it holds it, and the step checks that the shell's screen was drawn again
+once the manager took the display back. With `--keyboard`, the debug
+console's `keylog` traces typed keys to the screen manager with the shell in
+front, then Meta+M to `inputprobe keys 4`, which borrows and claims the
+queue. `jobdemo`, `condemo` and `gfxdemo` draw on screens of their own,
+closed with Enter or Escape; `termdemo` draws on the shell's console. A
+second `screens` is refused. Two `screenprobe`s, each filling a screen with
+a colour, run in the background beside the shell: the front screen fills
+the display, a key typed with `key` goes to the front probe only, Meta+M goes
+round the screens (the shell's first), a probe ending with its screen open
+(x) has it closed at once and the next brought to front, and the shell's is
+in front at the end. Ctrl+C ends the shell's program in front (`conprobe
+hang`), and at the prompt drops the line without touching the next program.
+With `--keyboard`, a key goes to the front probe only, Meta+M switches,
+Escape closes each, and Meta+M goes round `condemo`'s and `gfxdemo`'s
+screens and the shell's. With `--keyboard`, `newcon conprobe` runs a program
+in a console: a line edited with an arrow, recalled with Up, edited with
+Backspace and Home, Ctrl+D as the end of input and raw mode's bytes, each
+reported by `conprobe` on the serial line; then Ctrl+C kills `conprobe
+hang`, and `cat` copies typed lines until Ctrl+D. `cat` alone in the shell's
+console copies a typed line until Ctrl+D, and `cat < file` copies the file.
+The last step types `exit`: the shell and the screen manager end, and init
+starts them again. `--repeat N` runs `allocprobe` N times: page runs, a `malloc`
 heap grown to about 1.5 MiB with churn and `realloc`, a nested child while it is
 live, and deliberate leaks. The kernel heap's live count and the free page count
 must be the same after the last run as after the first, so everything a reaped
@@ -358,7 +371,7 @@ Use `--release` and `--build-dir` to match the build configuration. `--kernel`
 and `--out` override the image and artifact locations. Defaults are the selected
 `build/debug/<target>/kernel.img` and its `qemu-smoke/` directory. `--machine`
 remains a deprecated alias for target selection. `--no-graphics` omits ramfb on
-virt and tests serial fallback. `--disk-writable` negotiates writable test media;
+virt: no display, so no shell, and only the kernel's checks run. `--disk-writable` negotiates writable test media;
 file writes require a writable file descriptor. Use writable media only on
 disposable scratch images.
 

@@ -27,14 +27,14 @@ A program runs in EL0 with a deliberately small runtime:
   `<time.h>` (`clock` counts microseconds since boot; `mktime`, `gmtime`,
   `strftime` and the rest work in UTC; `time` returns -1, since there is no
   wall clock yet). `stdin`
-  is the raw console: no echo, and Enter arrives as `'\r'`. See
+  is the shell's console, which hands over whole lines (below). See
   [libc-plan.md](../project_doc/libc-plan.md) for what is still missing.
   Programs print through `stdout` and report errors on `stderr`; they never
   name the console by file descriptor (`write(1, ...)`), which
   `tests/check-console-fds.py` enforces. libk
   ([`user/libk/koraos.h`](../user/libk/koraos.h)) flushes `stdout` where the
   console changes hands: before `spawn` starts a child (which writes to the
-  console directly) and before `kgetline` reads and echoes a line. A program
+  console directly). A program
   that draws with escape sequences and no newline ends each frame with
   `fflush(stdout)`. `koraos.h` includes
   `<stddef.h>`, `<stdio.h>`, `<stdlib.h>` and `<string.h>`. The KoraOS calls
@@ -101,17 +101,21 @@ A program runs in EL0 with a deliberately small runtime:
   Meta+M brings the next screen to front; the keys go to the front screen's
   program as events, read with `screen_event` after
   `sig_wait(screen_signal(s))`. `screen_close`, or the program's end, closes
-  it. [`user/gfxdemo.c`](../user/gfxdemo.c) is the smallest example, and
-  draws straight into the framebuffer when no manager runs.
+  it. [`user/gfxdemo.c`](../user/gfxdemo.c) is the smallest example. A
+  program that drives the display and the keyboard itself (`fb_claim`,
+  `input_claim`) first borrows them from the manager with `screens_borrow()`,
+  and gives them back with `screens_return()` or by ending.
 - **Consoles.** A console on a screen (`user/libscreen/console.h`) is a
-  terminal its programs use as stdin, stdout and stderr: `newcon program`
-  runs one there. Reads are cooked by default: the console edits the line
+  terminal its programs use as stdin, stdout and stderr: the shell runs on
+  one, so your program does too, and `newcon program` runs one in a console
+  of its own. Reads are cooked by default: the console edits the line
   (arrows, Home/End, history with Up/Down) and a read gets it once Enter is
   pressed, with Ctrl+D as the end of input. `console_mode(CON_RAW)` hands
   your program each key as typed instead, unechoed (arrows as xterm escape
-  sequences), and `console_mode(CON_COOKED)` goes back. Ctrl+C kills the
-  program. On the kernel console these do nothing: it is always raw, and
-  `kgetline` does the editing there.
+  sequences), and `console_mode(CON_COOKED)` goes back. Ctrl+C ends the
+  program: the shell kills the one it runs in front, newcon its own. On the
+  kernel console these do nothing: it is always raw, with no
+  editing at all.
 - **`main` signature.** Either `int main(void)` or `int main(int argc, char
   **argv)`; the libc's entry stub
   [`user/libc/src/crt/crt0.S`](../user/libc/src/crt/crt0.S) calls `main` and

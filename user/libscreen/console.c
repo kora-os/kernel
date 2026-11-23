@@ -245,6 +245,49 @@ void console_write(console_t *c, const char *text, size_t length) {
     flush(c);
 }
 
+struct running {
+    int pid;
+    int on_break;
+};
+
+static void break_program(void *ctx) {
+    struct running *r = ctx;
+    if (r->on_break == CONSOLE_BREAK_SIGNAL) {
+        sig_send(r->pid, SIG_MASK(SIG_BREAK));
+    } else {
+        kill(r->pid);
+    }
+}
+
+int console_run(console_t *c, const char *name, int argc, char *const argv[], int on_break,
+                int *code) {
+    int end_bit = sig_alloc(-1);
+    if (end_bit < 0) {
+        return -1;
+    }
+    struct std_handle std[3];
+    for (int i = 0; i < 3; i++) {
+        std[i] = (struct std_handle){STD_PORT, c->port};
+    }
+    struct running r = {spawn_std(name, argc, argv, SPAWN_NOWAIT | SPAWN_SIGNAL(end_bit), std),
+                        on_break};
+    if (r.pid < 0) {
+        sig_free(end_bit);
+        return -1;
+    }
+    console_on_break(c, break_program, &r);
+    for (;;) {
+        unsigned got = sig_wait(console_signals(c) | SIG_MASK(end_bit));
+        console_service(c, got);
+        if ((got & SIG_MASK(end_bit)) && waitpid(r.pid, code, WNOHANG) == r.pid) {
+            break;
+        }
+    }
+    console_on_break(c, NULL, NULL);
+    sig_free(end_bit);
+    return 0;
+}
+
 void console_close(console_t *c) {
     while (c->waiting_count > 0) {
         answer(c->waiting[0].packet, -1);

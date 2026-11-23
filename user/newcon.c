@@ -12,15 +12,6 @@
 #include "libk/koraos.h"
 #include "libscreen/console.h"
 
-static int program = -1;
-
-static void kill_program(void *ctx) {
-    (void)ctx;
-    if (program > 0) {
-        kill(program);
-    }
-}
-
 int main(int argc, char **argv) {
     if (argc < 2) {
         fputs("usage: newcon program [args]\n", stderr);
@@ -34,33 +25,19 @@ int main(int argc, char **argv) {
         return 1;
     }
     console_t *console = console_open(screen);
-    int end_bit = sig_alloc(-1);
-    if (console == NULL || end_bit < 0) {
+    if (console == NULL) {
         fputs("newcon: out of memory\n", stderr);
         screen_close(screen);
         return 1;
     }
-    struct std_handle std[3];
-    for (int i = 0; i < 3; i++) {
-        std[i] = (struct std_handle){STD_PORT, console_port(console)};
-    }
-    program = spawn_std(argv[1], argc - 1, argv + 1, SPAWN_NOWAIT | SPAWN_SIGNAL(end_bit), std);
     int code = -1;
-    if (program < 0) {
+    int ran = console_run(console, argv[1], argc - 1, argv + 1, CONSOLE_BREAK_KILL, &code);
+    if (ran != 0) {
         printf("newcon: cannot run %s\n", argv[1]);
     } else {
-        console_on_break(console, kill_program, NULL);
-        for (;;) {
-            unsigned got = sig_wait(console_signals(console) | SIG_MASK(end_bit));
-            console_service(console, got);
-            if ((got & SIG_MASK(end_bit)) && waitpid(program, &code, WNOHANG) == program) {
-                break;
-            }
-        }
         printf("newcon: %s exited with %d\n", argv[1], code);
     }
     console_close(console);
     screen_close(screen);
-    sig_free(end_bit);
-    return program < 0 ? 1 : 0;
+    return ran != 0;
 }

@@ -1,7 +1,6 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// User-facing terminal: screen output, keyboard (+ UART fallback) input. See
-// tty.h.
+// User-facing terminal: screen output and keyboard input. See tty.h.
 
 #include "tty.h"
 
@@ -87,38 +86,16 @@ static int input_pop(char *c) {
     return 1;
 }
 
-// Serial input routing. The UART belongs either to the kernel debug console
-// (console.c) or, as a fallback keyboard, to this terminal; Ctrl-T switches.
-#define SERIAL_SWITCH_KEY 0x14  // Ctrl-T
-
-static bool serial_to_tty = false;  // the UART is the kernel debug console
-
-static void announce_serial_route(void) {
-    if (serial_to_tty) {
-        uart_puts("\n[serial -> screen terminal; Ctrl-T for the kernel console]\n");
-    } else {
-        uart_puts("\n[serial -> kernel console; Ctrl-T for the screen terminal]\n");
-        console_prompt();
-    }
-}
-
-// serial_lock (IRQ-safe) keeps the UART interrupt and the boot thread's
-// polling loop from draining the UART, or flipping the route, at once. The
-// debug console's commands run under it (lock order: serial, then the others).
+// The serial line is the kernel debug console's (console.c). serial_lock
+// (IRQ-safe) keeps the UART interrupt and the boot thread's polling loop from
+// draining the UART at once. The debug console's commands run under it (lock
+// order: serial, then the others).
 static struct spinlock serial_lock = SPINLOCK_INIT("serial");
 
 void tty_poll_serial(void) {
     uint64_t flags = spin_lock_irqsave(&serial_lock);
     while (uart_rx_ready()) {
-        char c = (char)uart_getc();
-        if (c == SERIAL_SWITCH_KEY) {
-            serial_to_tty = !serial_to_tty;
-            announce_serial_route();
-        } else if (serial_to_tty) {
-            tty_input_push(c);
-        } else {
-            console_input(c);
-        }
+        console_input((char)uart_getc());
     }
     spin_unlock_irqrestore(&serial_lock, flags);
 }
@@ -129,7 +106,7 @@ static void serial_isr(void *ctx) {
 }
 
 void tty_serial_init(void) {
-    announce_serial_route();
+    console_prompt();
     uart_rx_irq_enable(serial_isr);
 }
 

@@ -168,7 +168,7 @@ void kernel_main(uintptr_t dtb) {
   console_init();
   tty_serial_init();
 #ifdef KORAOS_VIRTIO_INPUT
-  printf("[virtio-input] keyboard %s\n", virtio_input_init() ? "ready" : "absent; serial input available");
+  printf("[virtio-input] keyboard %s\n", virtio_input_init() ? "ready" : "absent");
 #endif
 
   // Start /bin/init as the first (and only) user program the kernel launches.
@@ -183,8 +183,8 @@ void kernel_main(uintptr_t dtb) {
   }
   task_reap_all();  // release anything left unreaped
 
-  // Nothing left to run: keep serving the serial line (the debug console, or
-  // Ctrl-T to switch) for as long as the machine is up, without the BKL.
+  // Nothing left to run: keep serving the serial line (the debug console) for
+  // as long as the machine is up, without the BKL.
   bkl_release_for_good();
   for (;;) {
     tty_poll_serial();

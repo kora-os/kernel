@@ -87,8 +87,8 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
 - **`read`**: `fd` 0 reads raw bytes from the kernel console: it blocks until at least one
   arrives, then returns those already queued, up to `len`. Nothing is echoed,
   buffered into lines or translated (Enter arrives as `\r`, cursor keys as VT
-  escape sequences). libk's `kgetline` reads an echoed line with backspace, as
-  the shell does. `fd ≥ 3` reads from an open file.
+  escape sequences). Line editing is a console handler's
+  (`user/libscreen/console.c`). `fd ≥ 3` reads from an open file.
 - **`alloc_pages`** / **`free_pages`**: Amiga-style memory: a run of `count`
   contiguous, zeroed 4 KB pages (`KORAOS_PAGE_SIZE`) anywhere in RAM, returned
   by its base address. The kernel records each run against the calling
@@ -265,8 +265,11 @@ and it sleeps until any of several is set: that is how one thread waits on
 several ports, a port and a child, or a port and another thread at once.
 
 - **`sig_alloc`** allocates bit `bit` of the calling thread, or for `-1` its
-  highest free one, and clears it. Bits 0 to 7 are kept for the system (none
-  is used yet), so a thread has 24.
+  highest free one, and clears it. Bits 0 to 7 are kept for the system, so a
+  thread has 24. Bit 0 is the break (`SIG_BREAK` in libk): Ctrl+C on a
+  console, which the program serving the console sends to the program it
+  runs when that program asked for it (`console_run`); the shell does, and
+  ends its foreground program. The others are not used yet.
 - **`sig_free`** frees an allocated bit and clears it; a port tied to it stops
   setting it, the thread's end watches on it (`sig_on_end`) stop, and an input
   claim on it is given back.
@@ -297,7 +300,7 @@ A screen manager takes the screen and the keyboard from the kernel's console
 and gives them to programs of its own, Amiga style (console step 4b,
 [`project_doc/console-plan.md`](../project_doc/console-plan.md)). The kernel
 gives both back to its console when the program that took them ends, crashed
-or not, so the shell is never left without them. Nobody is checked: as
+or not. Nobody is checked: as
 everywhere in KoraOS, any program may take them.
 
 - **`sig_on_end`** sets bit `bit` of the calling thread when process `pid`

@@ -307,6 +307,69 @@ static void test_closing(void) {
     CHECK(screen_count == 0 && front == NULL && !fb_held, "all of them close at its end");
 }
 
+static void test_lending(void) {
+    struct screen *a = open_for(10, "shell");
+    fill(a, 0, 0, WIDTH, HEIGHT, RED);
+    damage(a, 10, 0, 0, WIDTH, HEIGHT, 0);
+    CHECK(fb_held && display_is(a), "a screen in front");
+
+    struct screen_request r = ask(SCREEN_LEND, NULL, 40);
+    CHECK(r.result == 0 && lent_to == 40 && watched[40], "pid 40 borrows the display and keys");
+    CHECK(!fb_held && input_held_bit == -1, "the console has them back, for it to claim");
+    r = ask(SCREEN_LEND, NULL, 41);
+    CHECK(r.result == -1 && lent_to == 40, "they are lent to one program at a time");
+    CHECK(open_for(41, "meanwhile") == NULL && screen_count == 1 && !watched[41],
+          "no screen opens while they are lent");
+    for (unsigned i = 0; i < HEIGHT * STRIDE; i++) {
+        display_pixels[i] = UNTOUCHED;
+    }
+    damage(a, 10, 0, 0, WIDTH, HEIGHT, 0);
+    struct screen_request front_request = ask(SCREEN_FRONT, a, 10);
+    CHECK(front_request.result == 0 && shown(0, 0) == UNTOUCHED && shown(5, 5) == UNTOUCHED,
+          "nothing is drawn on the borrower's display");
+    r = ask(SCREEN_RETURN, NULL, 41);
+    CHECK(r.result == -1 && lent_to == 40, "only the borrower returns them");
+    r = ask(SCREEN_RETURN, NULL, 40);
+    CHECK(r.result == 0 && lent_to == 0 && !watched[40], "returned, the borrower unwatched");
+    CHECK(fb_held && input_held_bit == input_bit && focus == 10 && display_is(a),
+          "the manager takes them back and shows the front screen again");
+
+    // A borrower that ends: watched again, it is gone.
+    CHECK(ask(SCREEN_LEND, NULL, 42).result == 0 && !fb_held, "lent again");
+    ended[42] = 1;
+    close_ended();
+    CHECK(lent_to == 0 && fb_held && display_is(a) && screen_count == 1,
+          "back at the borrower's end; the screens stay");
+
+    // A borrower that returns them still claimed: tried again later.
+    CHECK(ask(SCREEN_LEND, NULL, 43).result == 0, "lent to one that keeps its claim");
+    refuse_display = 1;
+    ask(SCREEN_RETURN, NULL, 43);
+    CHECK(lent_to == 0 && !holding && reclaim_failed, "taking them back fails");
+    refuse_display = 0;
+    reclaim();
+    CHECK(holding && fb_held && !reclaim_failed && display_is(a), "and works at the next wake");
+
+    // A borrower that also has a screen keeps its watch.
+    CHECK(ask(SCREEN_LEND, NULL, 10).result == 0, "the screen's own program borrows");
+    ask(SCREEN_RETURN, NULL, 10);
+    CHECK(watched[10] && fb_held, "and keeps its watch for its screen");
+
+    // A borrower whose screen closes is still watched for the lend.
+    struct screen *own = open_for(45, "borrower's");
+    CHECK(ask(SCREEN_LEND, NULL, 45).result == 0, "a program with a screen borrows");
+    ask(SCREEN_CLOSE, own, 45);
+    CHECK(watched[45] && lent_to == 45, "its screen closed, it is still watched");
+    ended[45] = 1;
+    close_ended();
+    CHECK(lent_to == 0 && fb_held && display_is(a),
+          "so its end brings the display back");
+
+    ask(SCREEN_CLOSE, a, 10);
+    CHECK(ask(SCREEN_LEND, NULL, 44).result == 0 && ask(SCREEN_RETURN, NULL, 44).result == 0 &&
+          !fb_held && input_held_bit == -1, "with no screen open, nothing is taken back");
+}
+
 static void test_programs(void) {
     char *argv[] = {"a", "1", "+", "b", "+", "+", "nosuch", "+", "c", "x", "y", "+"};
     start_programs(12, argv, 7);
@@ -332,5 +395,6 @@ static void teardown(void) {
     fake_set_handler(NULL);
 }
 
-TEST_MAIN(setup, test_open_and_damage, test_two_screens_and_keys, test_closing, test_programs,
+TEST_MAIN(setup, test_open_and_damage, test_two_screens_and_keys, test_closing, test_lending,
+          test_programs,
           teardown)

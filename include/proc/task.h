@@ -208,7 +208,8 @@ void wait_queue_wake_all(struct wait_queue *wq);
 // happened: one set again before it is waited for counts once, so a waiter
 // looks at every source its signal stands for (all the messages on a port)
 // and must cope with finding nothing. A thread allocates the bits it uses;
-// bits 0 to SIG_SYSTEM_BITS - 1 are kept for the system. The bits are
+// bits 0 to SIG_SYSTEM_BITS - 1 are kept for the system (bit 0 is the break,
+// Ctrl+C, that user consoles send: SIG_BREAK in libk). The bits are
 // sched_lock-protected, so interrupt handlers may signal.
 #define SIG_BITS 32
 #define SIG_SYSTEM_BITS 8

@@ -1,9 +1,10 @@
 # Console and screen plan (handover)
 
-Status: **steps 1 to 3 done** (step 3 as two PRs, 3a and 3b); **step 4 in
-progress**: 4a (signals), 4b (the screen manager) and 4c1 (the console
-handler) done; 4c2 in two PRs, 4c2a (typing through the debug console, in
-review) and 4c2b (the shell on the display). It is the outcome of a design discussion on
+Status: **steps 1 to 4 done** (step 3 as two PRs, 3a and 3b; step 4 as 4a
+signals, 4b the screen manager, 4c the console handler and the shell on it,
+4c2 in two PRs, 4c2a typing through the debug console and 4c2b the shell on
+the display, in review). Sliding screens (4d) and step 5 (mouse, graphics)
+are next. It is the outcome of a design discussion on
 2026-11-12 and is the "terminal design" that `libc-plan.md` defers to koracli.
 No milestone number has been assigned yet.
 
@@ -53,9 +54,10 @@ to pretend to be one.
   8x8 font (`font8x8.h`). The kernel builds it in for its screen terminal
   (`src/video/console_fb.c` is the glue); user programs link it from source
   (`condemo` runs two consoles in windows).
-- `src/tty.c`: input ring of **bytes**, `tty_read` / `tty_write`, ONLCR, the
-  serial route switch (Ctrl-T) and scrollback requests. Its readers are the
-  one consumer of the input event queue, for now.
+- `src/tty.c`: input ring of **bytes**, `tty_read` / `tty_write`, ONLCR and
+  scrollback requests. Its readers are the input event queue's consumer while
+  no screen manager claims it. Serial input is the debug console's only
+  (4c2b).
 - Standard handles (step 3b): each process has stdin, stdout and stderr
   handles, the kernel console, one of its files or a console handler's port,
   inherited at spawn or given by `spawn_std`. The libc reads them at startup
@@ -67,15 +69,16 @@ to pretend to be one.
   temporary adapter `src/input/input_tty.c`, which the tasks reading the tty
   run. Serial input is bytes already and calls `tty_input_push`; so do the
   kernel terminal's status replies, through the host hook the library calls.
-- Line editing is in user space: `kgetline` in `user/libk/koraos.h`, on
-  `stdin` and `stdout`.
+- Line editing is the console's (step 4c): `user/libconsole/edit.c` in the
+  console on a screen, `user/libscreen/console.c`. `kgetline` is gone.
 - Signals (step 4a): a thread waits on several sources at once, its ports,
   its children's ends and other threads (`sig_wait`). `condemo <program>`
   waits on its port and its program that way.
 - The screen manager (steps 4b1 and 4b2): `screens` claims the display and
   the keyboard from the kernel, and programs open screens on it with
-  `user/libscreen`. `condemo` and `gfxdemo` do when it runs. The shell still
-  uses the kernel terminal, which `screens` hides while it runs.
+  `user/libscreen`. init runs `screens shell` (4c2b), and the shell runs on a
+  console on a screen of its own; the kernel terminal shows the boot log
+  until then, and comes back if the manager ends.
 - The kernel log is UART-only (`kernel.c`). Programs can already draw straight
   into the framebuffer through `fb_info` (`gfxdemo`).
 
@@ -190,10 +193,10 @@ flowchart TB
   - [x] 3b. stdin, stdout and stderr as handles: the kernel console, a file
         or a console handler's port, inherited at spawn; the libc takes them
         at startup and gains `isatty`.
-- [ ] 4. Screen manager on top of the library, as three PRs:
+- [x] 4. Screen manager on top of the library, as three PRs:
   - [x] 4a. Signals: one thread waits on several ports, its children and
         other threads at once.
-  - [ ] 4b. The screen manager, as two PRs:
+  - [x] 4b. The screen manager, as two PRs:
     - [x] 4b1. The kernel's part: the input queue claimed by a thread and
           signalling it, the screen handed over and taken back at the
           holder's end, a signal at any process's end, and the debug
@@ -201,14 +204,14 @@ flowchart TB
     - [x] 4b2. The screen manager program: screens with changed rectangles,
           Meta+M, input to the front screen's owner, `condemo` on a screen of
           its own.
-  - [ ] 4c. The shell as the first console client, as two PRs:
+  - [x] 4c. The shell as the first console client, as two PRs:
     - [x] 4c1. The console handler: a console on a screen that serves its
           programs' packets, cooked and raw modes, line editing and history,
           Ctrl+C; `newcon` runs a program in one.
-    - [ ] 4c2a. The debug console types (`type`, `key`) and copies the
+    - [x] 4c2a. The debug console types (`type`, `key`) and copies the
           consoles' text to the serial line (`conlog`); the smoke test drives
           the shell that way.
-    - [ ] 4c2b. The shell on a screen of its own, init starting `screens
+    - [x] 4c2b. The shell on a screen of its own, init starting `screens
           shell` with a display (no shell without one), Ctrl+C to the
           foreground program, `kgetline` gone; Ctrl-T and the shell on the
           serial line removed. The kernel terminal becomes the boot and panic
@@ -473,6 +476,41 @@ flowchart TB
   characters) and sends debug console commands without Ctrl-T; a step drives
   two screens with `key` (a key to the front, Meta+M, a probe ending with its
   screen open), on every graphics profile.
+
+## Step 4c2b as built
+
+- **The shell hosts its console.** Started on the kernel console (init runs
+  `screens shell`), `shell` opens a screen and a console on it and runs
+  itself there with `console_run`, as AmigaOS's NewShell opens a `CON:`
+  window: the first shell serves the console, the second reads commands with
+  `fgets`. Started on a console already (`shell` typed in one) or with a
+  file for stdin, it reads at once. With no screen manager it says to start
+  one. The end of input (Ctrl+D) ends it like `exit`.
+- **Ctrl+C is a signal.** `console_run` kills its program on Ctrl+C
+  (newcon), or sends it `SIG_BREAK`, system bit 0, as `CON:` sends
+  `SIGBREAKF_CTRL_C`; the shell waits for its foreground program with
+  `sig_wait` on that bit and the program's end, and kills it on a break. A
+  break at the prompt drops the line and is cleared before the next program.
+- **init**: with a display, `screens shell`, started again when it ends
+  (unless within a second); without one, no shell.
+- **Lending.** A program borrows the display and the keyboard from the
+  manager (`screens_borrow`, `screens_return`): the manager gives them back
+  to the kernel console until the program returns them or ends, then takes
+  them back and shows its front screen. No screen opens meanwhile.
+  `inputprobe` borrows them, so it still checks the kernel's claims.
+- **Programs on screens.** `jobdemo` draws on a screen of its own (Enter or
+  Escape closes it), like `gfxdemo` and `condemo`. A screen's event ring
+  holds 256 events, room for a line typed at once.
+- **The kernel**: the serial line is the debug console only, no Ctrl-T.
+  `kgetline` is gone from libk.
+- **The smoke test** drives the shell on its screen; without a display it
+  checks that there is no shell and runs the debug console's checks. CI's
+  EL2 profiles run with a display, so they keep the shell.
+- **Not yet**: Ctrl+C at the prompt does not print a new prompt (the
+  console drops the line, the shell keeps waiting for one); keys typed while
+  the display is lent wait for the manager. A crashed manager leaves the
+  shell running with nothing on the display, drawing into pixels that were
+  the manager's memory, and init does not notice.
 
 ## Safety net
 
