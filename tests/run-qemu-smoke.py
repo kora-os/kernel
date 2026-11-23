@@ -1555,6 +1555,36 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
             q.expect(PROMPT)
         yield "console: cat copies typed lines until Ctrl+D (%s)" % keyboard, console_cat
 
+    def manager_crash():
+        # The screen manager killed, as a crash would. Its programs' screens
+        # are gone: the shell kills the program on its console and ends, and
+        # gfxdemo ends; nothing of theirs is left drawing into memory the
+        # manager no longer has. init starts screens shell again.
+        q.send("gfxdemo &\r")
+        q.expect(LINE + rb"gfxdemo: painted \d+x\d+ on screen \d+", timeout=30)
+        q.key("meta_l-m")
+        q.expect(SHELL_FRONT)
+        manager = [pid for pid, _, _, _, name in ps_table(q) if name == "screens"]
+        if len(manager) != 1:
+            raise Failure("ps shows screens as %s" % manager)
+        q.send("kill %d\r" % manager[0])
+        q.expect(rb"^init: the shell ended \(exit -9\); starting it again", timeout=30)
+        q.expect(rb"KoraOS shell\. Type 'help'\.", timeout=60)
+        q.expect(PROMPT)
+        for _ in range(20):
+            names = [name for *_, name in ps_table(q)]
+            if names.count("shell") == 2 and names.count("screens") == 1 and "gfxdemo" not in names:
+                break
+            time.sleep(0.2)
+        else:
+            raise Failure("after the manager's end, ps lists %s" % names)
+        q.send("hello\r")
+        q.expect(rb"^Hello from userland \(ELF\)")
+        q.expect(rb"exited with 0")
+        q.expect(PROMPT)
+    yield ("a killed screen manager: its programs end, and init starts the shell again"), \
+        manager_crash
+
     def shell_restart():
         # The last step: exit ends the shell and its screen, so screens ends
         # and the kernel's console has the display back; init starts them
