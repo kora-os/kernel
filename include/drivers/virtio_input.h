@@ -6,7 +6,7 @@
 
 // Initialize one modern virtio MMIO keyboard discovered by the platform DTB.
 // Its interrupt handler posts key events to the input queue (input/input.h);
-// failure leaves the serial input available.
+// failure leaves the machine without a keyboard.
 bool virtio_input_init(void);
 
 // Pure evdev key translation with a US layout, shared with host tests: Linux

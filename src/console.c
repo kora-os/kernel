@@ -59,8 +59,6 @@ void console_cmd_help(const char *args) {
   uart_puts("  type TEXT - Type TEXT as keys (\\n Enter, \\t, \\e, \\s, \\\\, \\xHH)\n");
   uart_puts("  key NAME... - Press keys by name: ret, esc, up, ctrl-c, meta_l-m...\n");
   uart_puts("  conlog [on|off] - Copy the consoles' text to this line; no echo\n");
-  uart_puts("Ctrl-T switches the serial line between this console and the\n");
-  uart_puts("screen terminal (the shell).\n");
 }
 
 void console_cmd_get_el(const char *args) {
