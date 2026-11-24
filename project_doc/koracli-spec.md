@@ -3,7 +3,7 @@
 *Status: draft v0.4, 24 November 2026. In the repository since v0.4; git holds its history.*
 *"KoraCLI" is a working name.*
 
-This document specifies the KoraOS command-line shell: the fullscreen environment the user lands in when the machine starts. It is meant as input for a development plan, so each section marks what is **decided** and what is only **proposed** (to be confirmed or changed during implementation). The plan itself, with its steps and their status, will be `koracli-plan.md`.
+This document specifies the KoraOS command-line shell: the fullscreen environment the user lands in when the machine starts. It is meant as input for a development plan, so each section marks what is **decided** and what is only **proposed** (to be confirmed or changed during implementation). The plan itself, with its steps and their status, will be `koracli-plan.md`. The user reference is `docs/koracli.md`, kept up to date with the implementation.
 
 ---
 
