@@ -1559,6 +1559,40 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         q.expect(PROMPT)
     yield "a program catches Ctrl+C, and a second pending break ends it", break_caught
 
+    def micropython():
+        # MicroPython's REPL on the shell's console, with its own line editor
+        # (the console in raw mode); Ctrl+D on an empty line ends it, and the
+        # shell's console is cooked again.
+        q.send("micropython\r")
+        q.expect(rb"^MicroPython v1\.29\.0 on 2026-08-24; KoraOS with AArch64", timeout=30)
+        q.expect(rb">>> ")
+        q.send("print(1+1)\r")
+        q.expect(rb"^2\r?$")
+        q.expect(rb">>> ")
+        q.send("[x * x for x in range(5)], 2 ** 70, 1 / 4\r")
+        q.expect(rb"^\(\[0, 1, 4, 9, 16\], 1180591620717411303424, 0\.25\)\r?$")
+        q.expect(rb">>> ")
+        time.sleep(0.2)
+        q.key("ctrl-d")
+        q.expect(rb"\] exited with 0")
+        q.expect(PROMPT)
+        q.send("echo cooked\r")
+        q.expect(rb"^cooked\r?$")
+        q.expect(PROMPT)
+        # Ctrl+C ends it for now (KeyboardInterrupt is step 0b), in raw mode:
+        # the shell sets its console cooked again.
+        q.send("micropython\r")
+        q.expect(rb">>> ", timeout=30)
+        time.sleep(0.2)
+        q.key("ctrl-c")
+        q.expect(rb"\] exited with -9")
+        q.expect(PROMPT)
+        q.send("echo again\r")
+        q.expect(rb"^again\r?$")
+        q.expect(PROMPT)
+    yield ("micropython: a REPL on the console, and the console cooked after it, "
+           "also when Ctrl+C ends it"), micropython
+
     def fonts():
         # `font` lists sys:fonts and switches the shell's console to another
         # font: the console resizes, and a program asking for its size gets

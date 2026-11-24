@@ -141,6 +141,26 @@ test.
 | `malloc_test.c` | `src/stdlib/malloc.c`: alignment, neighbour separation, coalescing, pool growth and release, direct page-run blocks, bad and double frees, `realloc`/`calloc`, exhaustion and failed `realloc`, a 200 000-round stress with `__malloc_info` consistency checks |
 | `malloc_threads_test.c` | The same heap under four concurrent pthreads (malloc/realloc/free, direct blocks), then a pool consistency check |
 
+## MicroPython tests (`tests/micropython/`)
+
+Python code for KoraOS runs on the host on MicroPython itself, not CPython:
+the unix port of the vendored MicroPython (`third_party/micropython`), built
+with KoraOS's variant (`user/micropython/unix/koraos`), which has the
+language of KoraOS's port. Each `NAME.py` there must print exactly
+`NAME.py.exp`:
+
+```bash
+tests/run-micropython-tests.sh
+```
+
+| Test | Covers |
+|------|--------|
+| `basics.py` | The interpreter runs a script: integers past 64 bits, floats, generators, dicts, formatting, exceptions, Unicode string lengths |
+
+On the target, the QEMU smoke test runs `micropython` in the shell and
+types into its REPL (`print(1+1)`, big integers, a float), ends it with
+Ctrl+D and checks the shell's console is cooked again.
+
 ## User program tests (`user/tests/`)
 
 The user programs themselves, and libk's console code, are tested on the host

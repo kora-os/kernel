@@ -2,17 +2,20 @@
 # legacy direct kernel configurations. Modern kernels only consume its image.
 include_guard(GLOBAL)
 
-# koraos_add_user_program(<name> <sources>... [FLAGS <extra compile flags>...])
-# links the sources with libk and the libc archive into a PIE.
+include("${CMAKE_CURRENT_LIST_DIR}/micropython.cmake")
+
+# koraos_add_user_program(<name> <sources>... [FLAGS <extra compile flags>...]
+#                         [TARGETS <targets built first>...])
+# links the sources (and archives) with libk and the libc archive into a PIE.
 function(koraos_add_user_program NAME)
-    cmake_parse_arguments(P "" "" "FLAGS" ${ARGN})
+    cmake_parse_arguments(P "" "" "FLAGS;TARGETS" ${ARGN})
     set(elf "${USER_BUILD_DIR}/${NAME}.elf")
     add_custom_command(
         OUTPUT "${elf}"
         COMMAND ${CMAKE_C_COMPILER} ${USER_COMPILE_FLAGS} ${P_FLAGS} ${USER_LINK_FLAGS}
                 ${USER_RUNTIME_SOURCES} ${P_UNPARSED_ARGUMENTS} "$<TARGET_FILE:koraos_libc>"
                 -o "${elf}"
-        DEPENDS ${USER_RUNTIME_SOURCES} ${P_UNPARSED_ARGUMENTS} koraos_libc ${USER_HEADERS}
+        DEPENDS ${USER_RUNTIME_SOURCES} ${P_UNPARSED_ARGUMENTS} koraos_libc ${P_TARGETS} ${USER_HEADERS}
                 "${USER_HEADER_MANIFEST}" "${CMAKE_CURRENT_FUNCTION_LIST_FILE}"
         COMMENT "Building user program ${NAME}.elf (PIE)"
         VERBATIM)
@@ -101,6 +104,13 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
     koraos_add_user_program(stackbig "${SOURCE_ROOT}/tests/user/stackprobe.c"
         FLAGS -Wl,-z,stack-size=2097152)
     koraos_add_user_program(breakprobe "${SOURCE_ROOT}/tests/user/breakprobe.c")
+
+    # MicroPython (cmake/micropython.cmake): the core and the port in a static
+    # library, linked with the stack its stack check is set up for.
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    koraos_add_micropython("${SOURCE_ROOT}")
+    koraos_add_user_program(micropython "$<TARGET_FILE:koraos_micropython>"
+        FLAGS -Wl,-z,stack-size=${MICROPY_KORA_STACK_SIZE} TARGETS koraos_micropython)
 
     # Retain the previous --bindir glob installation order in /bin.
     list(SORT USER_PROGRAM_ELVES)

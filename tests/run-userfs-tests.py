@@ -32,7 +32,7 @@ class UserFSTests(unittest.TestCase):
             build = base / "userfs"
             source.mkdir()
             for directory in ("cmake", "user", "fsroot", "tests/user", "scripts",
-                              "third_party/spleen"):
+                              "third_party/spleen", "third_party/micropython"):
                 shutil.copytree(ROOT / directory, source / directory)
             shutil.copy2(ROOT / "create-fs-image.sh", source / "create-fs-image.sh")
             self.run_tool(
