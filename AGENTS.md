@@ -94,8 +94,9 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
   console takes one through a `CON_FONT` packet (libk `console_font`, the
   `font` tool) and resizes (`term_resize`). The fonts in `sys:fonts` are
   Spleen's BDFs (`third_party/spleen`), converted by `scripts/bdf2psf.py`
-  at build time. Cells still hold ASCII and the `TERM_GLYPH_*` symbols;
-  Unicode cells come next.
+  at build time. Cells hold Unicode code points; a font finds each through
+  a sorted map, and the built-in one draws ASCII and a few symbols
+  (`term_symbol`).
 - The serial line is the kernel debug console (on QEMU too). With `conlog on`
   (the default under QEMU) it carries a copy of what the consoles show, and
   the debug console neither echoes nor prompts; `type TEXT` and `key NAME`
