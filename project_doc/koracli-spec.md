@@ -69,7 +69,7 @@ Guiding principles:
 ### 3.2 Main area
 - A fixed **text grid** (columns × rows determined by screen mode and font).
 - Graphics start on a canvas screen of their own (§10.1); later a graphics layer may share this screen (§10.2).
-- Scrollback: *proposed*, see Open Questions.
+- Scrollback: the console's, 1000 lines by default (configurable, §14), viewed with Shift+PgUp and Shift+PgDn.
 
 ### 3.3 Bottom bar
 - **Left:** mode indicator, VIM-style: `PY`, `BAS` or `BBC` (BASIC mode, showing the active dialect), `OS`.
@@ -174,7 +174,7 @@ Rules for Python and BASIC modes:
 | `!cmd args` | `kora.run("cmd", "args")` | The exit status |
 | `out = !cmd args` | `out = kora.capture("cmd", "args")` | The captured result |
 
-Both resolve `cmd` as above and accept the job suffixes as keyword arguments *(names to be decided)*. At the prompt a bare `!cmd` prints nothing, whatever its status (most programs report their own errors); `rc = kora.run(...)` returns it.
+Both resolve `cmd` as above and accept the job suffixes and redirection as keyword arguments: `background=True` for `&`, `core=2` for `@2`, `stdin="in.txt"`, `stdout="out.txt"` and `append=True` for `>>`. At the prompt a bare `!cmd` prints nothing, whatever its status (most programs report their own errors); `rc = kora.run(...)` returns it.
 
 For programs without a wrapper, the captured result is a **`str` subclass**: it behaves as an ordinary multi-line string and additionally carries:
 - `.status`: exit code
@@ -212,6 +212,7 @@ Trailing, space-separated tokens at the **end** of the line control how the prog
 - `@N` is passed to the kernel as a parameter of the spawn syscall. Without it, the scheduler places the new process on the least busy core. Processes never migrate between cores, so the choice made at spawn time is permanent. Core placement is otherwise the scheduler's concern, not KoraCLI's.
 - `job = !cmd &` returns a **job object** (status, wait, kill, captured output on completion) instead of a string.
 - Job control commands: `jobs`, `fg`, `kill` *(proposed names)*.
+- **Output of a background job** goes straight to the screen in phase 1b, as in the shell before KoraCLI, so it can land in the middle of a line being typed. From phase 7 the interpreter serves it (the same mechanism that captures a job object's output): it prints the output above the prompt and redraws the line being typed.
 
 ### 5.3 Wrappers (decided)
 - Users can add wrappers for any program or new command by registering a Python function, e.g.:
@@ -250,10 +251,13 @@ Two dialects, one active at a time, selectable from configuration:
 
 | Dialect | Modelled on | Prompt | Notes |
 |---|---|---|---|
-| **Classic BASIC** | Commodore 64, MSX, GW-BASIC family | `Ok` *(proposed)* | Case-insensitive keywords and variables |
+| **Classic BASIC** | Commodore 64, MSX, GW-BASIC family | `READY.` (configurable) | Case-insensitive keywords and variables |
 | **BBC BASIC** | BBC BASIC V (Acorn Archimedes) | `>` | Case-sensitive variables; `PROC`/`FN`; multi-line `IF`/`ENDIF`, `CASE`, `REPEAT`/`UNTIL`, `WHILE`/`ENDWHILE`; `*` star commands |
 
-The dialects follow the syntax and core instruction set of their models, but are **not exact clones**: they are extended for a modern machine (see §9).
+The dialects follow the syntax and core instruction set of their models, but are **not exact clones**: they are extended for a modern machine (see §9). Known differences:
+
+- In Classic BASIC the **whole variable name is significant**, as in GW-BASIC. (The C64 reads only the first two characters, so there `SCORE` and `SC` are the same variable.)
+- Classic BASIC's prompt is a **status line** printed after each command (`READY.`), and input lines have no prefix. BBC BASIC's `>` and Python's `>>>` prefix the input line.
 
 The name "Microsoft BASIC" is not used.
 
@@ -281,7 +285,7 @@ Any other BASIC statement typed without a line number is executed immediately (e
 
 ---
 
-## 7. Shared variables (decided, details partly open)
+## 7. Shared variables (decided)
 
 Python and BASIC share one variable space. BASIC type suffixes map to Python types:
 
@@ -300,7 +304,8 @@ hello world
 ```
 
 Case rules:
-- Names keep their case when exported to Python, in **both** dialects. In Classic BASIC, `A` defines Python `A` (uppercase).
+- Names keep their case when exported to Python, in **both** dialects. In Classic BASIC, `A` defines Python `A` (uppercase). A Classic variable is exported under the spelling it was **first written** with: `Msg$` and later `MSG$` are one variable, Python `Msg`.
+- When a Classic program reads a name it has not defined, it looks for a Python name with the exact spelling first, then for one matching without regard to case. More than one case-insensitive match is an error.
 - In BBC BASIC, names are case-sensitive, so they map one-to-one.
 - A type mismatch (e.g. `PRINT msg$` when Python `msg` is an `int`) raises the dialect's "Type mismatch" error.
 
@@ -310,7 +315,11 @@ Type rules:
 - **Booleans:** Python `True` reads as BASIC's `TRUE`, -1 in both dialects, and `False` as 0, so `IF flag THEN` behaves the same in both languages.
 - BASIC system variables (e.g. BBC `@%`, `TIME`) are not exported.
 
-See Open Questions §16 for unresolved collision cases.
+Collisions (`A`, `A%`, `A$` and `A()` all map to Python `A`):
+- **Inside BASIC they stay separate variables**, as on the C64 and the BBC, so old listings work: `A=5: A$="X": PRINT A` prints 5.
+- **Python sees one name, `A`**, holding the value either language wrote last (here `"X"`).
+- **When Python changes `A`, BASIC takes the new value on its next read** of any of them, with the type rules above: after Python's `msg = 3`, `PRINT msg$` is "Type mismatch".
+- To notice Python's change, BASIC remembers the value it last exported under each name. It needs that list anyway: `RUN` and `NEW` remove only the variables BASIC defined (§6.4).
 
 ---
 
@@ -373,16 +382,20 @@ The graphics surface becomes a layer of KoraCLI's own screen, composited with th
 1. **Full-screen (C64-style):** the cursor can move anywhere on screen; pressing Enter on any visible line re-enters it. Editing a listed BASIC line and pressing Enter replaces it. Also used to edit Python blocks in place.
 2. **Line-oriented (modern, IPython/xonsh-style):** Up/Down recall history; the screen above the prompt is read-only.
 
-The default is *to be decided* (see Open Questions).
+The default is line-oriented until the full-screen editor exists (phase 6). After that, full-screen is the intended default, for the C64 feel of §1, to be confirmed once both can be tried. The other style is one setting away (§14).
+
+In the full-screen editor, Enter on a single line re-enters that line, as on the C64. Inside a block being edited, Enter adds a line to the block.
 
 ### 11.2 Multi-line Python blocks (decided)
 - An indented block continues on the next line with the `...` prompt.
 - **One blank line** inside a block is kept as part of the block (so functions can contain blank lines).
-- **Two consecutive blank lines** end the block and execute it.
+- **Two consecutive blank lines** end the block and execute it (line-oriented editor).
+- **Ctrl+Enter** submits the whole block at once, in both editor styles.
 - The whole block remains editable before it is submitted.
 
 ### 11.3 History (decided)
-- **PgUp / PgDn** move through history **by block** (a whole multi-line Python block is recalled as one unit).
+- **PgUp / PgDn** move through history **by block** (a whole multi-line Python block is recalled as one unit), in both editor styles. The full-screen editor needs Up and Down for the cursor, which is why history is on these keys.
+- **Shift+PgUp / Shift+PgDn** scroll back through the screen. The console handles them itself, even in key-event mode, so they never reach the editor.
 
 ### 11.4 Implementation (decided)
 - The editor is **written in Python**, a module next to the dispatcher, so users can read and change it like the rest of the shell. Parts may move to C later if they turn out too slow; typing speed (a key every 100 ms or more) leaves ample margin.
@@ -429,7 +442,7 @@ Help text for BASIC keywords and the matching Python functions should come from 
 ## 14. Configuration and startup (proposed)
 
 - A startup file (in the spirit of AUTOEXEC.BAT or RISC OS `!Boot`) runs at boot. It is a Python file.
-- Configuration covers at least: active dialect, default mode, editor style, F-key assignments, screen mode/font.
+- Configuration covers at least: active dialect, default mode, editor style, F-key assignments, screen mode/font, scrollback size, Classic BASIC's prompt.
 - Later, the configuration is reachable from an icon on the right of the top bar.
 
 ---
@@ -448,18 +461,19 @@ Each language reports errors in its own style:
 
 ## 16. Open questions
 
-1. **Same name, different types in BASIC.** Classic BASIC allows `A`, `A%`, `A$` and the array `A()` to coexist as separate variables, but they all map to Python `A`. Options:
-   - (a) last write wins, with a type check on read;
-   - (b) keep them separate inside BASIC and export only by explicit rule (e.g. Python sees `A`, `A_int`, `A_str`);
-   - (c) disallow coexistence in KoraOS BASIC (breaks some old listings).
-2. **Case in Classic BASIC when reading Python names.** Classic BASIC is case-insensitive, but names are exported with their case. If Python defines `msg` and a Classic program reads `MSG$`, which variable is it? Proposal: exact match first, then a case-insensitive match against Python variables; error if more than one matches.
-3. **Default editor style.** Full-screen (more retro, nicer for Python blocks) or line-oriented (more familiar to modern users)?
-4. **PgUp/PgDn in full-screen mode.** In the full-screen editor these keys would naturally scroll the screen/scrollback, which conflicts with block history. Separate keys may be needed.
-5. **Submitting a block in full-screen mode.** Does the two-blank-lines rule also apply there, or should there be an explicit key (e.g. Ctrl+Enter) to submit immediately in both styles?
-6. **Classic BASIC prompt.** `Ok` (MSX/GW-BASIC) or `READY.` (C64)?
-7. **Scrollback.** Size and how it interacts with the graphics layer.
-8. **`!` command argument syntax.** *Resolved in v0.4:* bare words are strings, `{expr}` interpolates (§5.2, Arguments).
-9. **Background job output.** Where does output from a background job go: straight to the screen (interleaved with the prompt, as in Unix shells), or buffered until the user asks for it?
+All the questions of v0.3 were resolved in v0.4; the numbers are kept so that earlier references still point somewhere.
+
+1. **Same name, different types in BASIC.** *Resolved:* separate inside BASIC, and Python sees the most recent write (§7, Collisions). Rejected: (a) last write wins, because it breaks listings that use `N` and `N$` together; (b) separate exports such as `A_str`, because it loses `msg$ ↔ msg`; (c) disallowing coexistence, for the same reason as (a).
+2. **Case in Classic BASIC when reading Python names.** *Resolved:* exact match first, then case-insensitive, an error if more than one matches; exported under the first spelling written; the whole name is significant (§7, Case rules).
+3. **Default editor style.** *Resolved for now:* line-oriented until the full-screen editor exists; full-screen is the intended default after that, to be confirmed in phase 6 (§11.1).
+4. **PgUp/PgDn in full-screen mode.** *Resolved:* no conflict. Scrollback is Shift+PgUp/PgDn, handled by the console; plain PgUp/PgDn are block history in both styles (§11.3).
+5. **Submitting a block in full-screen mode.** *Resolved:* Ctrl+Enter submits the whole block in both styles; the line-oriented editor also keeps the two-blank-lines rule (§11.2).
+6. **Classic BASIC prompt.** *Resolved:* `READY.`, configurable; a status line after each command, not a prefix (§6.2).
+7. **Scrollback.** *Resolved:* the console's 1000 lines, configurable; graphics on the canvas screen do not interact with it, and the later layer stays put while text scrolls (§3.2, §10.2).
+8. **`!` command argument syntax.** *Resolved:* bare words are strings, `{expr}` interpolates (§5.2, Arguments).
+9. **Background job output.** *Resolved:* straight to the screen in phase 1b, as the shell before KoraCLI did; from phase 7 the interpreter prints it above the prompt and redraws the line being typed (§5.2, Job suffixes).
+
+Still open: none at the moment. New questions are added here with the phase that needs them.
 
 ---
 
