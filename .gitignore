@@ -14,6 +14,8 @@ cmake_install.cmake
 install_manifest.txt
 compile_commands.json
 Makefile
+# Vendored MicroPython's own makefile (its unix port, the host tests' interpreter)
+!third_party/micropython/ports/unix/Makefile
 
 # Compiled objects and archives
 *.o
