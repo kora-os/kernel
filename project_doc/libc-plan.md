@@ -123,7 +123,7 @@ that needs it.
 |---|---|
 | 3. Handles | Done (console step 3b): the standard streams take their handles on first use (`src/stdio/handle.c`), a handler's in packets; `isatty`; `stdout` fully buffered when it is a file. |
 | 4. Screen manager | In cooked mode `stdin` may read a whole line per call instead of one byte, and `fgets(stdin)` replaces `kgetline`. |
-| 4. Ctrl+C | Nothing while a break is a plain `kill`: the program loses at most its unflushed output. A break a program can catch (MicroPython's `KeyboardInterrupt`) needs the break word described under "Rest of the ISO library". |
+| 4. Ctrl+C | Nothing while a break is a plain `kill`: the program loses at most its unflushed output. A break a program can catch (MicroPython's `KeyboardInterrupt`) is step 21, under "Before MicroPython". |
 | Fonts | Nothing for bitmap fonts. FreeType would need `<setjmp.h>` and part of `<math.h>`. |
 
 Unicode needs nothing: `printf` passes UTF-8 bytes through and the console
@@ -195,15 +195,55 @@ Decisions:
 Two things need the kernel, and wait for it:
 
 - **A break a program can catch** (`SIGINT` from Ctrl+C, MicroPython's
-  `KeyboardInterrupt`). The plan is the AmigaOS way, a flag instead of an
-  interruption: the program registers the address of a break word, the
-  kernel sets it, and the program polls it at safe points. Without a
-  registered word a break is a `kill`, as today. Recognizing Ctrl+C and
-  knowing the foreground program belong to the screen manager (console
-  step 4); real asynchronous signals are not planned.
+  `KeyboardInterrupt`): step 21 below. Console step 4c2b made Ctrl+C a
+  signal, `SIG_BREAK`, which the shell turns into a `kill` of its
+  foreground program.
 - **A wall clock** for `time()`: a clock syscall, the PL031 RTC on virt and
   a settable clock on the Pi 3 and 4, which have no RTC. FAT32 timestamps
   and times in `stat` follow from it.
+
+## Before MicroPython (one PR each)
+
+What MicroPython needs that KoraOS does not have yet, checked against
+MicroPython v1.24.1's core (`py/`, 2024-11-29). Steps 20 and 21 touch the
+kernel.
+
+| # | Theme | Status |
+|---|-------|--------|
+| 19 | `<assert.h>` (66 files of `py/` include it) and `<inttypes.h>` | in review (#116) |
+| 20 | Stack size: a program declares its main thread's stack at link time; `thread_new` takes a size | planned |
+| 21 | A break a program can catch: opt-in, with the kernel's default action for the rest | planned |
+
+Decisions (2026-11-24):
+
+- **The stack size is declared at link time**, with lld's
+  `-z stack-size=N`, which records it in the ELF (`PT_GNU_STACK`). The
+  kernel reads it at spawn; a program that declares nothing keeps one 4 KB
+  page. `thread_new` gains a size, 16 KB when none is given. MicroPython's
+  own QEMU port runs in a 10 KB stack, so a declared 32 to 64 KB is ample.
+- **A break is opt-in, with a default action in the kernel.** The shell
+  passes `SIG_BREAK` on to its foreground program instead of killing it. The
+  kernel ends a program that has not said it handles breaks when the signal
+  arrives, so every existing program behaves as today; one that has opted in
+  only gets the bit set and checks it when it likes, as on AmigaOS.
+- **A second break ends it anyway**: a break that arrives while the
+  previous one is still pending ends even a program that has opted in, so a
+  stuck one can always be stopped with two presses.
+
+What MicroPython's core needs besides, and where it goes:
+
+- **`<unistd.h>`** (five files of `py/`, unconditionally, for `ssize_t`)
+  **and `<alloca.h>`** (included by the ports' `mpconfigport.h`). Neither is
+  ISO C, so the libc does not provide them: the KoraOS port of MicroPython
+  carries one-line shims (`ssize_t` from libk, `alloca` as
+  `__builtin_alloca`). A POSIX layer in the libc stays a separate decision.
+- **Not needed**: `<setjmp.h>` (MicroPython has its own AArch64
+  non-local return), `<endian.h>` (the compiler's `__BYTE_ORDER__` is
+  enough), `<fcntl.h>`, `<sys/stat.h>` and `<dirent.h>` (only for its POSIX
+  file layer; KoraOS gets a native one over libk, for volumes and assigns).
+- **Later, not blocking**: `time.time()` needs the wall clock;
+  per-thread `errno` only matters with `_thread`; syscalls returning real
+  error codes would make `OSError` exact.
 
 ## Known kernel gaps (not part of these steps)
 
@@ -222,7 +262,8 @@ Two things need the kernel, and wait for it:
   else needs an `fflush` or an `exit()`.
 - Not provided yet: `tmpfile`/`tmpnam`, `<locale.h>`, `<wchar.h>` (and
   with it `%lc`, `%ls` and `%l[` in `scanf`), `<fenv.h>`, `<complex.h>`,
-  `<tgmath.h>`, `<assert.h>`, `<inttypes.h>`.
+  `<tgmath.h>`. `<inttypes.h>` has the wide conversions (`wcstoimax`) all
+  the same, on `wchar_t` from `<stddef.h>`.
 - The main thread has a single 4 KB stack page: libc keeps large buffers off
   the stack, but exactness costs some: printing a float takes about 1.5 KB
   (its exact decimal digits), `strtod` about 750 bytes.
