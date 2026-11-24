@@ -106,7 +106,7 @@ From the spec's §17, with the PRs of phases 0 and 1:
 
 ## Steps (one PR each)
 
-- [x] **0a. MicroPython runs.** Vendor the subset with `PROVENANCE.md` and a
+- [x] **0a. MicroPython runs.** (#121) Vendor the subset with `PROVENANCE.md` and a
   CREDITS entry. Minimal port in `user/micropython`; the build generates the
   qstr headers (Python 3 is already a build dependency). A `micropython`
   program in `c:` with a REPL on its console, raw mode, using MicroPython's
