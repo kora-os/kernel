@@ -59,6 +59,7 @@ typedef struct {
 // Program header types and flags.
 #define PT_LOAD 1
 #define PT_DYNAMIC 2
+#define PT_GNU_STACK 0x6474e551  // p_memsz: the stack the program asks for (lld -z stack-size)
 #define PF_X 0x1
 #define PF_W 0x2
 #define PF_R 0x4
@@ -80,6 +81,9 @@ struct loaded_prog {
     uint64_t entry;
     void *image;
     size_t image_pages;
+    // The main thread's stack the program asks for, in bytes: PT_GNU_STACK's
+    // p_memsz (lld's -z stack-size=N). 0 when it asks for nothing.
+    uint64_t stack_size;
 };
 
 // Load a PIE ELF image (`data`, `len` bytes) into a freshly allocated region

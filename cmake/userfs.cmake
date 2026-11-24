@@ -94,6 +94,12 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
     koraos_add_user_program(writeprobe "${SOURCE_ROOT}/tests/user/writeprobe.c")
     koraos_add_user_program(libcprobe "${SOURCE_ROOT}/tests/user/libcprobe.c"
         "${USER_DIR}/libc/tests/setjmp_registers.S")
+    # A program declares its main thread's stack when it is linked (PT_GNU_STACK):
+    # 64 KB here, and for stackbig more than the kernel allows (1 MB).
+    koraos_add_user_program(stackprobe "${SOURCE_ROOT}/tests/user/stackprobe.c"
+        FLAGS -Wl,-z,stack-size=65536)
+    koraos_add_user_program(stackbig "${SOURCE_ROOT}/tests/user/stackprobe.c"
+        FLAGS -Wl,-z,stack-size=2097152)
 
     # Retain the previous --bindir glob installation order in /bin.
     list(SORT USER_PROGRAM_ELVES)

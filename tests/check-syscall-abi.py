@@ -47,7 +47,9 @@ def main():
     # The host twin of the stubs (user/tests) defines and renames the same set.
     stub_names = {name for name, _ in re.findall(r"^SYSCALL\s+(\w+),\s*(SYS_\w+)", stubs, re.M)}
     host = (ROOT / "user/tests/libk_host.c").read_text()
-    host_names = set(re.findall(r"^\w[\w \*]*?\b(\w+)\([^;{\n]*\) \{$", host, re.M))
+    # A definition's parameters may wrap onto further lines; no ';' or '{' in
+    # between keeps a match inside one definition.
+    host_names = set(re.findall(r"^\w[\w \*]*?\b(\w+)\([^;{]*?\) \{$", host, re.M))
     if host_names != stub_names:
         errors.append(f"user/tests/libk_host.c differs from syscall.S: "
                       f"missing={sorted(stub_names - host_names)}, extra={sorted(host_names - stub_names)}")

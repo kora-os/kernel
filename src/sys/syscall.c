@@ -681,8 +681,8 @@ void syscall_handle(struct trapframe *tf) {
     case SYS_permit:
         ret = task_permit();
         break;
-    case SYS_thread_new:
-        ret = a0 != 0 ? task_thread_create(a0, a1, a2, (int)a3) : -1;
+    case SYS_thread_new:  // the one call with a fifth argument: x4, the stack size
+        ret = a0 != 0 ? task_thread_create(a0, a1, a2, (int)a3, tf->regs[4]) : -1;
         break;
     case SYS_thread_exit:
         task_thread_exit((long)a0);  // does not return

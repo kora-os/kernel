@@ -88,7 +88,11 @@ int task_info(unsigned index, struct task_info *out) {
     return (int)CALL(SYS_TASK_INFO, index, out, 0, 0);
 }
 
-int thread_new(void (*start)(void), thread_fn fn, void *arg, int core) {
+// The stack size travels in x4 on the target; the fake kernel's __syscall
+// takes four arguments and has no stacks to size, so it stays behind.
+int thread_new(void (*start)(void), thread_fn fn, void *arg, int core,
+               unsigned long stack_size) {
+    (void)stack_size;
     return (int)CALL(SYS_THREAD_NEW, start, fn, arg, core);
 }
 

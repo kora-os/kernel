@@ -429,6 +429,8 @@ struct task_info {
     unsigned state;            /* TASK_RUNNING .. TASK_ZOMBIE (exited) */
     char name[TASK_NAME_MAX];
     int tid;                   /* the thread; == pid for the main thread */
+    unsigned long stack_base;  /* the lowest address of its stack (0: a kernel task) */
+    unsigned long stack_size;  /* its size in bytes */
 };
 
 /* Fill *out with the index-th live task (0, 1, ...): 1 if there is one, 0
@@ -456,22 +458,36 @@ int sysinfo(struct sysinfo *out);
  * open files and cwd, with a 16 KB stack and FP/SIMD registers of its own. It
  * stays on `core` (0..3) for life; -1 picks the online core with the fewest
  * tasks. thread_create() returns its id, or -1 (no such core, out of memory
- * or task slots, or the program is exiting). Returning from fn, or calling
+ * or task slots, or the program is exiting). thread_create_stack() gives the
+ * thread `stack_size` bytes of stack instead (rounded up to 4 KB pages, at
+ * most 1 MB; 0 is the 16 KB default). Nothing guards a stack's end: a thread
+ * that outgrows it writes over other memory. Returning from fn, or calling
  * thread_exit(), ends the thread; thread_join() waits for one, stores its
  * result in *value (may be NULL), frees it and returns 0, or -1 for no such
  * thread of this program (or one already joined). An unjoined thread is freed
  * with its program. The program lives until its last thread ends (exit()
  * ends them all), with exit code 0 if nobody called exit(). */
 typedef long (*thread_fn)(void *arg);
-int thread_new(void (*start)(void), thread_fn fn, void *arg, int core);  /* raw */
+int thread_new(void (*start)(void), thread_fn fn, void *arg, int core,
+               unsigned long stack_size);  /* raw */
 void thread_exit(long value) __attribute__((__noreturn__));
 int thread_join(int tid, long *value);
 
 void libk_thread_start(void);  /* user/libk/syscall.S */
 
 static inline int thread_create(thread_fn fn, void *arg, int core) {
-    return thread_new(libk_thread_start, fn, arg, core);
+    return thread_new(libk_thread_start, fn, arg, core, 0);
 }
+
+static inline int thread_create_stack(thread_fn fn, void *arg, int core,
+                                      unsigned long stack_size) {
+    return thread_new(libk_thread_start, fn, arg, core, stack_size);
+}
+
+/* A program's main thread has one 4 KB page of stack unless the program
+ * declares more when it is linked: -Wl,-z,stack-size=N (N bytes, rounded up
+ * to whole pages, at most 1 MB; cmake/userfs.cmake takes it as a program's
+ * FLAGS). The kernel reads it from the ELF's PT_GNU_STACK at spawn. */
 
 /* Atomics, for data the threads of a program share, on any int, long or
  * pointer object. Every operation is sequentially consistent except

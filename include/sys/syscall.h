@@ -4,7 +4,7 @@
 
 // KoraOS private syscall ABI (not POSIX-numbered, but the calls are shaped like
 // the POSIX ones to ease porting later):
-//   x8 = syscall number, x0..x3 = args, svc #0, return value in x0.
+//   x8 = syscall number, x0..x3 = args (x4 too for thread_new), svc #0, return value in x0.
 // These numbers must match the userland side in user/libk/abi.h. Not all are
 // serviced yet; unimplemented numbers return -1.
 #define SYS_write  0
