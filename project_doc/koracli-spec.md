@@ -1,9 +1,9 @@
-# KoraCLI — Shell Specification
+# KoraCLI: shell specification
 
-*Status: draft v0.3 — 24 November 2026*
+*Status: draft v0.4, 24 November 2026. In the repository since v0.4; git holds its history.*
 *"KoraCLI" is a working name.*
 
-This document specifies the KoraOS command-line shell: the fullscreen environment the user lands in when the machine starts. It is meant as input for a development plan, so each section marks what is **decided** and what is only **proposed** (to be confirmed or changed during implementation).
+This document specifies the KoraOS command-line shell: the fullscreen environment the user lands in when the machine starts. It is meant as input for a development plan, so each section marks what is **decided** and what is only **proposed** (to be confirmed or changed during implementation). The plan itself, with its steps and their status, will be `koracli-plan.md`.
 
 ---
 
@@ -44,7 +44,7 @@ Guiding principles:
 
 ---
 
-## 3. Screen layout — Decided
+## 3. Screen layout (decided)
 
 ```
 ┌─────────────────────────────────────────────────────────────┐
@@ -68,27 +68,27 @@ Guiding principles:
 
 ### 3.2 Main area
 - A fixed **text grid** (columns × rows determined by screen mode and font).
-- Shares the screen with the graphics layer (see §10).
+- Graphics start on a canvas screen of their own (§10.1); later a graphics layer may share this screen (§10.2).
 - Scrollback: *proposed*, see Open Questions.
 
 ### 3.3 Bottom bar
 - **Left:** mode indicator, VIM-style: `PY`, `BAS` or `BBC` (BASIC mode, showing the active dialect), `OS`.
 - **Rest:** function-key labels. Labels change with the current mode.
 
-### 3.4 Function keys — Proposed initial map
+### 3.4 Function keys (proposed initial map)
 
 | Key | Python mode | BASIC mode | OS mode |
 |---|---|---|---|
 | F1 | Help (later: context help on keyword under cursor) | same | same |
 | F2 | Next mode (PY → BASIC → OS → PY) | same | same |
-| F3 | LIST | LIST | — |
-| F5 | RUN (the BASIC program) | RUN | — |
-| F6 | SAVE | SAVE | — |
-| F7 | LOAD | LOAD | — |
+| F3 | LIST | LIST | |
+| F5 | RUN (the BASIC program) | RUN | |
+| F6 | SAVE | SAVE | |
+| F7 | LOAD | LOAD | |
 
 F-key assignments should be configurable (see §14). Labels for keys unused in the current mode are hidden.
 
-### 3.5 Screens and process model — Decided
+### 3.5 Screens and process model (decided)
 *Context only: screen management and process supervision are outside the scope of KoraCLI.*
 
 - The minimal process tree is `init → screens → shell`. If the shell is killed, it is respawned, so a KoraCLI is always available unless `init` is configured to spawn something else.
@@ -97,9 +97,26 @@ F-key assignments should be configurable (see §14). Labels for keys unused in t
 - **Meta+M** (Command+M on Apple keyboards, Win+M on Windows keyboards) switches screens. It is owned by the screen manager, which receives keys first and forwards the rest to the foreground app. KoraCLI never sees Meta+M and must not try to bind it. *(Already implemented.)*
 - Several KoraCLI instances may run on different screens. They are **independent**: each has its own Python namespace, BASIC program, mode and history. (With no memory protection, one instance could still reach into another's memory; that is left to the user's curiosity.)
 
+### 3.6 Inside KoraCLI: two processes (decided)
+
+KoraCLI is two processes, as the shell before it was:
+
+- A **console task**, written in C, owns KoraCLI's screen: the text grid, the scrollback, the top and bottom bars and the console port that programs write to.
+- The **interpreter**, MicroPython, is an ordinary console program on that port. It holds the Python namespace, the dispatcher (§4), BASIC (§6) and the editor (§11).
+
+Consequences:
+
+- The screen stays responsive while Python runs: the console task still sees ESC, scrolls back and redraws after Meta+M, because it is a task of its own.
+- The bars are the console's own drawing, outside the text grid, so a program's output (even a clear screen) cannot overwrite them. The interpreter sets what they show (mode indicator, F-key labels) with a packet.
+- Programs started with `!` write to the console port, never through the interpreter.
+- The interpreter could run in another console too (`newcon`, a window of a later GUI), since it only needs stdin, stdout and a few packets that a console may ignore.
+- The full-screen editor (§11.1) reads a row of the screen back with a packet, since text on screen may come from a program the interpreter never saw.
+
+Rejected: one process with the console in a second thread. It would give the editor and graphics direct access to the grid and the pixels, but the grid would need a lock from day one, and the interpreter would be tied to its own screen.
+
 ---
 
-## 4. Input dispatch — Decided
+## 4. Input dispatch (decided)
 
 In **Python mode** and **BASIC mode**, each line typed at the prompt is routed by its **first character(s)**, in this order:
 
@@ -124,12 +141,12 @@ Rules for Python and BASIC modes:
 
 ## 5. Python mode
 
-### 5.1 Interpreter — Decided
+### 5.1 Interpreter (decided)
 - **MicroPython**, chosen for ease of porting.
 - Prompt: the standard `>>>`, with `...` for continuation lines.
 - Known limitation: MicroPython has no full `ast` module and a more limited `compile()`. The design must not depend on them.
 
-### 5.2 OS commands — Decided
+### 5.2 OS commands (decided)
 `!command args` runs an OS command. `command` is resolved in this order:
 
 1. **Wrapper** in the `kora.cmd` namespace (e.g. `!dir` → `kora.cmd.dir`). Redefining a Python name `dir` never hides the OS command.
@@ -144,9 +161,9 @@ Rules for Python and BASIC modes:
 | `out = !cmd` | Output is **captured**. | A string subclass (see below) |
 
 For programs without a wrapper, the captured result is a **`str` subclass**: it behaves as an ordinary multi-line string and additionally carries:
-- `.status` — exit code
-- `.lines` — output split into lines
-- `.stderr` — captured error output
+- `.status`: exit code
+- `.lines`: output split into lines
+- `.stderr`: captured error output
 
 Wrappers may return richer Python objects (e.g. `kora.cmd.dir` returns file objects); at the prompt these are pretty-printed:
 ```
@@ -175,7 +192,7 @@ Trailing, space-separated tokens at the **end** of the line control how the prog
 - `job = !cmd &` returns a **job object** (status, wait, kill, captured output on completion) instead of a string.
 - Job control commands: `jobs`, `fg`, `kill` *(proposed names)*.
 
-### 5.3 Wrappers — Decided
+### 5.3 Wrappers (decided)
 - Users can add wrappers for any program or new command by registering a Python function, e.g.:
   ```python
   @kora.cmd.register
@@ -186,27 +203,27 @@ Trailing, space-separated tokens at the **end** of the line control how the prog
 - Wrappers placed in a user folder are loaded by the startup file (§14), so they persist across sessions.
 - Wrappers are the extension mechanism for the shell: there is no separate shell scripting language.
 
-### 5.4 OS mode — Decided
+### 5.4 OS mode (decided)
 - Prompt: `$`. Mode indicator: `OS`.
 - Behaves as a **plain command shell**: every line is an OS command, resolved and run exactly as `!command` (§5.2), including the `&` and `@N` suffixes.
 - **No scripting and no prefixes**: no `%`, no line numbers, no `{expr}` interpolation. Scripting is done in Python mode, and new commands are added as wrappers (§5.3).
 - Basic shell conveniences only: quoting, wildcards *(proposed)*. Pipes and redirection are deferred; if added, passing Python objects between commands is preferred over text.
 
-### 5.5 Paren-less function calls — Proposed, deferred
+### 5.5 Paren-less function calls (proposed, deferred)
 Optional REPL-only sugar so that `f 1 2` calls `f(1, 2)`. Only at the prompt, never in `.py` files. Only applied when the first token is a callable and the line is not otherwise valid Python. Not part of the MVP.
 
 ---
 
 ## 6. BASIC
 
-### 6.1 Architecture — Decided
+### 6.1 Architecture (decided)
 - The BASIC interpreter is **written in Python** and runs on MicroPython.
 - It is a **Python module loaded at startup**, so it can be read, extended and replaced by users.
 - Phase 1: a straightforward **interpreter** (tokenise lines, execute).
 - Phase 2: **transpile** the program to Python the first time it is run and cache the result (similar to `.py` → `.pyc`), to improve speed. Invalidated whenever the program changes.
 - Reference implementation worth studying: [PyBasic](https://github.com/richpl/PyBasic), which does not depend on `ast`. Check its license before reusing code.
 
-### 6.2 Dialects — Decided
+### 6.2 Dialects (decided)
 Two dialects, one active at a time, selectable from configuration:
 
 | Dialect | Modelled on | Prompt | Notes |
@@ -220,7 +237,7 @@ The name "Microsoft BASIC" is not used.
 
 Line-number-optional BASICs (QBasic, AmigaBASIC, Turbo Basic, etc.) are **out of scope** for the shell. They may be added later as separate applications.
 
-### 6.3 Switching dialect — Decided
+### 6.3 Switching dialect (decided)
 - If a program is in memory, the shell **warns and asks for confirmation**.
 - On confirmation, the program is cleared (implicit `NEW`) and the new dialect becomes active.
 
@@ -242,7 +259,7 @@ Any other BASIC statement typed without a line number is executed immediately (e
 
 ---
 
-## 7. Shared variables — Decided (details partly open)
+## 7. Shared variables (decided, details partly open)
 
 Python and BASIC share one variable space. BASIC type suffixes map to Python types:
 
@@ -270,21 +287,22 @@ See Open Questions §16 for unresolved collision cases.
 
 ---
 
-## 8. Break key — Decided
+## 8. Break key (decided)
 
 - **ESC** interrupts a running BASIC program or Python code (equivalent to ESCAPE on the BBC, RUN/STOP on the C64). ESC exists on all keyboards, including Mac keyboards, which lack Pause/Break.
 - In BASIC, execution can be resumed with `CONT`.
-- In Python, ESC raises `KeyboardInterrupt` (MicroPython supports remapping the interrupt character).
+- In Python, ESC raises `KeyboardInterrupt`.
+- How: while the interpreter runs code, it has its console turn ESC into a break for the interpreter (the console's "ESC means break" setting, §11.4), which MicroPython checks as it runs. A program opts in to catching breaks (`libc-plan.md`, step 21). At the prompt the setting is off and ESC is an editor key.
 - At an empty prompt, ESC has no effect *(proposed: clears the current input line if not empty)*.
-- **Foreground programs** (§5.2) are *not* interrupted by ESC, because full-screen programs (editors, games) need ESC for themselves. They are interrupted with **Ctrl+C** *(proposed)*, as on the Amiga, delivered to whichever screen is in the foreground. Background jobs are stopped with `kill`.
+- **Foreground programs** (§5.2) are *not* interrupted by ESC, because full-screen programs (editors, games) need ESC for themselves. They are interrupted with **Ctrl+C**, as on the Amiga, delivered to whichever screen is in the foreground: the console sends a break, which KoraCLI passes on to the program. A program that has not opted in to catching breaks ends; one that has gets the break and can still be ended with a second Ctrl+C. Background jobs are stopped with `kill`.
 
 ---
 
-## 9. Extensions for a modern machine — Proposed
+## 9. Extensions for a modern machine (proposed)
 
 ### 9.1 Calling Python from BASIC
 - **BBC BASIC:** if `PROCname` or `FNname` is not defined in the BASIC program, it is looked up in the Python namespace. `PROCled_on(17)` calls Python `led_on(17)`.
-- **Classic BASIC:** `SYS` with a number keeps its original meaning (call machine code at that address — consistent with KoraOS having no memory protection). `SYS "name", args` calls a Python function or OS command.
+- **Classic BASIC:** `SYS` with a number keeps its original meaning (call machine code at that address, consistent with KoraOS having no memory protection). `SYS "name", args` calls a Python function or OS command.
 - **BBC BASIC:** `SYS "name", args` likewise, echoing RISC OS's `SYS "OS_…"`.
 
 ### 9.2 Memory access
@@ -300,35 +318,54 @@ See Open Questions §16 for unresolved collision cases.
 
 ---
 
-## 10. Screen, graphics and sound — Decided in principle
+## 10. Screen, graphics and sound (decided in principle)
 
-- One **graphics/sound library implemented in Python**, used by both languages.
+- One **graphics/sound library**, used by both languages. Its interface is Python; its drawing primitives (plot, line, circle, fill, blit) are a native C module, because pixel loops in Python are too slow.
 - BASIC keywords are thin wrappers over it: `CLS`, `MODE`, `COLOUR`/`COLOR`, `PLOT`, `DRAW`, `CIRCLE`, `SOUND`, etc., spelled according to the dialect.
 - Python exposes the same functions (`cls()`, `mode()`, `plot()`, …).
-- The text grid (§3.2) is part of this layer; text and graphics share the screen.
+- A program asks for a **graphics surface**, not for a screen, so where the surface is shown can change without changing programs.
+
+### 10.1 First: a canvas screen (decided)
+The graphics surface is a screen of its own (as `gfxdemo` opens today), in front while the program draws. The user returns to KoraCLI when the program ends, or with Meta+M. This costs no new console protocol.
+
+The known limit: at the prompt, immediate-mode `PLOT` draws on another screen, so the prompt and the drawing cannot be seen together.
+
+### 10.2 Later: a graphics layer over the console (proposed)
+The graphics surface becomes a layer of KoraCLI's own screen, composited with the text with transparency, possibly on the GPU (the Pi's display hardware blends planes, or GL later). The screen manager composites, as it already puts client pixels on the display, so the console task needs no graphics code.
+
+- Each clear clears its own layer: `CLS` the text, `CLG` the graphics (BBC BASIC has both already; Classic BASIC's `CLS` clears both *(proposed)*).
+- Text scrolls; graphics stay where they are drawn.
+- The text layer needs a transparent background, at least for cells with the default background.
+- Which layer is on top is to be decided (text over graphics is the BBC feel).
 
 ---
 
 ## 11. Editing
 
-### 11.1 Two editor styles, user-selectable — Decided
-1. **Full-screen (C64-style)** — the cursor can move anywhere on screen; pressing Enter on any visible line re-enters it. Editing a listed BASIC line and pressing Enter replaces it. Also used to edit Python blocks in place.
-2. **Line-oriented (modern, IPython/xonsh-style)** — Up/Down recall history; the screen above the prompt is read-only.
+### 11.1 Two editor styles, user-selectable (decided)
+1. **Full-screen (C64-style):** the cursor can move anywhere on screen; pressing Enter on any visible line re-enters it. Editing a listed BASIC line and pressing Enter replaces it. Also used to edit Python blocks in place.
+2. **Line-oriented (modern, IPython/xonsh-style):** Up/Down recall history; the screen above the prompt is read-only.
 
 The default is *to be decided* (see Open Questions).
 
-### 11.2 Multi-line Python blocks — Decided
+### 11.2 Multi-line Python blocks (decided)
 - An indented block continues on the next line with the `...` prompt.
 - **One blank line** inside a block is kept as part of the block (so functions can contain blank lines).
 - **Two consecutive blank lines** end the block and execute it.
 - The whole block remains editable before it is submitted.
 
-### 11.3 History — Decided
+### 11.3 History (decided)
 - **PgUp / PgDn** move through history **by block** (a whole multi-line Python block is recalled as one unit).
+
+### 11.4 Implementation (decided)
+- The editor is **written in Python**, a module next to the dispatcher, so users can read and change it like the rest of the shell. Parts may move to C later if they turn out too slow; typing speed (a key every 100 ms or more) leaves ample margin.
+- If the editor fails (an exception, a broken edit to its module), the interpreter falls back to MicroPython's built-in line editor (C), so there is always a prompt to fix it from.
+- The editor reads **key events**, not bytes: a key-event mode of the console, next to cooked and raw, delivers each key's code, modifiers and character. ESC, the F-keys and Alt are then unambiguous, with no escape sequences to parse. Programs started from KoraCLI still get cooked or raw bytes.
+- While the interpreter runs code, it switches the console's "ESC means break" setting on (§8).
 
 ---
 
-## 12. Files — Decided
+## 12. Files (decided)
 
 ### 12.1 BASIC programs
 - Saved as **plain text** with the `.BAS` extension.
@@ -350,7 +387,7 @@ The default is *to be decided* (see Open Questions).
 
 ---
 
-## 13. Help — Decided
+## 13. Help (decided)
 
 | Context | Syntax |
 |---|---|
@@ -362,7 +399,7 @@ Help text for BASIC keywords and the matching Python functions should come from 
 
 ---
 
-## 14. Configuration and startup — Proposed
+## 14. Configuration and startup (proposed)
 
 - A startup file (in the spirit of AUTOEXEC.BAT or RISC OS `!Boot`) runs at boot. It is a Python file.
 - Configuration covers at least: active dialect, default mode, editor style, F-key assignments, screen mode/font.
@@ -370,7 +407,7 @@ Help text for BASIC keywords and the matching Python functions should come from 
 
 ---
 
-## 15. Error messages — Decided
+## 15. Error messages (decided)
 
 Each language reports errors in its own style:
 
@@ -403,12 +440,12 @@ Each language reports errors in its own style:
 
 | Phase | Scope |
 |---|---|
-| **1 — MVP shell** | Fullscreen layout with top/bottom bars; Python mode on MicroPython; input dispatch (§4); ESC break; line-oriented editor; block history |
-| **1b — OS commands** | `!` resolution (wrapper → path → explicit path); live vs captured runs; `str` subclass result; wrapper registration; OS mode (`$`); Ctrl+C for foreground programs |
-| **2 — Classic BASIC** | Interpreter module; program store; immediate commands; shared variables; SAVE/LOAD with line-0 header; dialect error messages |
-| **3 — BBC BASIC** | Second dialect; multi-line constructs; `PROC`/`FN` fallback to Python; star commands; dialect switching |
-| **4 — Machine access** | PEEK/POKE, indirection operators, `SYS`, GPIO layer |
-| **5 — Graphics & sound** | Shared library; BASIC keywords; text grid integration |
-| **6 — Editing & help** | Full-screen editor; `HELP` / `help()` / `?`; F-key configuration; startup file |
-| **7 — Jobs** | `&` background jobs; `@N` core pinning; job objects; `jobs` / `fg` / `kill` |
-| **8 — Performance & extras** | BASIC → Python transpile cache; F1 context help panel; paren-less call sugar; rich wrapper objects for built-in commands; pipes in OS mode |
+| **1. MVP shell** | Fullscreen layout with top/bottom bars; Python mode on MicroPython; input dispatch (§4); ESC break; line-oriented editor; block history |
+| **1b. OS commands** | `!` resolution (wrapper → path → explicit path); live vs captured runs; `str` subclass result; wrapper registration; OS mode (`$`); Ctrl+C for foreground programs |
+| **2. Classic BASIC** | Interpreter module; program store; immediate commands; shared variables; SAVE/LOAD with line-0 header; dialect error messages |
+| **3. BBC BASIC** | Second dialect; multi-line constructs; `PROC`/`FN` fallback to Python; star commands; dialect switching |
+| **4. Machine access** | PEEK/POKE, indirection operators, `SYS`, GPIO layer |
+| **5. Graphics & sound** | Shared library (native drawing primitives); BASIC keywords; canvas screen (§10.1) |
+| **6. Editing & help** | Full-screen editor; `HELP` / `help()` / `?`; F-key configuration; startup file |
+| **7. Jobs** | `&` background jobs; `@N` core pinning; job objects; `jobs` / `fg` / `kill` |
+| **8. Performance & extras** | BASIC → Python transpile cache; F1 context help panel; paren-less call sugar; rich wrapper objects for built-in commands; pipes in OS mode |
