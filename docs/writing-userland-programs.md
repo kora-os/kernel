@@ -45,13 +45,18 @@ A program runs in EL0 with a deliberately small runtime:
   IEEE binary128, which the hardware cannot compute with, and there is no
   compiler-rt: avoid arithmetic in it (the link fails on `__addtf3` and
   friends). `strtold` and `%Lf` work at double precision.
-- **A ~4 KB stack.** A program's main thread gets a single-page user stack
-  (other threads get 16 KB), so keep large buffers off the stack (use `malloc`,
-  or static arrays). Nothing protects what lies below it: a larger frame
-  writes over kernel memory and the kernel faults later, somewhere else. The
-  build refuses a function whose frame passes 2 KB
+- **A ~4 KB stack, unless you ask for more.** A program's main thread gets a
+  single-page user stack (other threads get 16 KB), so keep large buffers off
+  the stack (use `malloc`, or static arrays). Nothing protects what lies below
+  it: a larger frame writes over kernel memory and the kernel faults later,
+  somewhere else. The build refuses a function whose frame passes 2 KB
   (`-Wframe-larger-than=2048`); a path (`KORA_PATH_MAX`, 4128 bytes) alone
-  passes it.
+  passes it. A program that needs more (an interpreter, say) declares its
+  main thread's stack when it is linked, `-Wl,-z,stack-size=N` (in
+  `cmake/userfs.cmake`, as the program's `FLAGS`), and gets `N` bytes rounded
+  up to whole pages, up to 1 MB; a larger request makes the spawn fail. A
+  thread asks for its own with `thread_create_stack(fn, arg, core, size)`.
+  `task_info` reports each thread's stack (`stack_base`, `stack_size`).
 - **A heap that grows with the system's free memory.** `malloc`, `free`,
   `calloc` and `realloc` (16-byte aligned) come from the libc
   ([`user/libc/src/stdlib/malloc.c`](../user/libc/src/stdlib/malloc.c)), a

@@ -5,8 +5,9 @@ their POSIX namesakes to ease a future libc shim, but the numbering is our own.
 
 ## Calling convention
 
-`x8` holds the syscall number; arguments go in `x0` to `x3` (AAPCS order);
-`svc #0` traps into the kernel; the return value comes back in `x0`.
+`x8` holds the syscall number; arguments go in `x0` to `x3` (AAPCS order),
+and for `thread_new` alone a fifth in `x4`; `svc #0` traps into the kernel;
+the return value comes back in `x0`.
 
 The numbers are defined in two places that **must stay in sync**:
 [`include/sys/syscall.h`](../include/sys/syscall.h) (kernel) and
@@ -39,7 +40,7 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
 | 17 | `forbid` | `int forbid(void)` | new forbid depth |
 | 18 | `permit` | `int permit(void)` | new forbid depth, or `-1` if not forbidden |
 | 19 | `task_info` | `int task_info(unsigned index, struct task_info *out)` | `1` entry, `0` past the last, `-1` bad pointer |
-| 20 | `thread_new` | `int thread_new(void (*start)(void), thread_fn fn, void *arg, int core)` | thread id, or `-1` (use libk's `thread_create`) |
+| 20 | `thread_new` | `int thread_new(void (*start)(void), thread_fn fn, void *arg, int core, unsigned long stack_size)` | thread id, or `-1` (use libk's `thread_create`) |
 | 21 | `thread_exit` | `void thread_exit(long value)` | does not return |
 | 22 | `thread_join` | `int thread_join(int tid, long *value)` | `0`, or `-1` |
 | 23 | `kill` | `int kill(int pid)` | `0`, or `-1` if there is no such running program |
@@ -129,15 +130,23 @@ kernel dispatches them in [`src/sys/syscall.c`](../src/sys/syscall.c).
   program's pid, its parent pid (0 for the kernel or an orphan), core, state
   (`TASK_RUNNING`, `TASK_READY`, `TASK_SLEEPING`, `TASK_ZOMBIE` for an exited
   thread), name, and the thread id (`tid`, equal to `pid` for the main
-  thread). Each call is consistent; tasks may come and go between calls.
+  thread), and its user stack (`stack_base`, `stack_size`; 0 for a kernel
+  task). Each call is consistent; tasks may come and go between calls.
   `/bin/ps` prints the list.
 - **`thread_new`**: starts a thread of the calling program at `start` (in
-  EL0) with `x0 = fn` and `x1 = arg`, on a fresh 16 KB stack, on `core` for life
-  (`-1`: the online core with the fewest tasks). It shares everything else with
-  the program: memory, heap, open files, cwd. libk's `thread_create(fn, arg,
-  core)` passes its own `start`, which calls `fn(arg)` and hands the result to
-  `thread_exit`. Fails for a missing or offline core, when the task table
-  (32 tasks system-wide) or memory runs out, or while the program is exiting.
+  EL0) with `x0 = fn` and `x1 = arg`, on a fresh stack of `stack_size` bytes
+  (in `x4`; rounded up to 4 KB pages, at most 1 MB; `0` gives 16 KB), on
+  `core` for life (`-1`: the online core with the fewest tasks). It shares
+  everything else with the program: memory, heap, open files, cwd. libk's
+  `thread_create(fn, arg, core)` and `thread_create_stack(fn, arg, core,
+  size)` pass their own `start`, which calls `fn(arg)` and hands the result
+  to `thread_exit`. Fails for a missing or offline core, a stack over 1 MB,
+  when the task table (32 tasks system-wide) or memory runs out, or while the
+  program is exiting.
+- **The main thread's stack** is not a syscall: a program declares it at
+  link time (lld's `-z stack-size=N`, the ELF's `PT_GNU_STACK`), and spawn
+  gives it that many bytes rounded up to pages, one page when it declares
+  nothing, and fails above 1 MB.
 - **`thread_exit`**: ends the calling thread with `value` for `thread_join`.
   The last thread to end finishes the program, with exit code 0 unless `exit`
   or `kill` set one.

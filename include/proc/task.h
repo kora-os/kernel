@@ -6,6 +6,7 @@
 #include "arch/fpsimd.h"
 #include "arch/spinlock.h"
 #include "arch/trapframe.h"
+#include "mm.h"
 
 // Process model. A process is a loaded program: its image, the pages it
 // allocated, its cwd and fd table, its parent and its exit code. It runs as one
@@ -35,7 +36,22 @@
 
 #define MAX_TASKS 32         // threads, system-wide
 #define MAX_PROCS 16         // processes, zombies included
-#define THREAD_STACK_PAGES 4 // 16 KB user stack per created thread
+#define THREAD_STACK_PAGES 4 // 16 KB user stack per created thread, unless it asks
+#define MAIN_STACK_PAGES 1   // 4 KB for a program's main thread, unless it asks
+#define USER_STACK_MAX_PAGES 256 // 1 MB: the most a program or a thread may ask for
+
+// Pages of user stack for a request of `bytes` (rounded up to whole pages),
+// `fallback` pages when the request is 0, or 0 when it asks for more than
+// USER_STACK_MAX_PAGES.
+static inline size_t user_stack_pages(uint64_t bytes, size_t fallback) {
+    if (bytes == 0) {
+        return fallback;
+    }
+    if (bytes > (uint64_t)USER_STACK_MAX_PAGES * PAGE_SIZE) {
+        return 0;
+    }
+    return (size_t)((bytes + PAGE_SIZE - 1) / PAGE_SIZE);
+}
 #define EXIT_KILLED (-9)     // exit code of a process ended by kill()
 #define KSTACK_PAGES 4       // 16 KB kernel stack per task
 #define MAX_ARGS 16          // most argv entries a spawned program may receive
@@ -313,7 +329,9 @@ void task_exit(int code) __attribute__((noreturn));
 // THREAD_STACK_PAGES, on `core` for life (-1: the least-loaded online core).
 // Returns its id, or -1 (no such core, out of memory or table slots, or the
 // process is exiting).
-int task_thread_create(uint64_t entry, uint64_t a0, uint64_t a1, int core);
+// A new thread of the calling program at `entry` (EL0) with x0 = a0 and
+// x1 = a1, on `core`, with a user stack of `stack_size` bytes (0: 16 KB).
+int task_thread_create(uint64_t entry, uint64_t a0, uint64_t a1, int core, uint64_t stack_size);
 
 // End the calling thread with `value` for thread_join. The last thread to exit
 // ends its process (with code 0 unless exit() or kill() set one).
@@ -360,7 +378,10 @@ struct ktask_info {
     uint32_t state;  // 0 running, 1 ready, 2 sleeping, 3 zombie (exited)
     char name[TASK_NAME_MAX];
     int32_t tid;     // the thread itself (== pid for the main thread)
+    uint64_t stack_base;  // the lowest address of its user stack (0 for a kernel task)
+    uint64_t stack_size;  // and its size in bytes
 };
+_Static_assert(sizeof(struct ktask_info) == 56, "struct task_info's layout in user/libk/koraos.h");
 int task_info_get(unsigned index, struct ktask_info *out);
 
 // Live tasks (threads) and processes, zombies included (for sysinfo).

@@ -98,10 +98,14 @@ int elf_load(const void *data, size_t len, struct loaded_prog *out) {
     uint64_t hi = 0;
     const Elf64_Phdr *dyn_ph = NULL;
     bool have_load = false;
+    uint64_t stack_size = 0;
     for (uint16_t i = 0; i < eh->e_phnum; i++) {
         const Elf64_Phdr *ph = phdr_at(data, eh, i);
         if (ph->p_type == PT_DYNAMIC) {
             dyn_ph = ph;
+        }
+        if (ph->p_type == PT_GNU_STACK) {
+            stack_size = ph->p_memsz;
         }
         if (ph->p_type != PT_LOAD) {
             continue;
@@ -164,5 +168,6 @@ int elf_load(const void *data, size_t len, struct loaded_prog *out) {
     out->entry = eh->e_entry + bias;
     out->image = region;
     out->image_pages = pages;
+    out->stack_size = stack_size;
     return 0;
 }

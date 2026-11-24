@@ -656,6 +656,26 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         q.expect(PROMPT)
     yield "libc on the target (floats, strtod, snprintf va_list, stdio flushed at exit)", libc_on_target
 
+    def stack_sizes():
+        # stackprobe declares 64 KB at link time; the kernel says what it gave.
+        q.send("stackprobe\r")
+        q.expect(rb"run 'stackprobe' on cpu \d+: [^\r\n]*\(\d+ image pages, 16 stack\)")
+        m = q.expect(rb"^stackprobe: ([^\r\n]*)\r?\n")
+        if m.group(1) != b"main 64 KB, thread 200 KB, default 16 KB":
+            raise Failure("stackprobe: %s" % m.group(1).decode(errors="replace"))
+        q.expect(rb"exited with 0")
+        q.expect(PROMPT)
+        # More than the kernel allows: the spawn fails, and says why.
+        q.send("stackbig\r")
+        q.expect(rb"spawn: 'stackbig' asks for a 2048 KB stack, more than 1024 KB")
+        q.expect(rb"shell: no such program: stackbig")
+        q.expect(PROMPT)
+        # A program that declares nothing keeps its one page.
+        q.send("hello\r")
+        q.expect(rb"run 'hello' on cpu \d+: [^\r\n]*\(\d+ image pages, 1 stack\)")
+        q.expect(PROMPT)
+    yield "stacks declared at link time, for a program and its threads", stack_sizes
+
     def read_tasks():
         """Run `tasks` on the debug console: ({name: (state, stack)}, peak, size)."""
         listed, peak, size, _ = read_tasks_bkl()

@@ -4,7 +4,7 @@
  *
  * These MUST match the kernel side in include/sys/syscall.h.
  *
- * Calling convention: x8 = syscall number, x0..x3 = arguments, `svc #0`,
+ * Calling convention: x8 = syscall number, x0..x3 = arguments (x4 too for thread_new), `svc #0`,
  * return value in x0.
  */
 #pragma once

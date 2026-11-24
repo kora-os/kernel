@@ -72,6 +72,7 @@ run_test term_render user/libconsole/term_render.c user/libconsole/font.c user/l
 run_test edit user/libconsole/edit.c user/libconsole/keys.c user/libconsole/term.c
 TEST_FLAGS=()
 run_test printf src/lib/printf.c
+run_test elf src/user/elf.c
 run_test virt src/platform/virt.c
 run_test placement src/proc/placement.c
 run_test sd src/drivers/sd.c

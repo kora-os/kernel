@@ -754,10 +754,10 @@ static void copy_bytes(void *dst, const void *src, size_t n) {
 // writes the new 16-byte-aligned stack pointer and the address of the argv array
 // (both in the task's address space) and returns true; returns false if the
 // arguments do not fit in the stack page.
-static bool build_args(void *stack, int argc, char *const argv[],
+static bool build_args(void *stack, size_t stack_pages, int argc, char *const argv[],
                        uint64_t *out_sp, uint64_t *out_argv) {
     uint64_t base = (uint64_t)stack;
-    uint64_t p = base + PAGE_SIZE;
+    uint64_t p = base + (uint64_t)stack_pages * PAGE_SIZE;
     uint64_t str_addr[MAX_ARGS];
 
     for (int i = 0; i < argc; i++) {
@@ -994,8 +994,17 @@ struct process *task_create(const char *name, int argc, char *const argv[], int 
     p->parent = proc_current();
     copy_name(p->name, name);
 
+    // The main thread's stack: what the program declared (PT_GNU_STACK), or
+    // one page.
+    size_t stack_pages = user_stack_pages(lp.stack_size, MAIN_STACK_PAGES);
+    if (stack_pages == 0) {
+        printf("spawn: '%s' asks for a %lu KB stack, more than %d KB\n", name,
+               (unsigned long)(lp.stack_size / 1024), USER_STACK_MAX_PAGES * PAGE_SIZE / 1024);
+        proc_free(p);  // releases the image
+        return NULL;
+    }
     bool full;
-    task_t *t = thread_alloc(p, (unsigned)core, 1, &full);
+    task_t *t = thread_alloc(p, (unsigned)core, stack_pages, &full);
     if (t == NULL) {
         printf(full ? "spawn: task table full\n" : "spawn: out of memory for '%s' stacks\n", name);
         proc_free(p);  // releases the image
@@ -1011,13 +1020,13 @@ struct process *task_create(const char *name, int argc, char *const argv[], int 
         return NULL;
     }
 
-    uint64_t sp = (uint64_t)t->stack + PAGE_SIZE;
+    uint64_t sp = (uint64_t)t->stack + (uint64_t)stack_pages * PAGE_SIZE;
     uint64_t argv_child = 0;
     if (argc > MAX_ARGS) {
         argc = MAX_ARGS;
     }
     if (argc > 0) {
-        if (!build_args(t->stack, argc, argv, &sp, &argv_child)) {
+        if (!build_args(t->stack, stack_pages, argc, argv, &sp, &argv_child)) {
             printf("spawn: arguments too large for '%s'\n", name);
             proc_free(p);  // releases the image and stacks we just took
             return NULL;
@@ -1025,8 +1034,8 @@ struct process *task_create(const char *name, int argc, char *const argv[], int 
     }
 
     thread_setup(t, lp.entry, sp, (uint64_t)argc, argv_child);
-    printf("  [pid %d] run '%s' on cpu %u: entry=0x%lx sp=0x%lx (%d image pages)\n",
-           t->pid, name, t->core, lp.entry, sp, (int)p->image_pages);
+    printf("  [pid %d] run '%s' on cpu %u: entry=0x%lx sp=0x%lx (%d image pages, %d stack)\n",
+           t->pid, name, t->core, lp.entry, sp, (int)p->image_pages, (int)stack_pages);
     set_state(t, TASK_RUNNABLE);
     return p;
 }
@@ -1237,22 +1246,26 @@ void task_thread_exit(long value) {
     thread_die(value);
 }
 
-int task_thread_create(uint64_t entry, uint64_t a0, uint64_t a1, int core) {
+int task_thread_create(uint64_t entry, uint64_t a0, uint64_t a1, int core, uint64_t stack_size) {
     struct process *p = proc_current();
     if (p == NULL || p->exiting) {
         return -1;
+    }
+    size_t stack_pages = user_stack_pages(stack_size, THREAD_STACK_PAGES);
+    if (stack_pages == 0) {
+        return -1;  // more than USER_STACK_MAX_PAGES
     }
     core = choose_core(core);
     if (core < 0) {
         return -1;
     }
     bool full;
-    task_t *t = thread_alloc(p, (unsigned)core, THREAD_STACK_PAGES, &full);
+    task_t *t = thread_alloc(p, (unsigned)core, stack_pages, &full);
     if (t == NULL) {
         return -1;
     }
     p->threads++;
-    thread_setup(t, entry, (uint64_t)t->stack + THREAD_STACK_PAGES * PAGE_SIZE, a0, a1);
+    thread_setup(t, entry, (uint64_t)t->stack + (uint64_t)stack_pages * PAGE_SIZE, a0, a1);
     set_state(t, TASK_RUNNABLE);
     return t->pid;
 }
@@ -1348,6 +1361,8 @@ int task_info_get(unsigned index, struct ktask_info *out) {
         out->tid = t->pid;
         out->ppid = p != NULL && p->parent != NULL ? p->parent->pid : 0;
         out->core = t->core;
+        out->stack_base = (uint64_t)t->stack;
+        out->stack_size = (uint64_t)t->stack_pages * PAGE_SIZE;
         out->state = t->state == TASK_EXITED    ? 3
                      : t->state == TASK_BLOCKED ? 2
                      : t->on_cpu                ? 0
