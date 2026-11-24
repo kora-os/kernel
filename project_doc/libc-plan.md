@@ -210,7 +210,7 @@ kernel.
 
 | # | Theme | Status |
 |---|-------|--------|
-| 19 | `<assert.h>` (66 files of `py/` include it) and `<inttypes.h>` | in progress |
+| 19 | `<assert.h>` (66 files of `py/` include it) and `<inttypes.h>` | in review (#116) |
 | 20 | Stack size: a program declares its main thread's stack at link time; `thread_new` takes a size | planned |
 | 21 | A break a program can catch: opt-in, with the kernel's default action for the rest | planned |
 
