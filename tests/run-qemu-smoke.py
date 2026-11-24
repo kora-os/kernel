@@ -1530,6 +1530,25 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         q.send("font spleen-8x16\r")
         q.expect(PROMPT)
         size(128, 48)
+        # Characters past ASCII in the font's own glyphs, pixel for pixel as
+        # Spleen's BDF draws them: the cells hold code points.
+        q.send("conprobe utf8\r")
+        q.expect(rb"exited with 0")
+        q.expect(PROMPT)
+        time.sleep(0.3)
+        shot = q.screendump("font-utf8")
+        sys.path.insert(0, os.path.join(ROOT, "scripts"))
+        import bdf2psf
+        with open(os.path.join(ROOT, "third_party", "spleen", "spleen-8x16.bdf")) as f:
+            _, _, glyphs = bdf2psf.parse_bdf(f.read())
+        rows = dict(glyphs)
+        for col, cp in enumerate((0xE9, 0x2500, 0x20AC, 0xFC)):
+            for y in range(16):
+                for x in range(8):
+                    want = (255, 255, 255) if rows[cp][y][x] else (0, 0, 0)
+                    if not near(pixel(shot, col * 8 + x, y), want):
+                        raise Failure("U+%04X: pixel %d,%d of its cell is %s, not %s"
+                                      % (cp, x, y, pixel(shot, col * 8 + x, y), want))
         q.send("font spleen-16x32\r")
         q.expect(PROMPT)
         size(64, 24)
