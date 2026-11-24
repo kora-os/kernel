@@ -136,6 +136,13 @@ Rules for Python and BASIC modes:
 3. A line consisting only of a number (e.g. `10`) **deletes** that program line, as in classic BASIC.
 4. `!` is never valid at the start of a Python line, so it is unambiguous. (`*` was rejected as the OS prefix because `*a, b = items` is valid Python. `*` remains the native star-command prefix *inside BBC BASIC*.)
 5. `%` is never valid at the start of a Python line and is not used at the start of a BASIC line.
+6. **Routing applies to the line typed at `>>>` only.** Continuation lines (at `...`, inside a block or open brackets) are Python, so a line such as `1, 2]` that closes a list is never taken for a program line, and `%` is not recognised there.
+7. **One exception inside blocks:** `!cmd` and `name = !cmd` (§5.2) are still translated when they start a statement after the indentation, so this works:
+   ```
+   >>> for f in files:
+   ...     !cat {f}
+   ```
+   The editor knows whether a line starts a statement or continues one inside brackets, since it decides continuation (§11.2).
 
 ---
 
@@ -150,15 +157,24 @@ Rules for Python and BASIC modes:
 `!command args` runs an OS command. `command` is resolved in this order:
 
 1. **Wrapper** in the `kora.cmd` namespace (e.g. `!dir` → `kora.cmd.dir`). Redefining a Python name `dir` never hides the OS command.
-2. **Program on the search path**, if no wrapper exists.
+2. **Program on the search path** (`c:`, as in the shell before KoraCLI), if no wrapper exists.
 3. An **explicit path** (`!/bin/randombin`) bypasses wrappers and runs the program directly.
 
 #### Running vs capturing
 
 | Form | Behaviour | Result |
 |---|---|---|
-| `!cmd` (not assigned) | Runs **live**: stdout/stderr go to KoraCLI's screen. A program that needs the full display opens its **own screen** (§3.5). Either way, KoraCLI waits until the program ends (unless `&` is used). | Exit status |
+| `!cmd` (not assigned) | Runs **live**: stdout/stderr go to KoraCLI's screen. A program that needs the full display opens its **own screen** (§3.5). Either way, KoraCLI waits until the program ends (unless `&` is used). | Nothing is printed; the exit status is in `kora.status` |
 | `out = !cmd` | Output is **captured**. | A string subclass (see below) |
+
+`!` exists only at the prompt. It is shorthand for two ordinary functions, which `.py` files (§12.2) and wrappers (§5.3) call instead:
+
+| At the prompt | In code | Returns |
+|---|---|---|
+| `!cmd args` | `kora.run("cmd", "args")` | The exit status |
+| `out = !cmd args` | `out = kora.capture("cmd", "args")` | The captured result |
+
+Both resolve `cmd` as above and accept the job suffixes as keyword arguments *(names to be decided)*. At the prompt a bare `!cmd` prints nothing, whatever its status (most programs report their own errors); `rc = kora.run(...)` returns it.
 
 For programs without a wrapper, the captured result is a **`str` subclass**: it behaves as an ordinary multi-line string and additionally carries:
 - `.status`: exit code
@@ -175,8 +191,13 @@ Wrappers may return richer Python objects (e.g. `kora.cmd.dir` returns file obje
 ```
 
 #### Arguments
-- Bare words are strings (shell convention).
-- In Python and BASIC modes, Python values are interpolated with `{expr}`.
+- Bare words are strings (shell convention), with quoting for spaces.
+- In Python and BASIC modes, Python values are interpolated with `{expr}`:
+  - A list or tuple expands to **one argument per element** (`!cat {files}`).
+  - Any other value becomes **one argument**, `str(value)`, never split again, even if it contains spaces.
+  - Inside a word the value joins it: `file{n}.txt` is one argument. A list inside a word is an error.
+  - `{{` and `}}` give literal braces, as in f-strings.
+- Redirection, as in OS mode (§5.4): `!cmd < in.txt > out.txt`, with `>>` to append.
 
 #### Job suffixes
 Trailing, space-separated tokens at the **end** of the line control how the program runs:
@@ -197,9 +218,9 @@ Trailing, space-separated tokens at the **end** of the line control how the prog
   ```python
   @kora.cmd.register
   def randombin(*args):
-      out = !/bin/randombin {args}
-      return parse(out)
+      return parse(kora.capture("/bin/randombin", *args))
   ```
+  Wrappers live in `.py` files, which are pure Python, so they call `kora.run` and `kora.capture` (§5.2) rather than `!`. The explicit path keeps the wrapper from calling itself.
 - Wrappers placed in a user folder are loaded by the startup file (§14), so they persist across sessions.
 - Wrappers are the extension mechanism for the shell: there is no separate shell scripting language.
 
@@ -207,7 +228,8 @@ Trailing, space-separated tokens at the **end** of the line control how the prog
 - Prompt: `$`. Mode indicator: `OS`.
 - Behaves as a **plain command shell**: every line is an OS command, resolved and run exactly as `!command` (§5.2), including the `&` and `@N` suffixes.
 - **No scripting and no prefixes**: no `%`, no line numbers, no `{expr}` interpolation. Scripting is done in Python mode, and new commands are added as wrappers (§5.3).
-- Basic shell conveniences only: quoting, wildcards *(proposed)*. Pipes and redirection are deferred; if added, passing Python objects between commands is preferred over text.
+- Shell conveniences: quoting; **redirection** to and from files (`<`, `>`, `>>`); a volume or assign name alone (`dh0:`) changes directory; wildcards *(proposed)*. Pipes are deferred; if added, passing Python objects between commands is preferred over text.
+- **What the shell before KoraCLI had is kept** (`user/shell.c`, which KoraCLI replaces): programs from `c:`, quoting, `&`, `@N`, redirection and the built-ins `cd`, `pwd`, `volumes`, `sync`, `assign`, `kill`, `help` and `exit`. The built-ins are wrappers in `kora.cmd`; `cd` has to be one, since it changes the interpreter's own directory. All of it is there before `shell.c` is removed (phase 1b).
 
 ### 5.5 Paren-less function calls (proposed, deferred)
 Optional REPL-only sugar so that `f 1 2` calls `f(1, 2)`. Only at the prompt, never in `.py` files. Only applied when the first token is a callable and the line is not otherwise valid Python. Not part of the MVP.
@@ -281,6 +303,11 @@ Case rules:
 - Names keep their case when exported to Python, in **both** dialects. In Classic BASIC, `A` defines Python `A` (uppercase).
 - In BBC BASIC, names are case-sensitive, so they map one-to-one.
 - A type mismatch (e.g. `PRINT msg$` when Python `msg` is an `int`) raises the dialect's "Type mismatch" error.
+
+Type rules:
+- **Numbers convert; other types do not.** A plain BASIC variable reading a Python `int` gets a float. `n%` reading a Python float truncates toward zero, BASIC's own rule for `A%=1.5`.
+- A string read as a number, or a number read as a string, is "Type mismatch". So is any other Python type (dict, function, ...), except a list read as an array (`DIM`).
+- **Booleans:** Python `True` reads as BASIC's `TRUE`, -1 in both dialects, and `False` as 0, so `IF flag THEN` behaves the same in both languages.
 - BASIC system variables (e.g. BBC `@%`, `TIME`) are not exported.
 
 See Open Questions §16 for unresolved collision cases.
@@ -431,7 +458,7 @@ Each language reports errors in its own style:
 5. **Submitting a block in full-screen mode.** Does the two-blank-lines rule also apply there, or should there be an explicit key (e.g. Ctrl+Enter) to submit immediately in both styles?
 6. **Classic BASIC prompt.** `Ok` (MSX/GW-BASIC) or `READY.` (C64)?
 7. **Scrollback.** Size and how it interacts with the graphics layer.
-8. **`!` command argument syntax.** Confirm bare-words-are-strings and `{expr}` interpolation.
+8. **`!` command argument syntax.** *Resolved in v0.4:* bare words are strings, `{expr}` interpolates (§5.2, Arguments).
 9. **Background job output.** Where does output from a background job go: straight to the screen (interleaved with the prompt, as in Unix shells), or buffered until the user asks for it?
 
 ---
@@ -441,11 +468,11 @@ Each language reports errors in its own style:
 | Phase | Scope |
 |---|---|
 | **1. MVP shell** | Fullscreen layout with top/bottom bars; Python mode on MicroPython; input dispatch (§4); ESC break; line-oriented editor; block history |
-| **1b. OS commands** | `!` resolution (wrapper → path → explicit path); live vs captured runs; `str` subclass result; wrapper registration; OS mode (`$`); Ctrl+C for foreground programs |
+| **1b. OS commands** | `!` resolution (wrapper → path → explicit path); live vs captured runs; `kora.run` / `kora.capture`; `str` subclass result; wrapper registration; OS mode (`$`); redirection; plain `&` and `@N`; the old shell's built-ins as wrappers; Ctrl+C for foreground programs; `shell.c` removed |
 | **2. Classic BASIC** | Interpreter module; program store; immediate commands; shared variables; SAVE/LOAD with line-0 header; dialect error messages |
 | **3. BBC BASIC** | Second dialect; multi-line constructs; `PROC`/`FN` fallback to Python; star commands; dialect switching |
 | **4. Machine access** | PEEK/POKE, indirection operators, `SYS`, GPIO layer |
 | **5. Graphics & sound** | Shared library (native drawing primitives); BASIC keywords; canvas screen (§10.1) |
 | **6. Editing & help** | Full-screen editor; `HELP` / `help()` / `?`; F-key configuration; startup file |
-| **7. Jobs** | `&` background jobs; `@N` core pinning; job objects; `jobs` / `fg` / `kill` |
+| **7. Jobs** | Job objects (`job = !cmd &`); `jobs` / `fg` (plain `&`, `@N` and `kill` come in 1b) |
 | **8. Performance & extras** | BASIC → Python transpile cache; F1 context help panel; paren-less call sugar; rich wrapper objects for built-in commands; pipes in OS mode |
