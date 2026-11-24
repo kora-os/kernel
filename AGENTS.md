@@ -52,6 +52,11 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
   `user/libconsole`: one source built into the kernel (`KORAOS_KERNEL`, glue in
   `src/video/console_fb.c`) and linked by user programs (`condemo`). Keep it
   free of kernel calls; what it needs comes through `term_host_t`.
+- MicroPython (KoraCLI's Python) is vendored, a pinned subset, in
+  `third_party/micropython` (`PROVENANCE.md`, upstream files unchanged);
+  KoraOS's port is `user/micropython`, built by `cmake/micropython.cmake`
+  into the `micropython` program. Python code is tested on the unix port
+  from the same tree (`tests/run-micropython-tests.sh`), not on CPython.
 - Message ports (`src/ipc/port.c`, syscalls 48 to 54) carry pointers to the
   sender's memory; the kernel never touches a message and keeps an ended
   sender's memory until its held messages are replied (`docs/syscalls.md`).

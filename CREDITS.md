@@ -52,6 +52,17 @@ Raspberry Pi 4's xHCI controller, letting a single stack serve both boards.
   the exact commit). The build converts them to PSF2 for the consoles'
   `font` command.
 
+## MicroPython
+
+- **Project:** MicroPython, a lean Python 3 implementation.
+- **Author:** Damien P. George and contributors, as the individual files say.
+- **Upstream:** <https://github.com/micropython/micropython>
+- **License:** MIT (`third_party/micropython/LICENSE`).
+- **What we use:** the core (`py/`), the REPL and its line editor, and the
+  unix port as the host interpreter for tests, from release v1.29.0, in
+  `third_party/micropython` (`PROVENANCE.md` there has the exact commit and
+  the file list). KoraOS's port of it is our own code, in `user/micropython`.
+
 ## Raspberry Pi boot firmware
 
 - **Files:** the GPU boot firmware and device trees in [`firmware/`](firmware/)

@@ -361,6 +361,9 @@ static int session(void) {
     for (;;) {
         reap_jobs();
         if (console) {
+            // A program that ended in raw mode (Ctrl+C on micropython's line
+            // editor, say) leaves the console raw: lines are the shell's.
+            console_mode(CON_COOKED);
             fputs("$ ", stdout);
         }
         int got = read_command_line();

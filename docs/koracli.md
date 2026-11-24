@@ -5,7 +5,8 @@ Python, a line of BASIC or an OS command, and see what happens.
 
 > **Status: not available yet.** This reference is written ahead of the
 > implementation and grows with it. Each section says whether what it
-> describes works today or which step brings it; nothing does yet. The
+> describes works today or which step brings it. So far only MicroPython
+> itself runs, as a program of its own (see Python mode). The
 > design behind it is `project_doc/koracli-spec.md`, and the steps are in
 > `project_doc/koracli-plan.md`. Every change to KoraCLI updates this page in
 > the same pull request.
@@ -96,6 +97,23 @@ Things to know:
 *Planned (phase 1).*
 
 KoraCLI's Python is MicroPython.
+
+**Today (step 0a):** type `micropython` in the shell for MicroPython's own
+REPL, on the shell's console. It is not KoraCLI yet: none of the editing
+below, no bars, no prefixes. What it has:
+
+- MicroPython v1.29.0's core language, with integers of any size, floats
+  (double precision; `repr` gives the shortest form that reads back almost
+  always, not always) and Unicode strings, and the `math` and `sys`
+  modules.
+- MicroPython's line editor: Left, Right, Home, End, Backspace, Delete, Up
+  and Down for the history, Tab to complete a name, and an indented block
+  continued after `...` (auto-indent).
+- Ctrl+D on an empty line ends it. Ctrl+E is paste mode, Ctrl+A and Ctrl+B
+  the raw REPL and back (for tools).
+- Not yet: Ctrl+C ends the program instead of raising `KeyboardInterrupt`,
+  and there are no files (`import` of a module from disk, `open`), no `os`
+  and no `time` (step 0b).
 
 - An indented block continues on the next line with the `...` prompt.
 - One blank line inside a block stays part of it, so a function can contain
