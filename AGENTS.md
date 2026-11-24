@@ -101,7 +101,11 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
   shell's own: started on the kernel console, the shell opens one and runs
   itself there) serves its programs' packets; line editing is `user/libconsole/edit.c` and key bytes
   `keys.c`, both pure (built into the kernel too, like `term.c`) and tested
-  on the host (`tests/host/edit_test.c`).
+  on the host (`tests/host/edit_test.c`). For KoraCLI it also has a
+  key-event mode (`CON_EVENTS`, libk `console_events`), bars above and
+  below the grid (`CON_BAR`, `console_bar`) and ESC as a break for the
+  program that asks (`CON_ESC_BREAK`, `console_esc_break`); `keyprobe`
+  shows them, and `user/tests/console_test.c` tests them.
 - Fonts (`user/libconsole/font.c`): the built-in 8x8 font or PSF2. A
   console takes one through a `CON_FONT` packet (libk `console_font`, the
   `font` tool) and resizes (`term_resize`). The fonts in `sys:fonts` are

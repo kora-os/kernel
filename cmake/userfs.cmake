@@ -104,6 +104,7 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
     koraos_add_user_program(stackbig "${SOURCE_ROOT}/tests/user/stackprobe.c"
         FLAGS -Wl,-z,stack-size=2097152)
     koraos_add_user_program(breakprobe "${SOURCE_ROOT}/tests/user/breakprobe.c")
+    koraos_add_user_program(keyprobe "${SOURCE_ROOT}/tests/user/keyprobe.c")
 
     # MicroPython (cmake/micropython.cmake): the core and the port in a static
     # library, linked with the stack its stack check is set up for.

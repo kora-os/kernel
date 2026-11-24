@@ -129,7 +129,19 @@ A program runs in EL0 with a deliberately small runtime:
   `console_font(psf, size)` draws the console your stdout is in a PSF2
   font (NULL: the built-in 8x8 one), as the `font` command does; the
   console resizes, so ask for its size again (`ESC [ 18 t`) if you lay
-  text out by it. Ctrl+C ends the
+  text out by it. F1 to F12 come as xterm's sequences (`ESC O P` to
+  `ESC O S`, then `ESC [ 15 ~` to `ESC [ 24 ~`).
+  `console_mode(CON_EVENTS)` hands your program each key press as an
+  event instead, read with `console_events(events, max)`: a `struct
+  con_key_event` with the key's position (`KEY_*`), the modifiers held
+  (`INPUT_MOD_*`) and the character it types, so ESC, the F-keys and
+  modified keys need no parsing (Shift+PgUp/PgDn still scroll, Ctrl+C is
+  still a break). `console_bar(CON_BAR_TOP or CON_BAR_BOTTOM, text)` shows
+  a bar above or below the text grid, in reverse video, which output never
+  overwrites; the grid loses a row for each, and `NULL` takes the bar
+  away. `console_esc_break(1)` makes ESC a break for your program instead
+  of a key (allocate `SIG_BREAK` first, or it ends you), until
+  `console_esc_break(0)` or your end. Ctrl+C ends the
   program: the shell sends the one it runs in front a break, which ends it,
   and newcon kills its own. A program that wants to stop cleanly instead
   calls `sig_alloc(SIG_BREAK)` and checks the bit (`sig_set(0, 0)`) or waits

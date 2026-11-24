@@ -286,7 +286,7 @@ categories:
         prs: [121, 122]
       - id: koracli-console
         name: KoraCLI console
-        status: planned
+        status: in_progress
         description: The console task behind KoraCLI, with bars outside the text grid and keys delivered as events.
       - id: koracli-python-mode
         name: Python mode

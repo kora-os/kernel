@@ -37,7 +37,7 @@ static screen_t handle;
 static struct {
     struct con_packet *packet;
     int sender;
-} queue[32];
+} queue[96];
 static int queued, taken;
 // What it answered, in order.
 static struct con_packet *answered[64];
@@ -148,6 +148,9 @@ static long kernel(long number, long a0, long a1, long a2, long a3) {
         *(int *)a1 = 5;
         return RUN_PID;
     case SYS_SIG_SEND:
+        if (a0 > 0 && a0 < 100 && ended[a0]) {
+            return -1;
+        }
         sent_to = (int)a0;
         sent_mask = (unsigned)a1;
         return 0;
@@ -408,6 +411,181 @@ static void make_font(void) {
     memcpy(psf + 32 + 64, "?\xff" "A\xff", 4);
 }
 
+// The key-event mode, ESC as a break, and the bars.
+static void test_events_and_bars(void) {
+    // The reads earlier tests left waiting take a key each first (raw mode).
+    while (c->waiting_count > 0) {
+        type_key(0x1D, 0, 'z');
+        service(SIG_MASK(KEY_BIT));
+    }
+
+    struct con_packet events_mode = {CON_MODE, -9, NULL, CON_EVENTS};
+    put(&events_mode, 50);
+    answer_count = 0;
+    service(SIG_MASK(PORT_BIT));
+    CHECK(answer_count == 1 && events_mode.result == 0 && c->events, "the key-event mode");
+    static struct con_key_event got[4];
+    struct con_packet read = {CON_READ, -9, got, sizeof got};
+    put(&read, 50);
+    answer_count = 0;
+    service(SIG_MASK(PORT_BIT));
+    CHECK(answer_count == 0 && c->waiting_count == 1, "a read waits for a key");
+    type_key(KEY_F1 + 4, INPUT_MOD_LEFT_CTRL, 0);   // Ctrl+F5
+    type_key(0xE1, INPUT_MOD_LEFT_SHIFT, 0);        // Shift alone: no event
+    type_key(KEY_PAGE_UP, INPUT_MOD_LEFT_SHIFT, 0); // scrolls, no event
+    type_key(0x1B, INPUT_MOD_LEFT_SHIFT, 'X');
+    type_key(KEY_ESCAPE, 0, 0);
+    answer_count = 0;
+    service(SIG_MASK(KEY_BIT));
+    CHECK(answer_count == 1 && read.result == 3 * (long)sizeof(struct con_key_event),
+          "the read gets the three key presses at once (%ld)", read.result);
+    CHECK(got[0].keycode == KEY_F1 + 4 && got[0].modifiers == INPUT_MOD_LEFT_CTRL &&
+              got[0].codepoint == 0, "Ctrl+F5: its key and modifiers");
+    CHECK(got[1].keycode == 0x1B && got[1].codepoint == 'X' &&
+              got[1].modifiers == INPUT_MOD_LEFT_SHIFT, "Shift+X: its character too");
+    CHECK(got[2].keycode == KEY_ESCAPE, "ESC is a key");
+    CHECK(c->term.view_offset == 0, "the scroll was undone by the next key");
+    for (int i = 0; i < CONSOLE_EVENTS + 3; i++) {
+        type_key(0x04 + (unsigned)(i % 26), 0, 'a' + (unsigned)(i % 26));
+        if (typed.count == SCREEN_BATCH) {
+            service(SIG_MASK(KEY_BIT));
+        }
+    }
+    service(SIG_MASK(KEY_BIT));
+    CHECK(c->event_count == CONSOLE_EVENTS, "the queue keeps the newest %d", CONSOLE_EVENTS);
+    put(&read, 50);
+    answer_count = 0;
+    service(SIG_MASK(PORT_BIT));
+    CHECK(answer_count == 1 && read.result == 4 * (long)sizeof(struct con_key_event) &&
+              got[0].codepoint == 'a' + 3, "a read takes as many as fit, the oldest kept first");
+    char small[4];
+    struct con_packet tiny = {CON_READ, -9, small, sizeof small};
+    put(&tiny, 50);
+    answer_count = 0;
+    service(SIG_MASK(PORT_BIT));
+    CHECK(answer_count == 1 && tiny.result == -1, "a read with no room for an event is refused");
+    int before = broke, events_before = (int)c->event_count;
+    type_key(0x06, INPUT_MOD_LEFT_CTRL, 'c');
+    service(SIG_MASK(KEY_BIT));
+    CHECK(broke == before + 1 && (int)c->event_count == events_before,
+          "Ctrl+C is still the console's break, not an event");
+    broke = before;  // as test_run expects it
+    struct con_packet cooked = {CON_MODE, -9, NULL, CON_COOKED};
+    put(&cooked, 50);
+    service(SIG_MASK(PORT_BIT));
+    CHECK(!c->events && c->event_count == 0 && c->edit.mode == CON_COOKED,
+          "cooked again, the events not read are dropped");
+
+    // ESC as a break for the program that asks, until it asks no more.
+    struct con_packet esc_on = {CON_ESC_BREAK, -9, NULL, 1};
+    put(&esc_on, 51);
+    answer_count = 0;
+    service(SIG_MASK(PORT_BIT));
+    CHECK(answer_count == 1 && esc_on.result == 0, "ESC as a break, asked for");
+    sent_to = 0;
+    sent_mask = 0;
+    type_key(KEY_ESCAPE, 0, 0);
+    type_text("k");
+    service(SIG_MASK(KEY_BIT));
+    CHECK(sent_to == 51 && sent_mask == SIG_MASK(SIG_BREAK), "ESC sends that program the break");
+    CHECK(c->edit.length == 1 && c->edit.escape_length == 0, "and is not typed");
+    struct con_packet esc_other = {CON_ESC_BREAK, -9, NULL, 0};
+    put(&esc_other, 52);
+    service(SIG_MASK(PORT_BIT));
+    CHECK(c->esc_break_pid == 51, "another program cannot turn it off");
+    struct con_packet esc_off = {CON_ESC_BREAK, -9, NULL, 0};
+    put(&esc_off, 51);
+    service(SIG_MASK(PORT_BIT));
+    sent_to = 0;
+    type_key(KEY_ESCAPE, 0, 0);
+    service(SIG_MASK(KEY_BIT));
+    CHECK(c->esc_break_pid == 0 && sent_to == 0, "off again: ESC is a key");
+    struct con_packet esc_gone = {CON_ESC_BREAK, -9, NULL, 1};
+    put(&esc_gone, 61);
+    service(SIG_MASK(PORT_BIT));
+    ended[61] = 1;
+    type_key(KEY_ESCAPE, 0, 0);
+    service(SIG_MASK(KEY_BIT));
+    CHECK(c->esc_break_pid == 0, "a program that ended has it no more");
+    type_key(KEY_ENTER, 0, 0);  // the line typed meanwhile, for nobody
+    service(SIG_MASK(KEY_BIT));
+
+    // Bars: a row each, outside the grid.
+    uint32_t rows = c->term.rows;
+    static const char top_text[] = "Top \xc3\xa9";
+    struct con_bar top = {CON_BAR_TOP, top_text, strlen(top_text)};
+    struct con_packet top_packet = {CON_BAR, -9, &top, sizeof top};
+    put(&top_packet, 50);
+    answer_count = 0;
+    damages = 0;
+    service(SIG_MASK(PORT_BIT));
+    CHECK(answer_count == 1 && top_packet.result == 0, "a top bar");
+    CHECK(c->term.rows == rows - 1 && c->render.y == 8, "the grid gives it its first row");
+    CHECK(damages == 1 && damage_y == 0 && damage_height == HEIGHT, "the screen redrawn");
+    const term_cell_t *cell = term_view_cell(&c->bars[0].term, 0, 4);
+    CHECK(cell->ch == 0xE9 && (cell->attr & TERM_ATTR_REVERSE), "its text, in reverse video");
+    CHECK(term_view_cell(&c->bars[0].term, 0, 39)->attr & TERM_ATTR_REVERSE, "across the width");
+    CHECK(pixels[0] != TERM_DEFAULT_BG, "drawn at the top");
+    static const char bottom_text[] =
+        "F1 Help  F2 Mode  F3 List  F5 Run  F6 Save  F7 Load\n";  // wider than 40
+    struct con_bar bottom = {CON_BAR_BOTTOM, bottom_text, strlen(bottom_text)};
+    struct con_packet bottom_packet = {CON_BAR, -9, &bottom, sizeof bottom};
+    put(&bottom_packet, 50);
+    service(SIG_MASK(PORT_BIT));
+    CHECK(bottom_packet.result == 0 && c->term.rows == rows - 2 &&
+              c->bars[1].render.y == (int32_t)(8 + (rows - 2) * 8),
+          "a bottom bar below the grid's last row (%d)", (int)c->bars[1].render.y);
+    CHECK(term_view_cell(&c->bars[1].term, 0, 39)->ch == 'a' &&  // "... F6 Sa|ve"
+              term_view_cell(&c->bars[1].term, 0, 38)->ch == 'S' &&
+              term_view_cell(&c->bars[1].term, 0, 0)->ch == 'F',
+          "a long text cut at the width, not wrapped");
+    static const char clear[] = "\x1b[2J\x1b[Hcleared";
+    console_write(c, clear, strlen(clear));
+    CHECK(term_view_cell(&c->bars[0].term, 0, 0)->ch == 'T', "the grid's output leaves the bars alone");
+    struct con_bar again = {CON_BAR_TOP, "Again", 5};
+    struct con_packet again_packet = {CON_BAR, -9, &again, sizeof again};
+    put(&again_packet, 50);
+    damages = 0;
+    service(SIG_MASK(PORT_BIT));
+    CHECK(term_view_cell(&c->bars[0].term, 0, 0)->ch == 'A' &&
+              term_view_cell(&c->bars[0].term, 0, 4)->ch == 'n' &&
+              term_view_cell(&c->bars[0].term, 0, 5)->ch == ' ' && c->term.rows == rows - 2,
+          "new text for a bar shown");
+    CHECK(damages == 1 && damage_y == 0 && damage_height == 8, "only the bar's row redrawn");
+    struct con_bar bad_bar = {7, "x", 1};
+    struct con_packet bad_packet = {CON_BAR, -9, &bad_bar, sizeof bad_bar};
+    put(&bad_packet, 50);
+    struct con_packet short_packet = {CON_BAR, -9, &bad_bar, 3};
+    put(&short_packet, 50);
+    service(SIG_MASK(PORT_BIT));
+    CHECK(bad_packet.result == -1 && short_packet.result == -1, "no such bar, a short packet");
+    struct con_bar top_off = {CON_BAR_TOP, NULL, 0};
+    struct con_packet top_off_packet = {CON_BAR, -9, &top_off, sizeof top_off};
+    put(&top_off_packet, 50);
+    service(SIG_MASK(PORT_BIT));
+    CHECK(top_off_packet.result == 0 && !c->bars[0].shown && c->term.rows == rows - 1 &&
+              c->render.y == 0 && c->bars[1].render.y == (int32_t)((rows - 1) * 8),
+          "the top bar taken away: the grid at the top again");
+    struct con_bar bottom_off = {CON_BAR_BOTTOM, NULL, 0};
+    struct con_packet bottom_off_packet = {CON_BAR, -9, &bottom_off, sizeof bottom_off};
+    put(&bottom_off_packet, 50);
+    service(SIG_MASK(PORT_BIT));
+    CHECK(!c->bars[1].shown && c->term.rows == rows, "both gone: the grid has its rows back");
+
+    // Raw again, as before, with reads left waiting, which closing the
+    // console answers (test_close).
+    struct con_packet raw_again = {CON_MODE, -9, NULL, CON_RAW};
+    put(&raw_again, 50);
+    service(SIG_MASK(PORT_BIT));
+    static char left[8][8];
+    static struct con_packet waiting[8];
+    for (int i = 0; i < 8; i++) {
+        waiting[i] = (struct con_packet){CON_READ, -9, left[i], sizeof left[i]};
+        put(&waiting[i], 50);
+    }
+    service(SIG_MASK(PORT_BIT));
+}
+
 static void test_fonts(void) {
     make_font();
     for (int i = 0; i < WIDTH * HEIGHT; i++) {
@@ -501,6 +679,7 @@ static void test_close(void) {
     fake_set_handler(NULL);
 }
 
-TEST_MAIN(setup, test_writes, test_reads, test_modes_and_keys, test_fonts, test_run,
+TEST_MAIN(setup, test_writes, test_reads, test_modes_and_keys, test_events_and_bars, test_fonts,
+          test_run,
           test_manager_ends,
           test_close)
