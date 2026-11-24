@@ -36,9 +36,13 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
     set(USER_HEADER_MANIFEST "${CMAKE_CURRENT_BINARY_DIR}/userfs-headers.txt")
     string(JOIN "\n" _headers ${USER_HEADERS})
     file(GENERATE OUTPUT "${USER_HEADER_MANIFEST}" CONTENT "${_headers}\n")
+    # A program's main thread has one 4 KB page of stack, and nothing below it
+    # is protected: a larger frame writes over kernel memory. No function may
+    # take more than half of it (large buffers go in static storage).
     set(USER_COMPILE_FLAGS
         --target=aarch64-none-elf -mcpu=cortex-a72 -ffreestanding -nostdlib
         -fno-builtin -fno-stack-protector -fPIE -O2 -Wall
+        -Wframe-larger-than=2048 -Werror=frame-larger-than
         "-I${USER_DIR}" -isystem "${USER_DIR}/libc/includes")
     # Preserve ET_DYN, classic DT_RELA relocations and 4 KiB segment alignment.
     set(USER_LINK_FLAGS

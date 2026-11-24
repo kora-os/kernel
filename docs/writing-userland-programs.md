@@ -46,7 +46,11 @@ A program runs in EL0 with a deliberately small runtime:
   friends). `strtold` and `%Lf` work at double precision.
 - **A ~4 KB stack.** A program's main thread gets a single-page user stack
   (other threads get 16 KB), so keep large buffers off the stack (use `malloc`,
-  or static arrays).
+  or static arrays). Nothing protects what lies below it: a larger frame
+  writes over kernel memory and the kernel faults later, somewhere else. The
+  build refuses a function whose frame passes 2 KB
+  (`-Wframe-larger-than=2048`); a path (`KORA_PATH_MAX`, 4128 bytes) alone
+  passes it.
 - **A heap that grows with the system's free memory.** `malloc`, `free`,
   `calloc` and `realloc` (16-byte aligned) come from the libc
   ([`user/libc/src/stdlib/malloc.c`](../user/libc/src/stdlib/malloc.c)), a
@@ -171,7 +175,8 @@ That is all. `koraos_add_user_program` compiles the source together with libk
 
 ```
 --target=aarch64-none-elf -mcpu=cortex-a72 -ffreestanding -nostdlib
--fno-builtin -fno-stack-protector -fPIE -O2 -isystem user/libc/includes
+-fno-builtin -fno-stack-protector -fPIE -O2 -Wall
+-Wframe-larger-than=2048 -Werror=frame-larger-than -isystem user/libc/includes
 ```
 
 Extra flags for one program go after `FLAGS`, for example

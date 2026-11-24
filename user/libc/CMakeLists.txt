@@ -58,11 +58,13 @@ target_include_directories(koraos_libc PRIVATE "${LIBC_INTERNAL_DIR}")
 # Position independent (it links into PIE user programs) and allowed to use
 # FP/SIMD: the kernel switches those registers lazily per task. There is no
 # compiler-rt, so libc code must not do arithmetic in long double (binary128);
-# libc_link_check catches it if it does.
+# libc_link_check catches it if it does. A program's main thread has one 4 KB
+# page of stack and nothing below it is protected, so no function may take
+# more than half of it (as for the programs, cmake/userfs.cmake).
 set(LIBC_TARGET_FLAGS
     --target=aarch64-none-elf -mcpu=cortex-a72
     -ffreestanding -nostdlib -fno-builtin -fno-stack-protector -fPIE
-    -std=c11 -O2 -Wall -Wextra -Werror)
+    -std=c11 -O2 -Wall -Wextra -Werror -Wframe-larger-than=2048)
 target_compile_options(koraos_libc PRIVATE ${LIBC_TARGET_FLAGS})
 
 # The user program link flags (cmake/userfs.cmake), with the whole archive
