@@ -256,18 +256,6 @@ categories:
         milestone: 7
         completed: 2026-10-20
         prs: [62]
-      - id: basic
-        name: BASIC
-        status: wish
-        description: A built-in BASIC interpreter in the home-computer tradition.
-      - id: python
-        name: MicroPython
-        status: planned
-        description: MicroPython as the built-in scripting language, with a kora module over the OS API.
-      - id: koracli
-        name: koracli
-        status: planned
-        description: A full-screen shell with a menu and a status bar.
       - id: line-editing
         name: Console line editing
         status: completed
@@ -280,6 +268,85 @@ categories:
         description: Ctrl+C stops the program in the foreground of a console.
         completed: 2026-11-23
         prs: [106, 108]
+
+  # KoraCLI: project_doc/koracli-spec.md (what it is), koracli-plan.md (the
+  # steps), docs/koracli.md (the user reference).
+  - id: koracli
+    name: KoraCLI
+    description: The shell the machine starts in, like switching on a home computer, with Python, two BASIC dialects and OS commands at one prompt.
+    features:
+      - id: koracli
+        name: KoraCLI shell
+        status: planned
+        description: The fullscreen shell on its own screen, with a top bar, a mode indicator and function-key labels; it replaces the shell.
+      - id: python
+        name: MicroPython
+        status: planned
+        description: MicroPython ported to KoraOS, KoraCLI's main language, with a kora module over the OS API.
+      - id: koracli-console
+        name: KoraCLI console
+        status: planned
+        description: The console task behind KoraCLI, with bars outside the text grid and keys delivered as events.
+      - id: koracli-python-mode
+        name: Python mode
+        status: planned
+        description: A Python prompt with multi-line blocks, block history and one-character prefixes for BASIC lines and OS commands.
+      - id: koracli-os-commands
+        name: OS commands from Python
+        status: planned
+        description: Run or capture programs with !cmd and kora.run, and add commands as Python wrappers.
+      - id: koracli-os-mode
+        name: OS mode
+        status: planned
+        description: A plain command shell with redirection, background jobs and core pinning, everything the shell before it had.
+      - id: basic
+        name: Classic BASIC
+        status: planned
+        description: A line-numbered BASIC in the tradition of the Commodore 64, MSX and GW-BASIC.
+      - id: bbc-basic
+        name: BBC BASIC
+        status: planned
+        description: A second dialect modelled on BBC BASIC V, with PROC, FN, multi-line IF and star commands.
+      - id: koracli-shared-variables
+        name: Shared variables
+        status: planned
+        description: Python and BASIC see the same variables, with BASIC's type suffixes mapped to Python types.
+      - id: koracli-machine-access
+        name: Machine access
+        status: planned
+        description: PEEK, POKE, indirection operators, SYS and a GPIO layer, from BASIC and from Python.
+      - id: koracli-graphics
+        name: Graphics and sound
+        status: planned
+        description: One graphics and sound library for both languages, drawing on a screen of its own.
+      - id: koracli-screen-editor
+        name: Full-screen editor
+        status: planned
+        description: A C64-style editor where Enter on any line on the screen enters it again.
+      - id: koracli-help
+        name: Help
+        status: planned
+        description: HELP in BASIC, help() and ? in Python, from one source, and later F1 context help.
+      - id: koracli-startup
+        name: Startup file and configuration
+        status: planned
+        description: A Python startup file and settings for dialect, mode, editor style and function keys.
+      - id: koracli-jobs
+        name: Job objects
+        status: planned
+        description: Background jobs as Python objects, with jobs and fg.
+      - id: basic-transpiler
+        name: BASIC transpiler
+        status: planned
+        description: A BASIC program compiled to Python on its first run and cached, for speed.
+      - id: koracli-graphics-layer
+        name: Graphics over the console
+        status: wish
+        description: Graphics composited over KoraCLI's text with transparency, possibly on the GPU.
+      - id: other-basics
+        name: Other BASICs
+        status: wish
+        description: BASICs without line numbers, such as QBasic or AmigaBASIC, as applications of their own.
 
   - id: storage
     name: Storage and filesystems
