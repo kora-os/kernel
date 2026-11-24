@@ -223,8 +223,9 @@ flowchart TB
         keylog shows them.
   - [x] 5b. The screen manager: a pointer over the front screen, hidden while
         typing, and mouse events to the program in front.
-  - Then fonts (PSF2, a `font` command, consoles that resize), before
-    koracli; the graphics layer after.
+  - [x] Fonts: PSF2, a `font` command, consoles that resize. Cells that
+        hold Unicode code points follow, then koracli; the graphics layer
+        after.
 
 ## Step 1 as built
 
@@ -613,6 +614,33 @@ would write into pages that may belong to another program by then.
   timer); no pointer shape for programs to choose; xterm mouse reporting for
   programs in a console; selecting text.
 
+## Fonts as built
+
+- **PSF2 at run time** (`user/libconsole/font.c`, pure and host-tested): a
+  font is a set of bitmaps of one cell size, up to 32x64, rows of whole
+  bytes. The built-in 8x8 font is one too. A PSF2 font's Unicode table
+  names the glyph for each cell code (ASCII and the `TERM_GLYPH_*`
+  symbols, through their code points); ASCII it lacks shows its '?', a
+  symbol it lacks is the built-in one scaled to the cell, so lines join.
+- **The renderer** draws cells of any font's size: bold, underline,
+  strike and the cursors scale with it.
+- **Consoles resize** (`term_resize`): each line keeps its left part; with
+  fewer rows the cursor's line and the text above it stay at the bottom and
+  the rest goes to the scrollback, which keeps its capacity. The margins
+  and the view are reset. `term_host_t` has a `free` for the old buffers.
+- **A `CON_FONT` packet** carries a PSF2 file (or NULL, the built-in font)
+  to a console handler, which copies it before it replies (the sender's
+  memory is lent only until then) and resizes. libk's `console_font()`
+  sends it on stdout; the `font` tool lists `sys:fonts` and loads
+  `sys:fonts/NAME.psf` or a path.
+- **The fonts** are Spleen's (BSD 2-Clause), vendored as BDF
+  (`third_party/spleen`) and converted at build time by
+  `scripts/bdf2psf.py`: 5x8, 6x12, 8x16, 12x24 and 16x32.
+- **Not yet**: cells holding Unicode code points (accents, more symbols:
+  the next step), a default other than 8x8 (issue #113), a `fonts:` assign,
+  the font chosen at a console's start, the kernel console's font, bold
+  fonts.
+
 ## Safety net
 
 If the screen manager crashes, the screen is lost. The kernel reclaims the
@@ -621,8 +649,8 @@ is today.
 
 ## Open decisions
 
-- Font format for the first glyph provider (PSF2 or BDF), and whether
-  FreeType is added at all.
+- Whether FreeType is added at all (PSF2 at run time, BDF as the source,
+  is decided and built).
 - How the library is shared once static linking is not enough.
 - Whether boot text stays on screen in the long run or only the log ring.
 - Milestone number. `roadmap.md` has an unnumbered section and

@@ -365,7 +365,10 @@ are in [`<_libc/console.h>`](../user/libc/includes/_libc/console.h), which
   a buffer, a length) on a reply port of its own, and takes the `result` the
   handler fills in before replying, as AmigaOS DOS packets. `CON_MODE`
   (`length` = `CON_COOKED` or `CON_RAW`) switches a console's input mode:
-  libk's `console_mode()` sends it for stdin. `isatty(0..2)`
+  libk's `console_mode()` sends it for stdin. `CON_FONT` (`buf` a PSF2 font
+  of `length` bytes, which the handler copies, or NULL for its built-in
+  font) changes a console's font, and with it its size in characters:
+  libk's `console_font()` sends it for stdout. `isatty(0..2)`
   (libk) says whether a standard stream is a console, the kernel's or a
   handler's. Raw `read(0)` and `write(1)` still reach the kernel console.
 
@@ -440,9 +443,10 @@ struct spawn_request {     /* spawn_std()'s one argument */
 #define CON_WRITE 1
 #define CON_READ 2
 #define CON_MODE 3         /* length: CON_COOKED (0) or CON_RAW (1) */
+#define CON_FONT 4         /* buf, length: a PSF2 font, or NULL for the built-in one */
 
 struct con_packet {        /* the libc to a console handler */
-    int op;                /* CON_WRITE or CON_READ */
+    int op;                /* CON_WRITE, CON_READ, CON_MODE or CON_FONT */
     long result;           /* the handler's answer: bytes, 0 at end, or -1 */
     void *buf;
     unsigned long length;

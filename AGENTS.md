@@ -90,6 +90,12 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
   itself there) serves its programs' packets; line editing is `user/libconsole/edit.c` and key bytes
   `keys.c`, both pure (built into the kernel too, like `term.c`) and tested
   on the host (`tests/host/edit_test.c`).
+- Fonts (`user/libconsole/font.c`): the built-in 8x8 font or PSF2. A
+  console takes one through a `CON_FONT` packet (libk `console_font`, the
+  `font` tool) and resizes (`term_resize`). The fonts in `sys:fonts` are
+  Spleen's BDFs (`third_party/spleen`), converted by `scripts/bdf2psf.py`
+  at build time. Cells still hold ASCII and the `TERM_GLYPH_*` symbols;
+  Unicode cells come next.
 - The serial line is the kernel debug console (on QEMU too). With `conlog on`
   (the default under QEMU) it carries a copy of what the consoles show, and
   the debug console neither echoes nor prompts; `type TEXT` and `key NAME`

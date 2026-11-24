@@ -115,7 +115,11 @@ A program runs in EL0 with a deliberately small runtime:
   (arrows, Home/End, history with Up/Down) and a read gets it once Enter is
   pressed, with Ctrl+D as the end of input. `console_mode(CON_RAW)` hands
   your program each key as typed instead, unechoed (arrows as xterm escape
-  sequences), and `console_mode(CON_COOKED)` goes back. Ctrl+C ends the
+  sequences), and `console_mode(CON_COOKED)` goes back.
+  `console_font(psf, size)` draws the console your stdout is in a PSF2
+  font (NULL: the built-in 8x8 one), as the `font` command does; the
+  console resizes, so ask for its size again (`ESC [ 18 t`) if you lay
+  text out by it. Ctrl+C ends the
   program: the shell kills the one it runs in front, newcon its own. On the
   kernel console these do nothing: it is always raw, with no
   editing at all.
