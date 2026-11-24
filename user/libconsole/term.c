@@ -72,42 +72,38 @@ uint32_t term_glyph_codepoint(uint8_t code) {
     return glyph_codepoints[code - 0x80];
 }
 
-// DEC special graphics (ESC ( 0) for 0x5F..0x7E. Symbols the font lacks fall
-// back to a close ASCII character.
-static const uint8_t dec_graphics[0x7F - 0x5F] = {
-    ' ',                  // _ blank
-    TERM_GLYPH_DIAMOND,   // `
-    TERM_GLYPH_CHECKER,   // a
-    '?', '?', '?', '?',   // b c d e: HT FF CR LF symbols
-    TERM_GLYPH_DEGREE,    // f
-    TERM_GLYPH_PLUSMINUS, // g
-    '?', '?',             // h i: NL VT symbols
-    TERM_GLYPH_LRCORNER,  // j
-    TERM_GLYPH_URCORNER,  // k
-    TERM_GLYPH_ULCORNER,  // l
-    TERM_GLYPH_LLCORNER,  // m
-    TERM_GLYPH_CROSS,     // n
-    TERM_GLYPH_HLINE,     // o scan line 1
-    TERM_GLYPH_HLINE,     // p scan line 3
-    TERM_GLYPH_HLINE,     // q scan line 5 (horizontal line)
-    TERM_GLYPH_HLINE,     // r scan line 7
-    TERM_GLYPH_HLINE,     // s scan line 9
-    TERM_GLYPH_LTEE,      // t
-    TERM_GLYPH_RTEE,      // u
-    TERM_GLYPH_BTEE,      // v
-    TERM_GLYPH_TTEE,      // w
-    TERM_GLYPH_VLINE,     // x
-    '<', '>',             // y z: less/greater-or-equal
-    '?', '#', 'L',        // { | }: pi, not-equal, pound
-    TERM_GLYPH_BULLET,    // ~
+// DEC special graphics (ESC ( 0) for 0x5F..0x7E, as code points.
+static const uint16_t dec_graphics[0x7F - 0x5F] = {
+    ' ',     // _ blank
+    0x25C6,  // ` diamond
+    0x2592,  // a checkerboard
+    0x2409, 0x240C, 0x240D, 0x240A,  // b c d e: HT FF CR LF symbols
+    0x00B0,  // f degree
+    0x00B1,  // g plus-minus
+    0x2424, 0x240B,  // h i: NL VT symbols
+    0x2518,  // j lower right corner
+    0x2510,  // k upper right corner
+    0x250C,  // l upper left corner
+    0x2514,  // m lower left corner
+    0x253C,  // n crossing lines
+    0x23BA,  // o scan line 1
+    0x23BB,  // p scan line 3
+    0x2500,  // q scan line 5 (horizontal line)
+    0x23BC,  // r scan line 7
+    0x23BD,  // s scan line 9
+    0x251C,  // t left tee
+    0x2524,  // u right tee
+    0x2534,  // v bottom tee
+    0x252C,  // w top tee
+    0x2502,  // x vertical line
+    0x2264, 0x2265,  // y z: less/greater-or-equal
+    0x03C0, 0x2260, 0x00A3,  // { | }: pi, not-equal, pound
+    0x00B7,  // ~ centred dot
 };
 
-// A decoded Unicode code point -> glyph. Box drawing (light, heavy, double and
-// rounded variants all map to the single-line glyphs), blocks and a few
-// symbols; anything else outside ASCII shows as '?'.
-static uint8_t unicode_glyph(uint32_t cp) {
-    if (cp < 0x80) {
-        return (uint8_t)cp;
+uint8_t term_symbol(uint32_t cp) {
+    if (cp >= 0x23BA && cp <= 0x23BD) {
+        return TERM_GLYPH_HLINE;  // the scan lines
     }
     if (cp >= 0x2500 && cp <= 0x257F) {
         // Straight lines: solid, dashed (2504..250B and 254C..254F come in
@@ -148,7 +144,7 @@ static uint8_t unicode_glyph(uint32_t cp) {
         if ((cp >= 0x253C && cp <= 0x254B) || (cp >= 0x256A && cp <= 0x256C)) {
             return TERM_GLYPH_CROSS;
         }
-        return '?';
+        return 0;
     }
     switch (cp) {
     case 0x00A0: return ' ';
@@ -158,7 +154,7 @@ static uint8_t unicode_glyph(uint32_t cp) {
     case 0x2588: return TERM_GLYPH_BLOCK;
     case 0x2591: case 0x2592: case 0x2593: return TERM_GLYPH_CHECKER;
     case 0x25C6: case 0x2666: return TERM_GLYPH_DIAMOND;
-    default: return '?';
+    default: return 0;
     }
 }
 
@@ -392,7 +388,7 @@ static void restore_cursor(term_t *t) {
 
 // --- Printing -----------------------------------------------------------------
 
-static void put_glyph(term_t *t, uint8_t glyph) {
+static void put_glyph(term_t *t, uint32_t glyph) {
     if (t->wrap_pending) {
         t->col = 0;
         index_down(t);
@@ -992,6 +988,24 @@ static void control(term_t *t, uint8_t b) {
     }
 }
 
+// Characters that take no cell of their own: combining marks (which this
+// terminal cannot stack on the character before), zero-width spaces and
+// joiners, variation selectors.
+static bool zero_width(uint32_t cp) {
+    return (cp >= 0x0300 && cp <= 0x036F) || (cp >= 0x200B && cp <= 0x200F) ||
+           (cp >= 0x2060 && cp <= 0x2064) || (cp >= 0xFE00 && cp <= 0xFE0F) || cp == 0xFEFF;
+}
+
+// A decoded code point: printed, dropped (zero width, C1 controls), or '?'
+// when it was not one (overlong, a surrogate, past U+10FFFF).
+static void put_code_point(term_t *t, uint32_t cp, uint32_t min) {
+    if (cp < min || (cp >= 0xD800 && cp <= 0xDFFF) || cp > 0x10FFFF) {
+        put_glyph(t, '?');
+    } else if (!zero_width(cp) && !(cp >= 0x80 && cp <= 0x9F)) {
+        put_glyph(t, cp);
+    }
+}
+
 static void ground(term_t *t, uint8_t b) {
     if (b < 0x80) {
         if (t->utf8_left != 0) {
@@ -1004,7 +1018,7 @@ static void ground(term_t *t, uint8_t b) {
     if (t->utf8_left != 0 && (b & 0xC0) == 0x80) {
         t->utf8_cp = (t->utf8_cp << 6) | (b & 0x3F);
         if (--t->utf8_left == 0) {
-            put_glyph(t, unicode_glyph(t->utf8_cp));
+            put_code_point(t, t->utf8_cp, t->utf8_min);
         }
         return;
     }
@@ -1015,12 +1029,15 @@ static void ground(term_t *t, uint8_t b) {
     if (b >= 0xC2 && b <= 0xDF) {
         t->utf8_cp = b & 0x1F;
         t->utf8_left = 1;
+        t->utf8_min = 0x80;
     } else if (b >= 0xE0 && b <= 0xEF) {
         t->utf8_cp = b & 0x0F;
         t->utf8_left = 2;
+        t->utf8_min = 0x800;
     } else if (b >= 0xF0 && b <= 0xF4) {
         t->utf8_cp = b & 0x07;
         t->utf8_left = 3;
+        t->utf8_min = 0x10000;
     } else {
         put_glyph(t, '?');  // stray continuation or invalid byte
     }

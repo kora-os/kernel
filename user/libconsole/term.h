@@ -42,7 +42,8 @@
 #define TERM_ATTR_REVERSE 0x04
 #define TERM_ATTR_STRIKE 0x08
 
-// Glyph codes >= 0x80 are line-drawing and symbol glyphs (see term_glyph()).
+// The built-in font's symbols beyond ASCII (term_glyph()): the characters a
+// cell may hold that it draws from these, through term_symbol().
 enum {
     TERM_GLYPH_HLINE = 0x80,
     TERM_GLYPH_VLINE,
@@ -65,10 +66,10 @@ enum {
 };
 
 typedef struct {
-    uint32_t fg;   // resolved 0x00RRGGBB
+    uint32_t fg;          // resolved 0x00RRGGBB
     uint32_t bg;
-    uint8_t ch;    // ASCII, or a TERM_GLYPH_* code
-    uint8_t attr;  // TERM_ATTR_*
+    uint32_t ch : 24;     // a Unicode code point
+    uint32_t attr : 8;    // TERM_ATTR_*
 } term_cell_t;
 
 // A pen colour: the terminal default, a palette index (0..255), or 24-bit RGB.
@@ -139,7 +140,7 @@ typedef struct {
     term_pen_t pen;
     uint8_t charset[2];     // G0/G1: 'B' ASCII or '0' DEC special graphics
     uint8_t gl;             // which of G0/G1 is active (SI/SO)
-    uint8_t last_glyph;     // for REP
+    uint32_t last_glyph;    // the last character printed, for REP
 
     // Modes.
     bool autowrap;          // DECAWM
@@ -164,6 +165,7 @@ typedef struct {
     bool colon;             // ':' separators seen (SGR 38:2::r:g:b form)
     uint8_t charset_slot;   // which G-set an ESC ( / ESC ) designates
     uint32_t utf8_cp;
+    uint32_t utf8_min;      // the least code point its length may encode
     uint8_t utf8_left;
 } term_t;
 
@@ -203,3 +205,8 @@ const uint8_t *term_glyph(uint8_t code);
 // The Unicode code point a TERM_GLYPH_* code stands for (U+2500 for
 // TERM_GLYPH_HLINE...), for fonts that name their glyphs by code point.
 uint32_t term_glyph_codepoint(uint8_t code);
+
+// The built-in symbol that stands for a code point: a TERM_GLYPH_* code (the
+// heavy, double and rounded box-drawing lines all stand for the single
+// ones), ' ' for a no-break space, or 0 when none does.
+uint8_t term_symbol(uint32_t cp);

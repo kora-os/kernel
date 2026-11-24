@@ -223,9 +223,9 @@ flowchart TB
         keylog shows them.
   - [x] 5b. The screen manager: a pointer over the front screen, hidden while
         typing, and mouse events to the program in front.
-  - [x] Fonts: PSF2, a `font` command, consoles that resize. Cells that
-        hold Unicode code points follow, then koracli; the graphics layer
-        after.
+  - [x] Fonts: PSF2, a `font` command, consoles that resize.
+  - [x] Cells that hold Unicode code points. Then koracli; the graphics
+        layer after.
 
 ## Step 1 as built
 
@@ -636,10 +636,31 @@ would write into pages that may belong to another program by then.
 - **The fonts** are Spleen's (BSD 2-Clause), vendored as BDF
   (`third_party/spleen`) and converted at build time by
   `scripts/bdf2psf.py`: 5x8, 6x12, 8x16, 12x24 and 16x32.
-- **Not yet**: cells holding Unicode code points (accents, more symbols:
-  the next step), a default other than 8x8 (issue #113), a `fonts:` assign,
+- **Not yet**: a default other than 8x8 (issue #113), a `fonts:` assign,
   the font chosen at a console's start, the kernel console's font, bold
   fonts.
+
+## Unicode cells as built
+
+- **A cell holds a code point** (24 bits beside the 8 of its attributes,
+  so a cell stays 12 bytes). UTF-8 decodes straight into it; overlong
+  forms, surrogates and code points past U+10FFFF show as '?'. DEC special
+  graphics are their code points (U+2500, U+25C6...), and REP repeats a
+  code point.
+- **No cell for what has no width**: combining marks (U+0300 to U+036F),
+  zero-width spaces and joiners, variation selectors, the BOM, and the C1
+  controls. A combining accent after its letter is lost, not stacked.
+- **A font looks code points up** in a map sorted at load (heapsort, the
+  first glyph for each code point kept), read from its Unicode table; the
+  console allocates it after its copy of the font. What a font lacks:
+  the plain symbol that stands for it (a heavy, double or rounded line is
+  drawn as the single one, `term_symbol`), else the built-in symbol
+  scaled, else the font's '?'. A no-break space is a space.
+- **The built-in 8x8 font** (the kernel's console, and a console's by
+  default) still has only ASCII and its symbols: other characters are '?'.
+- **Not yet**: wide characters (CJK, emoji) take one cell, and Spleen has
+  none of them anyway: they show as '?'. No font has glyphs for every
+  script.
 
 ## Safety net
 

@@ -81,14 +81,20 @@ int console_set_font(console_t *c, const void *psf, size_t size) {
     term_font_t font = term_font_builtin;
     void *data = NULL;
     if (psf != NULL) {
-        /* The font is read from the console's own copy: the sender's memory
-         * is lent only until the reply. */
-        data = malloc(size);
+        /* The font is read from the console's own copy, its map after it:
+         * the sender's memory is lent only until the reply. */
+        long entries = term_font_psf2_entries(psf, size);
+        size_t at = (size + 7) & ~(size_t)7;
+        if (entries < 0 || (size_t)entries > (SIZE_MAX - at) / sizeof(term_font_entry_t)) {
+            return -1;
+        }
+        data = malloc(at + (size_t)entries * sizeof(term_font_entry_t));
         if (data == NULL) {
             return -1;
         }
         memcpy(data, psf, size);
-        if (term_font_psf2(&font, data, size) != 0) {
+        if (term_font_psf2(&font, data, size, (term_font_entry_t *)((char *)data + at),
+                           (size_t)entries) != 0) {
             free(data);
             return -1;
         }

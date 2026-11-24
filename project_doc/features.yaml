@@ -408,9 +408,10 @@ categories:
         prs: [104, 108]
       - id: console-fonts
         name: Console fonts
-        status: in_progress
-        prs: [114]
+        status: completed
         description: Loadable fonts and Unicode text through a glyph provider, beyond the built-in 8x8 font.
+        completed: 2026-11-24
+        prs: [114, 115]
       - id: console-graphics
         name: Console graphics layer
         status: planned

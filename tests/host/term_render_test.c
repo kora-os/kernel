@@ -258,9 +258,10 @@ static bool shows_wide(int x, int y, const uint8_t *glyph, bool bold, int solid_
 }
 
 static void test_font(void) {
+    static const term_font_entry_t wide_map[] = {{'?', 0}, {'A', 1}};
     term_font_t wide = {.width = 12, .height = 4, .row_bytes = 2, .glyph_bytes = 8,
-                        .glyph_count = 2, .glyphs = &wide_glyphs[0][0]};
-    wide.code_glyph['A'] = 1;
+                        .glyph_count = 2, .glyphs = &wide_glyphs[0][0], .map = wide_map,
+                        .map_count = 2};
     start(2, 1);
     CHECK(render.font == &term_font_builtin, "the built-in font by default");
     render.font = &wide;

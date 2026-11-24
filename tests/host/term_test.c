@@ -64,12 +64,12 @@ static void feed(const char *s) {
 }
 
 // Text of a screen row as seen through the view, trailing blanks trimmed.
-// Glyph codes >= 0x80 show as '*'.
+// Code points past ASCII show as '*'.
 static const char *row_text(unsigned row) {
     static char buf[TERM_MAX_COLS + 1];
     unsigned n = 0;
     for (unsigned c = 0; c < t.cols; c++) {
-        uint8_t ch = term_view_cell(&t, row, c)->ch;
+        uint32_t ch = term_view_cell(&t, row, c)->ch;
         buf[n++] = ch >= 0x80 ? '*' : (char)ch;
     }
     while (n > 0 && buf[n - 1] == ' ') {
@@ -218,13 +218,50 @@ static void test_colours(void) {
 }
 
 static void test_utf8_and_line_drawing(void) {
-    start(20, 4);
-    feed("\xc3\xa9x\xe2\x94\x80\x1b(0q\x1b(Bq");
-    CHECK(cell(0, 0)->ch == '?', "U+00E9 shows as one '?'");
+    start(30, 4);
+    feed("\xc3\xa9x\xe2\x94\x80\x1b(0q\x1b(Bq\xe2\x82\xac\xf0\x9f\x98\x80");
+    CHECK(cell(0, 0)->ch == 0xE9, "cells hold code points: U+00E9 (2 bytes)");
     CHECK(cell(0, 1)->ch == 'x', "then x");
-    CHECK(cell(0, 2)->ch == TERM_GLYPH_HLINE, "U+2500 is a horizontal line");
-    CHECK(cell(0, 3)->ch == TERM_GLYPH_HLINE, "DEC graphics q is a horizontal line");
+    CHECK(cell(0, 2)->ch == 0x2500, "U+2500 (3 bytes)");
+    CHECK(cell(0, 3)->ch == 0x2500, "DEC graphics q is U+2500 too");
     CHECK(cell(0, 4)->ch == 'q', "back to ASCII after ESC ( B");
+    CHECK(cell(0, 5)->ch == 0x20AC && cell(0, 6)->ch == 0x1F600, "U+20AC, and U+1F600 (4 bytes)");
+    CHECK(t.col == 7, "one cell each (%u)", t.col);
+
+    // Zero-width characters take no cell; C1 controls are dropped.
+    feed("e\xcc\x81\xe2\x80\x8b\xef\xbb\xbf\xc2\x85!");
+    CHECK(cell(0, 7)->ch == 'e' && cell(0, 8)->ch == '!' && t.col == 9,
+          "a combining acute, a zero-width space, a BOM and NEL take no cell");
+
+    // What is not a code point shows as one '?'.
+    feed("\r\n\xc0\x80\xe0\x80\xaf\xed\xa0\x80\xf4\x90\x80\x80\xe2\x94Z\x80");
+    CHECK(cell(1, 0)->ch == '?' && cell(1, 1)->ch == '?', "an overlong 2-byte form (C0 is a stray byte)");
+    CHECK(cell(1, 2)->ch == '?', "an overlong 3-byte form");
+    CHECK(cell(1, 3)->ch == '?', "a surrogate");
+    CHECK(cell(1, 4)->ch == '?', "past U+10FFFF");
+    CHECK(cell(1, 5)->ch == '?' && cell(1, 6)->ch == 'Z', "a sequence cut short, then what cut it");
+    CHECK(cell(1, 7)->ch == '?' && t.col == 8, "a stray continuation byte");
+
+    // REP repeats a code point; DEC graphics are code points of their own.
+    feed("\r\n\xc3\xa9\x1b[2b\x1b(0`afgjklmnopqrstuvwxyz{|}~\x1b(B");
+    CHECK(cell(2, 0)->ch == 0xE9 && cell(2, 1)->ch == 0xE9 && cell(2, 2)->ch == 0xE9,
+          "REP repeats U+00E9");
+    feed("\x1b[4;1H\xe2\x82\xac\x1b[1b");
+    CHECK(cell(3, 0)->ch == 0x20AC && cell(3, 1)->ch == 0x20AC, "and U+20AC, past 8 bits");
+    static const uint32_t dec[] = {0x25C6, 0x2592, 0x00B0, 0x00B1, 0x2518, 0x2510, 0x250C,
+                                   0x2514, 0x253C, 0x23BA, 0x23BB, 0x2500, 0x23BC, 0x23BD,
+                                   0x251C, 0x2524, 0x2534, 0x252C, 0x2502, 0x2264, 0x2265,
+                                   0x03C0, 0x2260, 0x00A3, 0x00B7};
+    bool same = true;
+    for (unsigned i = 0; i < sizeof(dec) / sizeof(dec[0]); i++) {
+        same = same && cell(2, 3 + i)->ch == dec[i];
+    }
+    CHECK(same, "DEC special graphics ` a f..~ as their code points");
+
+    CHECK(term_symbol(0x2501) == TERM_GLYPH_HLINE && term_symbol(0x2551) == TERM_GLYPH_VLINE &&
+              term_symbol(0x256D) == TERM_GLYPH_ULCORNER && term_symbol(0x23BA) == TERM_GLYPH_HLINE &&
+              term_symbol(0xA0) == ' ' && term_symbol(0xE9) == 0 && term_symbol('A') == 0,
+          "term_symbol: heavy, double and rounded lines stand for single ones; nothing for letters");
 }
 
 static void test_modes_and_misc(void) {

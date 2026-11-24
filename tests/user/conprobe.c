@@ -8,6 +8,8 @@
 //                   to raw mode and reports the bytes of the next 4 keys
 //                   ("conprobe: raw 71 1b 5b 41 ..."), and "conprobe: done"
 //   conprobe hang   reports "conprobe: hanging" and sleeps until killed
+//   conprobe utf8   clears its console and prints "\u00e9\u2500\u20ac\u00fc" (e acute,
+//                   a box line, the euro sign, u umlaut) in its top left cells
 //   conprobe size   asks its console for its size in characters (CSI 18 t,
 //                   answered in raw mode as typed input) and reports
 //                   "conprobe: size COLSxROWS" ("conprobe: no size" if the
@@ -25,6 +27,11 @@ int main(int argc, char **argv) {
         for (;;) {
             msleep(1000);
         }
+    }
+    if (argc > 1 && !strcmp(argv[1], "utf8")) {
+        fputs("\x1b[H\x1b[2J\xc3\xa9\xe2\x94\x80\xe2\x82\xac\xc3\xbc\n", stdout);
+        fflush(stdout);
+        return 0;
     }
     if (argc > 1 && !strcmp(argv[1], "size")) {
         console_mode(CON_RAW);
