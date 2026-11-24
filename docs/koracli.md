@@ -6,7 +6,8 @@ Python, a line of BASIC or an OS command, and see what happens.
 > **Status: not available yet.** This reference is written ahead of the
 > implementation and grows with it. Each section says whether what it
 > describes works today or which step brings it. So far only MicroPython
-> itself runs, as a program of its own (see Python mode). The
+> itself runs, as a program of its own, with files, `os` and Ctrl+C (see
+> Python mode). The
 > design behind it is `project_doc/koracli-spec.md`, and the steps are in
 > `project_doc/koracli-plan.md`. Every change to KoraCLI updates this page in
 > the same pull request.
@@ -98,22 +99,42 @@ Things to know:
 
 KoraCLI's Python is MicroPython.
 
-**Today (step 0a):** type `micropython` in the shell for MicroPython's own
-REPL, on the shell's console. It is not KoraCLI yet: none of the editing
-below, no bars, no prefixes. What it has:
+**Today (steps 0a and 0b):** type `micropython` in the shell for
+MicroPython's own REPL, on the shell's console, or `micropython script.py
+args` to run a script. It is not KoraCLI yet: none of the editing below, no
+bars, no prefixes. What it has:
 
 - MicroPython v1.29.0's core language, with integers of any size, floats
   (double precision; `repr` gives the shortest form that reads back almost
-  always, not always) and Unicode strings, and the `math` and `sys`
-  modules.
+  always, not always) and Unicode strings. Tracebacks give line numbers.
 - MicroPython's line editor: Left, Right, Home, End, Backspace, Delete, Up
   and Down for the history, Tab to complete a name, and an indented block
   continued after `...` (auto-indent).
 - Ctrl+D on an empty line ends it. Ctrl+E is paste mode, Ctrl+A and Ctrl+B
   the raw REPL and back (for tools).
-- Not yet: Ctrl+C ends the program instead of raising `KeyboardInterrupt`,
-  and there are no files (`import` of a module from disk, `open`), no `os`
-  and no `time` (step 0b).
+- **Ctrl+C** raises `KeyboardInterrupt` in running code, `time.sleep` and
+  `input()` included; at the prompt it drops the line. Code stuck where
+  Python cannot see the break (a long calculation inside one call, such as
+  `2 ** 100000000`) ends at a second Ctrl+C, as any program does.
+- **Files:** `open(path, mode)` with `r`, `w`, `a`, `x`, `b` and `+`; read,
+  readline, readlines, write, seek, tell, iteration by line, `with`. Paths
+  are KoraOS's: relative, or with a volume or an assign (`sys:python/x.py`,
+  `df0:notes.txt`).
+- **Modules:** `import` finds `.py` files in `sys.path`: the script's
+  directory (the current one at the REPL), then `sys:python`. Built in:
+  `sys` (`argv`, `path`, `exit`), `math`, `gc`, `time` (`sleep`,
+  `sleep_ms`, `sleep_us`, `ticks_ms`, `ticks_us`, `ticks_diff`, `ticks_add`;
+  no wall clock yet), `os` and `kora`.
+- **`os`:** `listdir`, `stat` (the type and the size; times are 0), `mkdir`,
+  `rmdir`, `remove`, `rename`, `getcwd`, `chdir` and `sync`. A failure is
+  `OSError` with the most likely error number: KoraOS does not say why a
+  call failed yet.
+- **`kora`:** `uptime()` (seconds since boot), `volumes()` (a `(device,
+  label, boot, read_only)` tuple each) and `assigns()` (a `(name, target)`
+  tuple each). Running commands comes with OS mode.
+- The heap grows as a program needs it and shrinks again. A script's exit
+  code is 0, 1 for an exception, 130 for an uncaught `KeyboardInterrupt`, or
+  what `sys.exit()` gave.
 
 - An indented block continues on the next line with the `...` prompt.
 - One blank line inside a block stays part of it, so a function can contain

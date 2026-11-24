@@ -33,6 +33,7 @@ Options:
   --bindir DIR       Install DIR/*.elf into /bin (suffix stripped)
   --programs-file FILE  Install only the ELF paths listed in FILE, one per line
   --fonts-file FILE  Install the font files listed in FILE, one per line, into /fonts
+  --tests-file FILE  Install the test files listed in FILE, one per line, into /tests
   -h, --help         Show this message
 EOF
 }
@@ -46,6 +47,7 @@ volume_label="KORAOS"
 bindir=""
 programs_file=""
 fonts_file=""
+tests_file=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -67,6 +69,9 @@ while [[ $# -gt 0 ]]; do
   --fonts-file)
     shift; [[ $# -gt 0 ]] || { echo "Missing value for --fonts-file" >&2; exit 1; }
     fonts_file="$1" ;;
+  --tests-file)
+    shift; [[ $# -gt 0 ]] || { echo "Missing value for --tests-file" >&2; exit 1; }
+    tests_file="$1" ;;
   --programs-file)
     shift; [[ $# -gt 0 ]] || { echo "Missing value for --programs-file" >&2; exit 1; }
     programs_file="$1" ;;
@@ -150,6 +155,17 @@ if [[ -n "$fonts_file" ]]; then
     [[ -f "$font" ]] || { echo "Missing font: $font" >&2; exit 1; }
     mcopy -Q -i "$image_temp" "$font" "::/fonts/$(basename "$font")"
   done < "$fonts_file"
+fi
+
+if [[ -n "$tests_file" ]]; then
+  [[ -f "$tests_file" ]] || { echo "Missing test manifest: $tests_file" >&2; exit 1; }
+  echo "Installing test files into /tests"
+  mmd -i "$image_temp" ::/tests 2>/dev/null || true
+  while IFS= read -r test || [[ -n "$test" ]]; do
+    [[ -n "$test" ]] || continue
+    [[ -f "$test" ]] || { echo "Missing test file: $test" >&2; exit 1; }
+    mcopy -Q -i "$image_temp" "$test" "::/tests/$(basename "$test")"
+  done < "$tests_file"
 fi
 
 echo "Contents:"

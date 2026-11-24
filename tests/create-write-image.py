@@ -59,23 +59,30 @@ def create_image(userfs, output):
         validate_output(userfs, output, registered)
         manifest = temporary / "programs.txt"
         manifest.write_text("".join(str(elf) + "\n" for elf in registered))
-        # The fonts (sys:fonts), as the shared image has them.
-        fonts_dir = temporary / "fonts"
-        fonts_dir.mkdir()
-        listed = subprocess.run(["mdir", "-b", "-i", str(shared), "::/fonts"], text=True,
-                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
-        fonts = []
-        for path in listed.stdout.splitlines() if listed.returncode == 0 else []:
-            name = path.rsplit("/", 1)[-1]
-            if path.endswith("/") or not name or name in (".", ".."):
-                continue
-            subprocess.run(["mcopy", "-i", str(shared), path, str(fonts_dir / name)], check=True)
-            fonts.append(fonts_dir / name)
-        fonts_manifest = temporary / "fonts.txt"
-        fonts_manifest.write_text("".join(str(font) + "\n" for font in fonts))
+        # The fonts (sys:fonts) and the test files (sys:tests), as the shared
+        # image has them.
+        def copy_directory(directory):
+            target = temporary / directory
+            target.mkdir()
+            listed = subprocess.run(["mdir", "-b", "-i", str(shared), "::/" + directory], text=True,
+                                    stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+            files = []
+            for path in listed.stdout.splitlines() if listed.returncode == 0 else []:
+                name = path.rsplit("/", 1)[-1]
+                if path.endswith("/") or not name or name in (".", ".."):
+                    continue
+                subprocess.run(["mcopy", "-i", str(shared), path, str(target / name)], check=True)
+                files.append(target / name)
+            listing = temporary / (directory + ".txt")
+            listing.write_text("".join(str(f) + "\n" for f in files))
+            return files, listing
+
+        fonts, fonts_manifest = copy_directory("fonts")
+        _, tests_manifest = copy_directory("tests")
         subprocess.run([str(ROOT / "create-fs-image.sh"), "--size", "64", "--volume", "WRITE",
                         "--fsroot", str(ROOT / "fsroot"), "--programs-file", str(manifest),
-                        "--fonts-file", str(fonts_manifest), "--output", str(output)], check=True)
+                        "--fonts-file", str(fonts_manifest), "--tests-file", str(tests_manifest),
+                        "--output", str(output)], check=True)
     if digest(shared) != before:
         raise RuntimeError("immutable shared userfs changed during scratch generation")
     print("scratch root contains %d registered programs and %d fonts; shared SHA256 %s"
