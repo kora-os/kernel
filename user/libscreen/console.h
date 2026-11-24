@@ -23,7 +23,9 @@
  *   }
  *
  * Ctrl+C calls the break callback (console_on_break): a client kills its
- * foreground program there. console_run() does all of that for one program.
+ * foreground program there, or sends it the break. In cooked mode it also
+ * drops the line being typed and ends the oldest waiting read with an empty
+ * line. console_run() does all of that for one program.
  */
 #ifndef LIBSCREEN_CONSOLE_H
 #define LIBSCREEN_CONSOLE_H

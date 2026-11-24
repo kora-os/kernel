@@ -229,6 +229,15 @@ Decisions (2026-11-24):
 - **A second break ends it anyway**: a break that arrives while the
   previous one is still pending ends even a program that has opted in, so a
   stuck one can always be stopped with two presses.
+- **Opting in is `sig_alloc(SIG_BREAK)`** (step 21): bit 0 becomes the one
+  system bit a thread may allocate, by asking for it; `sig_free` opts out.
+  No new syscall. The default action is `sig_send`'s: signals from ports,
+  ends and input claims never end anyone.
+- **Ctrl+C ends a waiting line read** (step 21): the shell opts in, so two
+  presses at an idle prompt would end it. In cooked mode the console drops
+  the line and answers the oldest waiting read with an empty line, after
+  the break; the shell clears the break after each line it reads and prints
+  a new prompt (which it did not before).
 
 What MicroPython's core needs besides, and where it goes:
 

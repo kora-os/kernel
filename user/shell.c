@@ -312,7 +312,8 @@ static int open_redirection(const char *path, int flags) {
 static int end_bit = -1;
 
 // Start a program in front and wait for it: its pid and its exit code, or -1
-// if it did not start. Ctrl+C on the console (the break signal) ends it.
+// if it did not start. Ctrl+C on the console (the break signal) is passed on
+// to it: the kernel ends it, unless it handles breaks (SIG_BREAK in libk).
 static int run_foreground(const char *name, int argc, char **argv, int flags,
                           const struct std_handle *std, int *code) {
     if (end_bit < 0) {
@@ -332,7 +333,9 @@ static int run_foreground(const char *name, int argc, char **argv, int flags,
     }
     for (;;) {
         unsigned got = sig_wait(SIG_MASK(end_bit) | SIG_MASK(SIG_BREAK));
-        if (got & SIG_MASK(SIG_BREAK)) {
+        // The break goes to its main thread; with that one ended (its other
+        // threads still running) there is nobody to take it: end it as before.
+        if ((got & SIG_MASK(SIG_BREAK)) && sig_send(pid, SIG_MASK(SIG_BREAK)) != 0) {
             kill(pid);
         }
         if (waitpid(pid, code, WNOHANG) == pid) {
@@ -348,6 +351,10 @@ static int session(void) {
         fputs("\nKoraOS shell. Type 'help'.\n", stdout);
     }
     end_bit = sig_alloc(-1);
+    // Ctrl+C on the console is a break for the shell, which handles it: it
+    // passes it on to the program in front (run_foreground), and at the
+    // prompt the console ends the line instead.
+    sig_alloc(SIG_BREAK);
 
     char *argv[MAX_ARGV];
 
@@ -357,6 +364,9 @@ static int session(void) {
             fputs("$ ", stdout);
         }
         int got = read_command_line();
+        // A Ctrl+C at the prompt ended the line (an empty one): it was for
+        // nobody, and must not count as a pending break for the next.
+        sig_set(0, SIG_MASK(SIG_BREAK));
         if (got < 0) {
             fputs(console ? "\nbye\n" : "", stdout);
             return 0;

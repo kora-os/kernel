@@ -60,6 +60,9 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
   (`port_signal`) and a child's end (`SPAWN_SIGNAL`), waited for together
   with `sig_wait`. A server waits that way, never by polling. Bit 0 is the
   break (`SIG_BREAK`): Ctrl+C, sent by a console's server (`console_run`).
+  A break from `sig_send` ends its program unless the thread allocated the
+  bit (`sig_alloc(SIG_BREAK)`, as the shell does); a second one arriving
+  while the first is still set ends even that one.
 - stdin, stdout and stderr are per-process handles (`struct std_handle` in
   `proc/task.h`, `<_libc/console.h>`): the kernel console, a file or a console
   handler's port, set at spawn (`spawn_std`). The libc reads them on first

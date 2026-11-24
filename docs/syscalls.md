@@ -278,7 +278,9 @@ several ports, a port and a child, or a port and another thread at once.
   thread has 24. Bit 0 is the break (`SIG_BREAK` in libk): Ctrl+C on a
   console, which the program serving the console sends to the program it
   runs when that program asked for it (`console_run`); the shell does, and
-  ends its foreground program. The others are not used yet.
+  passes it on to its foreground program. Bit 0 is the one system bit a
+  thread may allocate, by asking for it (`-1` never picks it): see the break,
+  below. The others are not used yet.
 - **`sig_free`** frees an allocated bit and clears it; a port tied to it stops
   setting it, the thread's end watches on it (`sig_on_end`) stop, and an input
   claim on it is given back.
@@ -290,7 +292,14 @@ several ports, a port and a child, or a port and another thread at once.
   clears `m`.
 - **`sig_send`** sets signals of any live thread, of any program, waking it if
   it waits for one. A thread id is the pid for a main thread, and the value
-  `thread_create` returns otherwise.
+  `thread_create` returns otherwise. A break (bit 0) has a default action:
+  it ends the thread's program instead, unless the thread allocated bit 0,
+  which says it handles breaks itself. Even then, a break arriving while the
+  previous one is still set (not yet waited for or cleared) ends it, so two
+  presses of Ctrl+C stop a program that is stuck. A program that handles
+  breaks clears the bit once it has seen one (`sig_wait`, or
+  `sig_set(0, SIG_MASK(SIG_BREAK))`); `sig_free(SIG_BREAK)` gives it back its
+  default. Signals set by ports, ends and input claims never end anyone.
 - **`port_signal`** ties one of the program's ports to bit `bit` of the
   calling thread: every message arriving on it (a message, a reply or a
   returned one) sets the bit, and so does one already waiting when it is

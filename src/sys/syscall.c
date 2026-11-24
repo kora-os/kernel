@@ -767,7 +767,7 @@ void syscall_handle(struct trapframe *tf) {
         ret = task_sig_set((uint32_t)a0, (uint32_t)a1);
         break;
     case SYS_sig_send:
-        ret = task_signal((int)a0, (uint32_t)a1);
+        ret = task_send_signal((int)a0, (uint32_t)a1);
         break;
     case SYS_port_signal:
         ret = sys_port_signal((int)a0, (int)a1);

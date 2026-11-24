@@ -498,8 +498,11 @@ flowchart TB
 - **Ctrl+C is a signal.** `console_run` kills its program on Ctrl+C
   (newcon), or sends it `SIG_BREAK`, system bit 0, as `CON:` sends
   `SIGBREAKF_CTRL_C`; the shell waits for its foreground program with
-  `sig_wait` on that bit and the program's end, and kills it on a break. A
-  break at the prompt drops the line and is cleared before the next program.
+  `sig_wait` on that bit and the program's end, and passes a break on to it
+  (`sig_send`), which the kernel turns into its end unless the program
+  handles breaks (libc-plan step 21). A break at the prompt drops the line,
+  ends the shell's read with an empty line (a new prompt) and is cleared
+  before the next program.
 - **init**: with a display, `screens shell`, started again when it ends
   (unless within a second); without one, no shell.
 - **Lending.** A program borrows the display and the keyboard from the
@@ -515,8 +518,7 @@ flowchart TB
 - **The smoke test** drives the shell on its screen; without a display it
   checks that there is no shell and runs the debug console's checks. CI's
   EL2 profiles run with a display, so they keep the shell.
-- **Not yet**: Ctrl+C at the prompt does not print a new prompt (the
-  console drops the line, the shell keeps waiting for one); keys typed while
+- **Not yet**: keys typed while
   the display is lent wait for the manager. A crashed manager leaves the
   shell running with nothing on the display, drawing into pixels that were
   the manager's memory. (init does start the shell again: `screens` is its

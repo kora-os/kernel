@@ -167,13 +167,20 @@ int port_reply(void *msg);
  * 0), and be ready to find none. */
 #define SIG_MASK(bit) (1u << (bit))
 
-/* The break signal, a system bit nobody allocates: Ctrl+C on a console, as
- * AmigaOS's SIGBREAKF_CTRL_C. The program serving a console sends it with
- * sig_send to the program it runs, when that program asked for it
- * (console_run in <libscreen/console.h>); the shell does, and ends its
- * foreground program. Wait for it with sig_wait(SIG_MASK(SIG_BREAK)), and
- * clear it with sig_set(0, SIG_MASK(SIG_BREAK)) before a wait that should
- * see only a new one. */
+/* The break signal: Ctrl+C on a console, as AmigaOS's SIGBREAKF_CTRL_C.
+ * The program serving a console sends it with sig_send to the program it
+ * runs, when that program asked for it (console_run in
+ * <libscreen/console.h>); the shell does, and passes it on to its foreground
+ * program.
+ *
+ * A break sent with sig_send ends the program it goes to, unless that thread
+ * has allocated the bit with sig_alloc(SIG_BREAK), the one system bit a
+ * program may allocate (sig_alloc(-1) never picks it): it then only sets the
+ * bit, and the program checks it when it likes (sig_set(0, 0), or
+ * sig_wait(SIG_MASK(SIG_BREAK))). A break arriving while the previous one is
+ * still set ends even such a program, so two presses stop a stuck one; clear
+ * it (sig_wait, or sig_set(0, SIG_MASK(SIG_BREAK))) once it is handled.
+ * sig_free(SIG_BREAK) gives breaks back their default. */
 #define SIG_BREAK 0
 
 int sig_alloc(int bit);

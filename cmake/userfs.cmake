@@ -100,6 +100,7 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
         FLAGS -Wl,-z,stack-size=65536)
     koraos_add_user_program(stackbig "${SOURCE_ROOT}/tests/user/stackprobe.c"
         FLAGS -Wl,-z,stack-size=2097152)
+    koraos_add_user_program(breakprobe "${SOURCE_ROOT}/tests/user/breakprobe.c")
 
     # Retain the previous --bindir glob installation order in /bin.
     list(SORT USER_PROGRAM_ELVES)

@@ -1526,11 +1526,38 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         time.sleep(0.2)
         q.key("ctrl-c")
         q.expect(rb"\^C")
+        q.expect(PROMPT)  # a new one: the line read ended
+        # The shell handles breaks: more of them at the prompt do not end it.
+        for _ in range(2):
+            time.sleep(0.2)
+            q.key("ctrl-c")
+            q.expect(rb"\^C")
+            q.expect(PROMPT)
         q.send("echo kept\r")
         q.expect(rb"^kept\r?$")
         q.expect(rb"\] exited with 1")  # echo exits with its argument count
         q.expect(PROMPT)
-    yield "Ctrl+C ends the shell's program in front, and drops a line at the prompt", shell_break
+    yield ("Ctrl+C ends the shell's program in front, and drops a line at the prompt "
+           "for a new one"), shell_break
+
+    def break_caught():
+        # A program that allocated SIG_BREAK gets the break instead of being
+        # ended; once it is stuck, the second break ends it anyway.
+        q.send("breakprobe\r")
+        q.expect(rb"^breakprobe: waiting for a break", timeout=30)
+        time.sleep(0.2)
+        q.key("ctrl-c")
+        q.expect(rb"^breakprobe: caught a break")
+        time.sleep(0.2)
+        q.key("ctrl-c")  # left set: the program never clears it
+        time.sleep(0.5)
+        listed, _, _, _ = read_tasks_bkl()
+        if "breakprobe" not in listed:
+            raise Failure("one break after the caught one ended breakprobe")
+        q.key("ctrl-c")
+        q.expect(rb"\] exited with -9")
+        q.expect(PROMPT)
+    yield "a program catches Ctrl+C, and a second pending break ends it", break_caught
 
     def fonts():
         # `font` lists sys:fonts and switches the shell's console to another
