@@ -26,7 +26,8 @@ A program runs in EL0 with a deliberately small runtime:
   ones compute at double precision; no `M_PI`, which is not ISO C) and
   `<time.h>` (`clock` counts microseconds since boot; `mktime`, `gmtime`,
   `strftime` and the rest work in UTC; `time` returns -1, since there is no
-  wall clock yet). `stdin`
+  wall clock yet), `<assert.h>` (a failed assertion reports on `stderr` and
+  aborts) and `<inttypes.h>`. `stdin`
   is the shell's console, which hands over whole lines (below). See
   [libc-plan.md](../project_doc/libc-plan.md) for what is still missing.
   Programs print through `stdout` and report errors on `stderr`; they never
