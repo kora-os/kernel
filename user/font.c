@@ -15,7 +15,10 @@
 #define FONT_SUFFIX ".psf"
 #define FONT_MAX (1024 * 1024)  /* larger than any console font */
 
-static struct dirent font_entry;  /* 800 bytes: kept off the stack */
+/* Kept off the stack, which is a single 4 KB page for a program's main
+ * thread: a path alone is larger. */
+static struct dirent font_entry;
+static char path[KORA_PATH_MAX];
 
 static int has_suffix(const char *s, const char *suffix) {
     size_t n = strlen(s), m = strlen(suffix);
@@ -81,7 +84,6 @@ int main(int argc, char **argv) {
         }
         return 0;
     }
-    char path[KORA_PATH_MAX];
     if (strchr(name, '/') != NULL || strchr(name, ':') != NULL) {
         snprintf(path, sizeof(path), "%s", name);
     } else {
