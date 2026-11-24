@@ -142,6 +142,11 @@ static void drop_waiting(console_t *c, int i) {
 static void keys(console_t *c) {
     struct input_event event;
     while (screen_event(c->screen, &event)) {
+        if (event.type == INPUT_EVENT_MOUSE) {
+            /* The wheel scrolls the view, away from you back in time. */
+            term_scroll_view(&c->term, event.wheel * CONSOLE_WHEEL_LINES);
+            continue;
+        }
         con_key_t key;
         con_key_bytes(event.type, event.modifiers, event.keycode, event.codepoint, &key);
         if (key.scroll != 0) {

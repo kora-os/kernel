@@ -80,7 +80,8 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
   `screen_event`, `screen_gone`). Neither side writes into the other's memory
   (no MMU to catch it): a screen's pixels are its program's, which the
   manager only reads; keys are the manager's messages on the screen's port.
-  Meta+M is its hotkey.
+  Meta+M is its hotkey. It keeps the mouse pointer, drawn over the front
+  screen (hidden by typing), and sends mouse events at its position.
   init runs `screens shell` with a display (no shell without one) and starts
   it again when it ends. A program that claims the display or the keyboard
   itself borrows them first (`screens_borrow`), as `inputprobe` does.

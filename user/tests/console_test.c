@@ -348,6 +348,15 @@ static void test_modes_and_keys(void) {
     type_key(0x14, 0, 'q');
     service(SIG_MASK(KEY_BIT));
     CHECK(c->term.view_offset == 0, "typing returns to the live screen");
+    typed.events[typed.count++] = (struct input_event){.type = INPUT_EVENT_MOUSE, .wheel = 2};
+    service(SIG_MASK(KEY_BIT));
+    CHECK(c->term.view_offset == 2 * CONSOLE_WHEEL_LINES, "the wheel away from you scrolls back (%u)",
+          (unsigned)c->term.view_offset);
+    typed.events[typed.count++] = (struct input_event){
+        .type = INPUT_EVENT_MOUSE, .x = 5, .y = 7, .buttons = INPUT_BUTTON_LEFT, .wheel = -1};
+    service(SIG_MASK(KEY_BIT));
+    CHECK(c->term.view_offset == CONSOLE_WHEEL_LINES && c->edit.length == 0,
+          "towards you forward; a click types nothing (%u)", (unsigned)c->term.view_offset);
     CHECK(typed.count == 0 && !typed_out, "every key was taken");
 }
 

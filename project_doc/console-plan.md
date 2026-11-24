@@ -218,10 +218,10 @@ flowchart TB
           fallback only.
   - Screens sliding down to show the one behind can follow, as 4d or later.
 - [ ] 5. Mouse events, then the graphics layer:
-  - [ ] 5a. The kernel's part: mouse events in the input queue, from USB mice
+  - [x] 5a. The kernel's part: mouse events in the input queue, from USB mice
         (Circle), VirtIO mice and tablets and the debug console's `mouse`;
         keylog shows them.
-  - [ ] 5b. The screen manager: a pointer over the front screen, hidden while
+  - [x] 5b. The screen manager: a pointer over the front screen, hidden while
         typing, and mouse events to the program in front.
   - Then fonts (PSF2, a `font` command, consoles that resize), before
     koracli; the graphics layer after.
@@ -583,9 +583,35 @@ would write into pages that may belong to another program by then.
 - **keylog** shows mouse events.
 - **`int8_t` is signed now**: `include/common.h` had it as plain `char`,
   unsigned on AArch64.
-- **Not yet**: the screen manager passes mouse events to no program and
-  draws no pointer (5b). QEMU's monitor cannot move a tablet without a
-  display window, so the smoke test moves the mouse only.
+- **QEMU's monitor cannot move a tablet** without a display window, so the
+  smoke test moves the mouse only.
+
+## Step 5b as built
+
+- **The pointer is the manager's**: it keeps the position (a mouse's moves
+  added up, a tablet's positions scaled to the display, both clamped to it)
+  and draws an arrow, 12 by 19 pixels, over the front screen, straight on
+  the display. The pixels under it are the front screen's, which the
+  manager has anyway: hiding or moving it copies them again, so there is no
+  saved background. Damage under the pointer draws it again on top.
+- **It starts hidden** in the middle of the display, so a machine with no
+  mouse never shows one. A key typed hides it (a modifier alone does not, so
+  Shift+click works); a move, or a click while it is hidden, shows it. The
+  wheel alone does neither.
+- **The front screen's program gets the mouse's events** as it gets keys, in
+  the same messages: `x` and `y` are the pointer's position on its screen in
+  pixels (`INPUT_FLAG_ABSOLUTE` cleared), with the buttons and the wheel. An
+  event that changes nothing (a move against the edge) is not sent.
+- **Moves are merged** while the program has not taken them: a move alone
+  that follows one still waiting takes its place, so a busy program gets
+  where the pointer is, not every step, and does not lose keys to a full
+  queue. A click or a wheel turn is never merged, so it stays where it
+  happened.
+- **The console's wheel** scrolls its history, 3 lines a notch
+  (`CONSOLE_WHEEL_LINES`); clicks do nothing there yet.
+- **Not yet**: no idle timer to hide the pointer (the manager has no
+  timer); no pointer shape for programs to choose; xterm mouse reporting for
+  programs in a console; selecting text.
 
 ## Safety net
 

@@ -10,6 +10,11 @@
  * memory, and either may end, crashed or not. Meta+M (Command or the Windows key) brings the next screen
  * to front; a newly opened screen comes to front by itself.
  *
+ * screens keeps the mouse pointer: it draws it over the front screen, hides
+ * it while keys are typed and shows it again when the mouse moves or a
+ * button changes. The front screen's program gets the mouse's events with
+ * the pointer's position on its screen.
+ *
  * While a screen is open, screens holds the display and the keyboard, taken
  * from the kernel's console; with none, the console has them back, so a
  * program that opens no screen works as it would without screens. A program
@@ -43,6 +48,7 @@ struct screen {
     struct input_event pending[SCREEN_PENDING];
     unsigned head, tail;
     unsigned lost;
+    int last_moved;         /* pending[head - 1] is a move alone: the next one replaces it */
     struct batch *out;      /* the message the program has, or NULL */
 };
 
@@ -71,10 +77,46 @@ static int reclaim_failed;   /* taking them back failed, and was reported */
 static int programs[MAX_PROGRAMS];  /* the children still running */
 static int program_count;
 
+/* The pointer: its hot spot on the display, whether it is shown, and where
+ * it is drawn (when it is). The pixels under it are the front screen's, so
+ * hiding it is copying them again. */
+static int pointer_x, pointer_y;
+static int pointer_shown;
+static int pointer_drawn, drawn_x, drawn_y;
+static unsigned char pointer_buttons;
+
+#define POINTER_WIDTH 12
+#define POINTER_HEIGHT 19
+#define POINTER_EDGE 0x00000000u  /* X */
+#define POINTER_FILL 0x00FFFFFFu  /* . */
+/* An arrow, its hot spot the top left corner; ' ' shows the screen. */
+static const char pointer_shape[POINTER_HEIGHT][POINTER_WIDTH + 1] = {
+    "X           ",
+    "XX          ",
+    "X.X         ",
+    "X..X        ",
+    "X...X       ",
+    "X....X      ",
+    "X.....X     ",
+    "X......X    ",
+    "X.......X   ",
+    "X........X  ",
+    "X.........X ",
+    "X......XXXXX",
+    "X...X..X    ",
+    "X..XX..X    ",
+    "X.X  X..X   ",
+    "XX   X..X   ",
+    "X     X..X  ",
+    "      X..X  ",
+    "       XX   ",
+};
+
 /* --- The display --------------------------------------------------------------- */
 
-/* Copy a rectangle of the front screen to the display, clipped to it. */
-static void copy_rect(int x, int y, int width, int height) {
+/* Copy a rectangle of the front screen to the display, clipped to it, as
+ * it is: over the pointer too. */
+static void copy_screen(int x, int y, int width, int height) {
     if (front == NULL || !holding) {
         return;
     }
@@ -110,12 +152,60 @@ static void clear_display(void) {
             to[x] = BLACK;
         }
     }
+    pointer_drawn = 0;
+}
+
+/* Draw the pointer over the front screen, if it is shown. */
+static void draw_pointer(void) {
+    if (!pointer_shown || front == NULL || !holding) {
+        return;
+    }
+    for (int row = 0; row < POINTER_HEIGHT && pointer_y + row < (int)display.height; row++) {
+        unsigned *to = (unsigned *)((char *)display.addr +
+                                    (unsigned long)(pointer_y + row) * display.pitch);
+        for (int col = 0; col < POINTER_WIDTH && pointer_x + col < (int)display.width; col++) {
+            char c = pointer_shape[row][col];
+            if (c != ' ') {
+                to[pointer_x + col] = c == 'X' ? POINTER_EDGE : POINTER_FILL;
+            }
+        }
+    }
+    pointer_drawn = 1;
+    drawn_x = pointer_x;
+    drawn_y = pointer_y;
+}
+
+/* Show the front screen where the pointer was drawn. */
+static void erase_pointer(void) {
+    if (pointer_drawn) {
+        pointer_drawn = 0;
+        copy_screen(drawn_x, drawn_y, POINTER_WIDTH, POINTER_HEIGHT);
+    }
+}
+
+/* Copy a rectangle of the front screen to the display, the pointer kept
+ * over it. */
+static void copy_rect(int x, int y, int width, int height) {
+    copy_screen(x, y, width, height);
+    if (pointer_drawn && x < drawn_x + POINTER_WIDTH && drawn_x < x + width &&
+        y < drawn_y + POINTER_HEIGHT && drawn_y < y + height) {
+        draw_pointer();
+    }
+}
+
+/* The pointer starts hidden, in the middle of the display. */
+static void pointer_init(void) {
+    pointer_x = (int)display.width / 2;
+    pointer_y = (int)display.height / 2;
+    pointer_shown = pointer_drawn = 0;
+    pointer_buttons = 0;
 }
 
 static void to_front(struct screen *screen) {
     front = screen;
     if (holding) {
-        copy_rect(0, 0, (int)screen->width, (int)screen->height);
+        copy_screen(0, 0, (int)screen->width, (int)screen->height);
+        draw_pointer();
         input_focus(screen->owner);
     }
     printf("screens: screen %d in front (%s)\n", screen->id, screen->title);
@@ -137,6 +227,7 @@ static int hold(int on) {
         input_claim(-1);
         fb_claim(0);
         meta_m_held = 0;
+        pointer_drawn = 0;  /* the console draws over it */
     }
     holding = on;
     return 0;
@@ -409,20 +500,78 @@ static void send_all(void) {
     }
 }
 
-static void deliver(struct screen *screen, const struct input_event *event) {
+/* Queue an event for the screen's program. A move alone (`moved`: no button
+ * changed, no wheel) that follows one not sent yet takes its place: a busy
+ * program gets where the pointer is now, not every step it took, and a
+ * click stays where it was. */
+static void deliver(struct screen *screen, const struct input_event *event, int moved) {
+    if (moved && screen->last_moved && screen->head != screen->tail) {
+        screen->pending[(screen->head - 1) % SCREEN_PENDING] = *event;
+        return;
+    }
     if (screen->head - screen->tail == SCREEN_PENDING) {
         screen->lost++;
         return;
     }
     screen->pending[screen->head++ % SCREEN_PENDING] = *event;
+    screen->last_moved = moved;
+}
+
+static int clamp(long value, int max) {
+    return value < 0 ? 0 : value > max ? max : (int)value;
+}
+
+/* Move the pointer (shown, if it was hidden), and give the front screen's
+ * program the event with the pointer's position on its screen. */
+static void mouse(const struct input_event *event) {
+    int x, y;
+    if (event->flags & INPUT_FLAG_ABSOLUTE) {
+        x = clamp((long)event->x * (long)display.width / (INPUT_ABS_MAX + 1), (int)display.width - 1);
+        y = clamp((long)event->y * (long)display.height / (INPUT_ABS_MAX + 1),
+                  (int)display.height - 1);
+    } else {
+        x = clamp((long)pointer_x + event->x, (int)display.width - 1);
+        y = clamp((long)pointer_y + event->y, (int)display.height - 1);
+    }
+    int moved = x != pointer_x || y != pointer_y;
+    int clicked = event->buttons != pointer_buttons;
+    if (!moved && !clicked && event->wheel == 0) {
+        return;  /* against the edge: nothing happened */
+    }
+    if (moved || (clicked && !pointer_shown)) {
+        erase_pointer();
+        pointer_x = x;
+        pointer_y = y;
+        pointer_shown = 1;
+        draw_pointer();
+    }
+    pointer_buttons = event->buttons;
+    if (front != NULL) {
+        struct input_event on_screen = *event;
+        on_screen.flags &= (unsigned char)~INPUT_FLAG_ABSOLUTE;
+        on_screen.x = (short)x;
+        on_screen.y = (short)y;
+        deliver(front, &on_screen, moved && !clicked && event->wheel == 0);
+    }
+}
+
+/* Typing hides the pointer; a modifier alone does not (Shift+click). */
+static void typed(const struct input_event *event) {
+    if (event->type == INPUT_EVENT_KEY_DOWN && (event->keycode < KEY_LEFT_CTRL ||
+                                               event->keycode > KEY_RIGHT_GUI)) {
+        erase_pointer();
+        pointer_shown = 0;
+    }
 }
 
 static void route(const struct input_event *event) {
     if (event->type == INPUT_EVENT_MOUSE) {
-        return;  /* the pointer, and mouse events for programs, come with step 5b */
+        mouse(event);
+        return;
     }
+    typed(event);
     if (!hotkey(event) && front != NULL) {
-        deliver(front, event);
+        deliver(front, event, 0);
     }
 }
 
@@ -482,6 +631,7 @@ int main(int argc, char **argv) {
         fputs("screens: no port\n", stderr);
         return 1;
     }
+    pointer_init();
     printf("screens: %ux%u, Meta+M brings the next screen to front\n", display.width,
            display.height);
     fflush(stdout);

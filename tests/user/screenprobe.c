@@ -4,7 +4,9 @@
 //                        green, blue or white), fills it, and prints
 //                        "screenprobe: COLOUR on screen N, pid P". Then it
 //                        prints each key the screen gets ("screenprobe
-//                        COLOUR: key down 0x04 mods 0x0000 char 0x61") until
+//                        COLOUR: key down 0x04 mods 0x0000 char 0x61") and
+//                        mouse event ("screenprobe COLOUR: mouse at 512,384
+//                        buttons 0x01 wheel 0") until
 //                        Escape, closes the screen and prints "screenprobe:
 //                        COLOUR closed"; or until x, and ends without closing
 //                        it ("screenprobe: COLOUR ends, screen open"), as a
@@ -43,6 +45,11 @@ int main(int argc, char **argv) {
         sig_wait(screen_signal(s));
         struct input_event event;
         while (screen_event(s, &event)) {
+            if (event.type == INPUT_EVENT_MOUSE) {
+                printf("screenprobe %s: mouse at %d,%d buttons 0x%02x wheel %d\n", name, event.x,
+                       event.y, event.buttons, event.wheel);
+                continue;
+            }
             printf("screenprobe %s: key %s 0x%02x mods 0x%04x char 0x%x\n", name,
                    event.type == INPUT_EVENT_KEY_DOWN ? "down" : "up", event.keycode,
                    event.modifiers, event.codepoint);

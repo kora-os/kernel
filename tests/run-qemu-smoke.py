@@ -1374,12 +1374,13 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
     COLOURS = {b"red": (255, 0, 0), b"green": (0, 255, 0), b"blue": (0, 0, 255)}
 
     def uniform(name, colour):
-        """The whole display is one colour (a screen in front)."""
+        """The whole display is one colour (a screen in front); its size."""
         width, height, rgb = q.screendump(name)
         want = bytes(colour)
         wrong = sum(1 for i in range(0, len(rgb), 3 * 97) if rgb[i:i + 3] != want)
         if wrong:
             raise Failure("%s: %d sampled pixels are not %s" % (name, wrong, colour))
+        return width, height
 
     def shell_back(name):
         """The shell's screen is in front: text on black, no screen's colour."""
@@ -1456,6 +1457,42 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         shell_back("screens-done")
     yield ("screens: a second manager refused, keys to the front screen, Meta+M, each screen "
            "closed as its program ends, the shell's in front again"), screen_manager
+
+    def pointer():
+        # The screen manager draws the pointer over the front screen and
+        # gives its program the mouse's events, at the pointer's position in
+        # the screen's pixels; typing hides the pointer (the command typed
+        # here did), and moving the mouse shows it again.
+        q.send("screenprobe red &\r")
+        opened(1)
+        time.sleep(0.2)
+        width, height = uniform("pointer-hidden", COLOURS[b"red"])
+        x, y = width // 2, height // 2
+        q.debug("mouse to 16384 16384")
+        q.expect(LINE + rb"screenprobe red: mouse at %d,%d buttons 0x00 wheel 0" % (x, y))
+        time.sleep(0.2)
+        shot = q.screendump("pointer-shown")
+        if (pixel(shot, x, y) != (0, 0, 0) or pixel(shot, x + 1, y + 2) != (255, 255, 255) or
+                pixel(shot, x + 20, y) != COLOURS[b"red"] or pixel(shot, x - 1, y) != COLOURS[b"red"]):
+            raise Failure("no pointer drawn at %d,%d: %s %s" % (x, y, pixel(shot, x, y),
+                                                               pixel(shot, x + 1, y + 2)))
+        q.debug("mouse click left")
+        q.expect(LINE + rb"screenprobe red: mouse at %d,%d buttons 0x01 wheel 0" % (x, y))
+        q.expect(LINE + rb"screenprobe red: mouse at %d,%d buttons 0x00 wheel 0" % (x, y))
+        q.debug("mouse 10 -4")
+        q.expect(LINE + rb"screenprobe red: mouse at %d,%d buttons 0x00 wheel 0" % (x + 10, y - 4))
+        q.debug("mouse wheel 1")
+        q.expect(LINE + rb"screenprobe red: mouse at %d,%d buttons 0x00 wheel 1" % (x + 10, y - 4))
+        q.key("a")
+        q.expect(LINE + rb"screenprobe red: key down 0x04 mods 0x0000 char 0x61")
+        time.sleep(0.2)
+        uniform("pointer-typed", COLOURS[b"red"])
+        q.key("esc")
+        expect_both(SHELL_FRONT, LINE + rb"screenprobe: red closed")
+        q.send("\r")
+        q.expect(PROMPT)
+    yield ("screens: the pointer drawn over the front screen, mouse events at its position, "
+           "hidden by typing"), pointer
 
     def shell_break():
         # Ctrl+C on the shell's console ends the program in front; at the

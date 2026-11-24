@@ -354,7 +354,10 @@ a colour, run in the background beside the shell: the front screen fills
 the display, a key typed with `key` goes to the front probe only, Meta+M goes
 round the screens (the shell's first), a probe ending with its screen open
 (x) has it closed at once and the next brought to front, and the shell's is
-in front at the end. Ctrl+C ends the shell's program in front (`conprobe
+in front at the end. A probe in front gets the debug console's mouse at the
+pointer's position in pixels (moved, clicked, the wheel turned); a
+screendump finds the pointer drawn there, and gone again once a key is
+typed. Ctrl+C ends the shell's program in front (`conprobe
 hang`), and at the prompt drops the line without touching the next program.
 With `--keyboard`, a key goes to the front probe only, Meta+M switches,
 Escape closes each, and Meta+M goes round `condemo`'s and `gfxdemo`'s
