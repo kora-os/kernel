@@ -15,7 +15,7 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
 - `project_doc/roadmap.md` – milestones 6 to 12: kernel heap, SMP scheduler and threads, volumes, FAT32 write, storage drivers, hotplug, libc.
 - `project_doc/console-plan.md` – proposal for the console and screen: input events, message ports, a user-space console library and a screen manager task; the base for koracli.
 - `project_doc/features.yaml` – feature status list read by the project website; update it in any PR that changes a feature's status, and run `tests/check-features.py`.
-- `project_doc/koracli-spec.md` – what KoraCLI is (revised in place as points settle); `docs/koracli.md` is its user reference: every KoraCLI PR updates it, with the differences between modes and dialects, and the section status (planned or working).
+- `project_doc/koracli-spec.md` – what KoraCLI is (revised in place as points settle), and `project_doc/koracli-plan.md` its steps; `docs/koracli.md` is its user reference: every KoraCLI PR updates it, with the differences between modes and dialects, and the section status (planned or working).
 
 ## Working Guidelines
 - Follow the clang-flavored C style already in the tree (four-space indent, same-line braces, snake_case identifiers).
