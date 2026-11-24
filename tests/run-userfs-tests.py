@@ -31,7 +31,8 @@ class UserFSTests(unittest.TestCase):
             source = base / "source"
             build = base / "userfs"
             source.mkdir()
-            for directory in ("cmake", "user", "fsroot", "tests/user"):
+            for directory in ("cmake", "user", "fsroot", "tests/user", "scripts",
+                              "third_party/spleen"):
                 shutil.copytree(ROOT / directory, source / directory)
             shutil.copy2(ROOT / "create-fs-image.sh", source / "create-fs-image.sh")
             self.run_tool(
@@ -64,6 +65,9 @@ class UserFSTests(unittest.TestCase):
             self.assertEqual(snapshot(), initial)
             self.assertEqual(image.stat().st_mtime_ns, initial_image)
             self.assertIn("/cat", listing())
+            fonts = self.run_tool("mdir", "-b", "-i", str(image), "::/fonts/").stdout
+            for size in ("5x8", "6x12", "8x16", "12x24", "16x32"):
+                self.assertIn("/spleen-%s.psf" % size, fonts)
 
             # Removing a registration must remove its image entry even if the
             # old ELF remains in the producer's output directory.

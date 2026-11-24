@@ -90,14 +90,17 @@ typedef struct {
 // What a terminal needs from whoever runs it.
 typedef struct {
     // Memory for the cell buffers, `bytes` long, or NULL if there is none. It
-    // need not be zeroed, and the terminal never gives it back: it lives as
-    // long as the terminal.
+    // need not be zeroed. It lives as long as the terminal, unless a resize
+    // replaces it (then `free` gets it back).
     void *(*alloc)(void *ctx, size_t bytes);
     // The terminal's answers to status requests (cursor position, device
     // attributes, size), which a real terminal sends back as if typed. May be
     // NULL: the answers are dropped.
     void (*reply)(void *ctx, const char *bytes, size_t length);
-    void *ctx;  // passed to both
+    void *ctx;  // passed to all three
+    // Give back buffers that term_resize() replaced. May be NULL: they are
+    // kept, as by a host that never resizes (the kernel's).
+    void (*free)(void *ctx, void *buffer);
 } term_host_t;
 
 // State saved by DECSC / CSI s and restored by DECRC / CSI u.
@@ -171,6 +174,16 @@ typedef struct {
 int term_init(term_t *t, uint32_t cols, uint32_t rows, uint32_t history,
               const term_host_t *host);
 
+// Size the grid again (as term_init clamps it), keeping what it shows: each
+// line keeps its left part, a narrower grid cutting it and a wider one
+// padding it with blanks. A grid with fewer rows keeps the cursor's line and
+// the lines with text above it, at the bottom; the lines it pushes off the
+// top go to the scrollback. The scrollback keeps its capacity (or, short of
+// memory, has none). The alternate screen is cut and padded the same way. The
+// margins, the view and the pending wrap are reset. Returns 0, with the
+// terminal as it was, when the new buffers do not fit.
+int term_resize(term_t *t, uint32_t cols, uint32_t rows);
+
 // Feed one byte of output.
 void term_putc(term_t *t, char c);
 
@@ -186,3 +199,7 @@ bool term_cursor_shown(const term_t *t);
 
 // 8x8 bitmap (MSB = leftmost pixel) for a TERM_GLYPH_* code.
 const uint8_t *term_glyph(uint8_t code);
+
+// The Unicode code point a TERM_GLYPH_* code stands for (U+2500 for
+// TERM_GLYPH_HLINE...), for fonts that name their glyphs by code point.
+uint32_t term_glyph_codepoint(uint8_t code);

@@ -41,6 +41,17 @@ Raspberry Pi 4's xHCI controller, letting a single stack serve both boards.
   KoraOS's own. `user/libc/src/math/README.md` lists the files and every local
   change.
 
+## Spleen
+
+- **Project:** Spleen, monospaced bitmap fonts.
+- **Author:** Frederic Cambus.
+- **Upstream:** <https://github.com/fcambus/spleen>
+- **License:** BSD 2-Clause (`third_party/spleen/LICENSE`).
+- **What we use:** the BDF sources of the 5x8, 6x12, 8x16, 12x24 and 16x32
+  sizes of release 2.3.0, in `third_party/spleen` (`PROVENANCE.md` there has
+  the exact commit). The build converts them to PSF2 for the consoles'
+  `font` command.
+
 ## Raspberry Pi boot firmware
 
 - **Files:** the GPU boot firmware and device trees in [`firmware/`](firmware/)

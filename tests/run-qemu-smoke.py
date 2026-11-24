@@ -1512,6 +1512,41 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         q.expect(PROMPT)
     yield "Ctrl+C ends the shell's program in front, and drops a line at the prompt", shell_break
 
+    def fonts():
+        # `font` lists sys:fonts and switches the shell's console to another
+        # font: the console resizes, and a program asking for its size gets
+        # the new one. The display is 1024x768.
+        q.send("font\r")
+        for name in (rb"spleen-5x8", rb"spleen-6x12", rb"spleen-8x16", rb"spleen-12x24",
+                     rb"spleen-16x32", rb"builtin"):
+            q.expect(rb"^" + name + rb"\r?$")
+        q.expect(PROMPT)
+
+        def size(cols, rows):
+            q.send("conprobe size\r")
+            q.expect(rb"conprobe: size %dx%d" % (cols, rows))  # after the request, copied by conlog
+            q.expect(PROMPT)
+        size(128, 96)
+        q.send("font spleen-8x16\r")
+        q.expect(PROMPT)
+        size(128, 48)
+        q.send("font spleen-16x32\r")
+        q.expect(PROMPT)
+        size(64, 24)
+        time.sleep(0.2)
+        q.screendump("font-16x32")
+        q.send("font nosuch\r")
+        q.expect(rb"^font: cannot read sys:fonts/nosuch.psf")
+        q.expect(PROMPT)
+        q.send("font sys:bin/ls\r")
+        q.expect(rb"^font: cannot use sys:bin/ls here")
+        q.expect(PROMPT)
+        size(64, 24)
+        q.send("font builtin\r")
+        q.expect(PROMPT)
+        size(128, 96)
+    yield "font: the fonts listed, the shell's console resized to each, a bad font refused", fonts
+
     if keyboard:
         gap = 0.1 if keyboard == "USB" else 0.02
 

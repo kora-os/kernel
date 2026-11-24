@@ -9,7 +9,8 @@
  * (<_libc/console.h>). Writes are shown at once; reads wait for a line in
  * cooked mode (the default) or for any key in raw mode (console_mode() in
  * <libk/koraos.h>). Shift+PageUp and Shift+PageDown scroll back through its
- * history, and so does the mouse's wheel.
+ * history, and so does the mouse's wheel. It draws in the built-in 8x8 font
+ * or a PSF2 font a program gives it (console_set_font).
  *
  *   screen_t *s = screen_open("my console");
  *   console_t *c = console_open(s);
@@ -40,6 +41,8 @@ typedef struct console {
     screen_t *screen;
     term_t term;
     term_render_t render;
+    term_font_t font;     /* the renderer's */
+    void *font_data;      /* a PSF2 font's file, which it reads its glyphs from */
     uint32_t cursor_col;  /* where the renderer last drew the cursor */
     con_edit_t edit;
     int port;
@@ -71,6 +74,14 @@ unsigned console_signals(const console_t *c);
  * keys, serve the packets, answer the reads that can be answered, drop those
  * of programs that ended, and show what changed. */
 void console_service(console_t *c, unsigned got);
+
+/* Draw the console in a PSF2 font (`size` bytes at `psf`, copied), or with
+ * NULL in the built-in 8x8 font, resizing it to the cells the font gives:
+ * the text stays, cut or padded (term_resize in libconsole/term.h). Its
+ * programs ask for it with a CON_FONT packet (console_font in libk). 0, or
+ * -1 with the console as it was: not a PSF2 font, larger than the screen, or
+ * too little memory. */
+int console_set_font(console_t *c, const void *psf, size_t size);
 
 /* Show text of the client's own on the console ('\n' starts a new line). */
 void console_write(console_t *c, const char *text, size_t length);

@@ -46,7 +46,11 @@ A program runs in EL0 with a deliberately small runtime:
   friends). `strtold` and `%Lf` work at double precision.
 - **A ~4 KB stack.** A program's main thread gets a single-page user stack
   (other threads get 16 KB), so keep large buffers off the stack (use `malloc`,
-  or static arrays).
+  or static arrays). Nothing protects what lies below it: a larger frame
+  writes over kernel memory and the kernel faults later, somewhere else. The
+  build refuses a function whose frame passes 2 KB
+  (`-Wframe-larger-than=2048`); a path (`KORA_PATH_MAX`, 4128 bytes) alone
+  passes it.
 - **A heap that grows with the system's free memory.** `malloc`, `free`,
   `calloc` and `realloc` (16-byte aligned) come from the libc
   ([`user/libc/src/stdlib/malloc.c`](../user/libc/src/stdlib/malloc.c)), a
@@ -115,7 +119,11 @@ A program runs in EL0 with a deliberately small runtime:
   (arrows, Home/End, history with Up/Down) and a read gets it once Enter is
   pressed, with Ctrl+D as the end of input. `console_mode(CON_RAW)` hands
   your program each key as typed instead, unechoed (arrows as xterm escape
-  sequences), and `console_mode(CON_COOKED)` goes back. Ctrl+C ends the
+  sequences), and `console_mode(CON_COOKED)` goes back.
+  `console_font(psf, size)` draws the console your stdout is in a PSF2
+  font (NULL: the built-in 8x8 one), as the `font` command does; the
+  console resizes, so ask for its size again (`ESC [ 18 t`) if you lay
+  text out by it. Ctrl+C ends the
   program: the shell kills the one it runs in front, newcon its own. On the
   kernel console these do nothing: it is always raw, with no
   editing at all.
@@ -167,7 +175,8 @@ That is all. `koraos_add_user_program` compiles the source together with libk
 
 ```
 --target=aarch64-none-elf -mcpu=cortex-a72 -ffreestanding -nostdlib
--fno-builtin -fno-stack-protector -fPIE -O2 -isystem user/libc/includes
+-fno-builtin -fno-stack-protector -fPIE -O2 -Wall
+-Wframe-larger-than=2048 -Werror=frame-larger-than -isystem user/libc/includes
 ```
 
 Extra flags for one program go after `FLAGS`, for example

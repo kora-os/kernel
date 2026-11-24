@@ -31,9 +31,14 @@ struct std_handle {
 #define CON_MODE 3
 #define CON_COOKED 0
 #define CON_RAW 1
+// The console's font: a PSF2 font in `buf` (`length` bytes, which the
+// handler copies before it replies), or `buf` NULL for its built-in font.
+// The console resizes to the cells the font gives. `result` is 0, or -1: not
+// a font it can use, too little memory, or a handler without fonts.
+#define CON_FONT 4
 
 struct con_packet {
-    int op;               // CON_WRITE, CON_READ or CON_MODE
+    int op;               // CON_WRITE, CON_READ, CON_MODE or CON_FONT
     long result;
     void *buf;
     unsigned long length;
@@ -43,5 +48,9 @@ struct con_packet {
 // stdin is: 0, or -1 when stdin is the kernel console (always raw), a file,
 // or a handler that has no modes.
 int __con_mode(int mode);
+
+// Set the font (CON_FONT) of the console handler that stdout is: 0, or -1
+// when stdout is the kernel console, a file, or a handler that refuses it.
+int __con_font(const void *font, unsigned long size);
 
 #endif // _LIBC_CONSOLE_H

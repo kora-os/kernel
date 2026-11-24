@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
-"""Create a fresh 64 MiB FAT32 scratch root from registered prepared programs."""
+"""Create a fresh 64 MiB FAT32 scratch root from registered prepared programs,
+and the fonts of the shared image."""
 import argparse
 import hashlib
 from pathlib import Path
@@ -58,12 +59,27 @@ def create_image(userfs, output):
         validate_output(userfs, output, registered)
         manifest = temporary / "programs.txt"
         manifest.write_text("".join(str(elf) + "\n" for elf in registered))
+        # The fonts (sys:fonts), as the shared image has them.
+        fonts_dir = temporary / "fonts"
+        fonts_dir.mkdir()
+        listed = subprocess.run(["mdir", "-b", "-i", str(shared), "::/fonts"], text=True,
+                                stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+        fonts = []
+        for path in listed.stdout.splitlines() if listed.returncode == 0 else []:
+            name = path.rsplit("/", 1)[-1]
+            if path.endswith("/") or not name or name in (".", ".."):
+                continue
+            subprocess.run(["mcopy", "-i", str(shared), path, str(fonts_dir / name)], check=True)
+            fonts.append(fonts_dir / name)
+        fonts_manifest = temporary / "fonts.txt"
+        fonts_manifest.write_text("".join(str(font) + "\n" for font in fonts))
         subprocess.run([str(ROOT / "create-fs-image.sh"), "--size", "64", "--volume", "WRITE",
                         "--fsroot", str(ROOT / "fsroot"), "--programs-file", str(manifest),
-                        "--output", str(output)], check=True)
+                        "--fonts-file", str(fonts_manifest), "--output", str(output)], check=True)
     if digest(shared) != before:
         raise RuntimeError("immutable shared userfs changed during scratch generation")
-    print("scratch root contains %d registered programs; shared SHA256 %s" % (len(registered), before))
+    print("scratch root contains %d registered programs and %d fonts; shared SHA256 %s"
+          % (len(registered), len(fonts), before))
     return before
 
 

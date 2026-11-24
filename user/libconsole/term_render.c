@@ -4,8 +4,6 @@
 
 #include "libconsole/term_render.h"
 
-#include "libconsole/font8x8.h"
-
 #define NO_CURSOR 0xFF
 
 // The part of the surface that may be drawn on: its clip rectangle within its
@@ -32,14 +30,31 @@ static bounds_t drawable(const term_surface_t *s) {
     return b;
 }
 
+
+// Pixel (x, y) of a cell's glyph: from its bitmap, or (NULL) the built-in
+// symbol scaled.
+static bool glyph_pixel(const term_font_t *font, const uint8_t *bitmap, uint8_t code, int64_t x,
+                        int64_t y) {
+    if (x < 0) {
+        return false;
+    }
+    if (bitmap == NULL) {
+        return term_font_pixel(font, code, (uint32_t)x, (uint32_t)y);
+    }
+    return (bitmap[y * font->row_bytes + (x >> 3)] & (0x80u >> (x & 7))) != 0;
+}
+
 // Paint one cell, optionally with the cursor on it, as far as it is inside
-// `b`.
+// `b`. Lines (underline, strike, the cursor's) are a pixel or two thick, more
+// in a large font.
 static void draw_cell(const term_render_t *r, const bounds_t *b, uint32_t row, uint32_t col,
                       const term_cell_t *cell, uint8_t cursor) {
-    int64_t left = (int64_t)r->x + (int64_t)col * TERM_CELL_WIDTH;
-    int64_t top = (int64_t)r->y + (int64_t)row * TERM_CELL_HEIGHT;
-    int64_t x0 = max64(left, b->x0), x1 = min64(left + TERM_CELL_WIDTH, b->x1);
-    int64_t y0 = max64(top, b->y0), y1 = min64(top + TERM_CELL_HEIGHT, b->y1);
+    const term_font_t *font = r->font;
+    int64_t cw = font->width, ch = font->height;
+    int64_t left = (int64_t)r->x + (int64_t)col * cw;
+    int64_t top = (int64_t)r->y + (int64_t)row * ch;
+    int64_t x0 = max64(left, b->x0), x1 = min64(left + cw, b->x1);
+    int64_t y0 = max64(top, b->y0), y1 = min64(top + ch, b->y1);
     if (x0 >= x1 || y0 >= y1) {
         return;
     }
@@ -56,30 +71,24 @@ static void draw_cell(const term_render_t *r, const bounds_t *b, uint32_t row, u
         fg = bg;
         bg = tmp;
     }
-    const uint8_t *glyph = cell->ch < 0x80 ? font8x8_basic[cell->ch] : term_glyph(cell->ch);
+    const uint8_t *bitmap = term_font_bitmap(font, cell->ch);
+    int64_t thick = max64(1, ch / 16);   // underline and strike
+    int64_t cursor_rows = max64(2, ch / 8), bar = max64(2, cw / 4);
+    bool bold = (cell->attr & TERM_ATTR_BOLD) != 0;
 
     for (int64_t py = y0; py < y1; py++) {
-        uint32_t y = (uint32_t)(py - top);
-        uint8_t bits = glyph[y];
-        if (cell->attr & TERM_ATTR_BOLD) {
-            bits |= bits >> 1;  // no bold font: thicken the strokes
-        }
-        if ((cell->attr & TERM_ATTR_UNDERLINE) && y == TERM_CELL_HEIGHT - 1) {
-            bits = 0xFF;
-        }
-        if ((cell->attr & TERM_ATTR_STRIKE) && y == TERM_CELL_HEIGHT / 2) {
-            bits = 0xFF;
-        }
-        if (cursor == TERM_CURSOR_UNDERLINE && y >= TERM_CELL_HEIGHT - 2) {
-            bits = 0xFF;
-        }
-        if (cursor == TERM_CURSOR_BAR) {
-            bits |= 0xC0;
-        }
+        int64_t y = py - top;
+        bool line = ((cell->attr & TERM_ATTR_UNDERLINE) && y >= ch - thick) ||
+                    ((cell->attr & TERM_ATTR_STRIKE) && y >= ch / 2 && y < ch / 2 + thick) ||
+                    (cursor == TERM_CURSOR_UNDERLINE && y >= ch - cursor_rows);
         uint32_t *px = (uint32_t *)(r->surface.pixels + (size_t)py * r->surface.pitch);
         for (int64_t pxx = x0; pxx < x1; pxx++) {
-            uint32_t x = (uint32_t)(pxx - left);
-            px[pxx] = (bits & (1u << (7 - x))) ? fg : bg;
+            int64_t x = pxx - left;
+            // No bold font: bold thickens the strokes a pixel to the right.
+            bool on = line || glyph_pixel(font, bitmap, cell->ch, x, y) ||
+                      (bold && glyph_pixel(font, bitmap, cell->ch, x - 1, y)) ||
+                      (cursor == TERM_CURSOR_BAR && x < bar);
+            px[pxx] = on ? fg : bg;
         }
     }
 }
@@ -102,6 +111,7 @@ void term_render_init(term_render_t *render, term_t *term, const term_surface_t 
     render->surface = *surface;
     render->x = x;
     render->y = y;
+    render->font = &term_font_builtin;
     render->cursor_drawn = false;
     render->cursor_row = 0;
 }

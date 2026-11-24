@@ -50,7 +50,7 @@ static void console_reply(void *ctx, const char *bytes, size_t length) {
     answer[answer_length] = '\0';
 }
 
-static const term_host_t host = {console_alloc, console_reply, NULL};
+static const term_host_t host = {console_alloc, console_reply, NULL, NULL};
 
 /* condemo's screen under the screen manager, or NULL. */
 static screen_t *screen;
