@@ -283,7 +283,7 @@ categories:
         name: MicroPython
         status: in_progress
         description: MicroPython ported to KoraOS, KoraCLI's main language, with a kora module over the OS API.
-        prs: [121]
+        prs: [121, 122]
       - id: koracli-console
         name: KoraCLI console
         status: planned

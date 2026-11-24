@@ -122,7 +122,7 @@ From the spec's §17, with the PRs of phases 0 and 1:
   KoraOS's language (`user/micropython/unix/koraos`), and the shell sets its
   console back to cooked before each prompt, since a program killed in raw
   mode (Ctrl+C on `micropython`, until 0b) leaves it raw.
-- [x] **0b. The port's essentials.** The GC heap (taken from `malloc` at
+- [x] **0b. The port's essentials.** (#122) The GC heap (taken from `malloc` at
   start, size *proposed* 4 MB), the stack limit from the declared size,
   `KeyboardInterrupt` from a break (step 21), `os` over volumes and assigns
   (`listdir`, `stat`, `mkdir`, `remove`, `rename`, `getcwd`, `chdir`), files
