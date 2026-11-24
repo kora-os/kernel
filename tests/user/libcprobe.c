@@ -27,7 +27,9 @@
 // stdout goes: the smoke test runs it with redirections.
 #include "../../user/libk/koraos.h"
 
+#include <assert.h>
 #include <errno.h>
+#include <inttypes.h>
 #include <float.h>
 #include <limits.h>
 #include <math.h>
@@ -427,6 +429,26 @@ static void test_time(void) {
     check(difftime(t, 999999990) == 10.0, "difftime");
 }
 
+// <inttypes.h> through the AAPCS64 va_list, and an assertion that holds.
+static void test_inttypes(void) {
+    char text[80];
+    int64_t low = INT64_MIN;
+    uint64_t high = UINT64_MAX;
+    uint8_t byte = 0;
+    intmax_t back = 0;
+    snprintf(text, sizeof text, "%" PRId64 " %" PRIx64 " %" PRIu8 " %" PRIdPTR, low, high,
+             (uint8_t)200, (intptr_t)-3);
+    check(strcmp(text, "-9223372036854775808 ffffffffffffffff 200 -3") == 0, "PRI macros");
+    check(sscanf("255 -42", "%" SCNu8 " %" SCNdMAX, &byte, &back) == 2 && byte == 255 && back == -42,
+          "SCN macros");
+    wchar_t wide[] = {L' ', L'-', L'7', L'x', 0};
+    wchar_t *end;
+    check(strtoimax("0x7fffffffffffffff", NULL, 16) == INTMAX_MAX && wcstoimax(wide, &end, 10) == -7 &&
+              *end == L'x' && imaxabs(-9) == 9,
+          "strtoimax, wcstoimax, imaxabs");
+    assert(byte == 255);
+}
+
 static void test_files(void) {
     const char *name = "libc probe.txt", *moved = "libc probe moved.txt";
     FILE *f = fopen(name, "w");
@@ -531,6 +553,7 @@ int main(int argc, char **argv) {
     test_math_long_double();
     test_sscanf();
     test_time();
+    test_inttypes();
     if (failed) {
         return 1;
     }
