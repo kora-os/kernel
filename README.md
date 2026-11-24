@@ -103,6 +103,7 @@ alias. Target selection and installation no longer need environment variables.
 - [Userland model](docs/how-userland-works.md): ELF loading, allocation and processes.
 - [System calls](docs/syscalls.md): syscall ABI.
 - [Writing programs](docs/writing-userland-programs.md): adding userland programs.
+- [KoraCLI](docs/koracli.md): user reference for the shell (written ahead of it; each section says what works).
 - [Tests](tests/README.md): host, build CLI and QEMU verification.
 
 ## License

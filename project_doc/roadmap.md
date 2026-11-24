@@ -355,6 +355,14 @@ debug console's `keylog`; 4b2 is the screen manager itself (`screens`, with
 libscreen for its clients and Meta+M), done; 4c the console handler with
 line editing (4c1) and the shell as its first client (4c2).
 
+## KoraCLI (no milestone number yet)
+
+The shell the machine starts in, built on the console and screen work:
+Python (MicroPython), two BASIC dialects and OS commands at one prompt, on a
+screen of its own. What it is: `koracli-spec.md`; its steps (MicroPython
+first, then the console's new parts, then KoraCLI replacing the shell):
+`koracli-plan.md`; its user reference: `docs/koracli.md`.
+
 ## QEMU virt development platform
 
 An independent AArch64 virt target supports platform discovery, PL011/GICv2,
