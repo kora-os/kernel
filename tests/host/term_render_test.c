@@ -2,7 +2,7 @@
 //
 // Host tests for the console library's renderer (user/libconsole/
 // term_render.c): a terminal drawn into a surface in memory, checked pixel by
-// pixel against the 8x8 font, with the surface's untouched pixels holding a
+// pixel against the 8x8 font and a 12x4 one, with the surface's untouched pixels holding a
 // marker.
 
 #include "test.h"
@@ -24,7 +24,7 @@ static void *host_alloc(void *ctx, size_t bytes) {
     return p;
 }
 
-static const term_host_t host = {host_alloc, NULL, NULL};
+static const term_host_t host = {host_alloc, NULL, NULL, NULL};
 
 #define SURFACE_W 100
 #define SURFACE_H 40
@@ -230,4 +230,54 @@ static void test_clipping(void) {
     CHECK(untouched(SURFACE_W, 0, STRIDE, SURFACE_H), "a clip larger than the surface stops at its edges");
 }
 
-TEST_MAIN(test_glyphs_and_place, test_attributes, test_cursor, test_dirty_rows_only, test_clipping)
+// A font 12 pixels wide (two bytes a row) and 4 tall: glyph 0 is blank, and
+// glyph 1, for 'A', has pixels 0-3 in row 0, 7 and 8 in row 1 (either side of
+// the byte boundary) and 11 in row 2.
+static const uint8_t wide_glyphs[2][8] = {
+    {0},
+    {0xF0, 0x00, 0x01, 0x80, 0x00, 0x10, 0x00, 0x00},
+};
+
+static bool wide_pixel(const uint8_t *glyph, int x, int y) {
+    return x >= 0 && x < 12 && (glyph[y * 2 + x / 8] & (0x80 >> (x % 8))) != 0;
+}
+
+// Whether the 12x4 cell at (x, y) shows `glyph` (bold: thickened) with rows
+// [solid_from, 4) solid.
+static bool shows_wide(int x, int y, const uint8_t *glyph, bool bold, int solid_from) {
+    for (int row = 0; row < 4; row++) {
+        for (int col = 0; col < 12; col++) {
+            bool on = row >= solid_from || wide_pixel(glyph, col, row) ||
+                      (bold && wide_pixel(glyph, col - 1, row));
+            if (px(x + col, y + row) != (on ? FG : BG)) {
+                return false;
+            }
+        }
+    }
+    return true;
+}
+
+static void test_font(void) {
+    term_font_t wide = {.width = 12, .height = 4, .row_bytes = 2, .glyph_bytes = 8,
+                        .glyph_count = 2, .glyphs = &wide_glyphs[0][0]};
+    wide.code_glyph['A'] = 1;
+    start(2, 1);
+    CHECK(render.font == &term_font_builtin, "the built-in font by default");
+    render.font = &wide;
+    feed("\x1b[?25l?A\x1b[1mA\x1b[0m\x1b[4mA\r\n");
+    term_render_flush(&render);
+    CHECK(shows_wide(2, 1, wide_glyphs[0], false, 4), "a cell is 12x4 pixels: '?' is blank");
+    CHECK(shows_wide(14, 1, wide_glyphs[1], false, 4), "'A' across two bytes a row, in the next cell");
+    CHECK(shows_wide(26, 1, wide_glyphs[1], true, 4), "bold thickens across the byte boundary");
+    CHECK(shows_wide(38, 1, wide_glyphs[1], false, 3), "underline: the bottom row");
+    CHECK(shows_wide(2, 5, wide_glyphs[0], false, 4) && shows_wide(86, 9, wide_glyphs[0], false, 4),
+          "the next row 4 pixels down, the 8th cell of the 3rd row at 86,9");
+    CHECK(untouched(SURFACE_W, 0, STRIDE, SURFACE_H) && untouched(0, 13, SURFACE_W, SURFACE_H),
+          "nothing below the 3 rows, nor past the surface (10 cells of 12 overflow it)");
+    feed("\x1b[?25h\x1b[4 q");
+    term_render_flush(&render);
+    CHECK(shows_wide(2, 5, wide_glyphs[0], false, 2), "an underline cursor: the bottom two rows");
+}
+
+TEST_MAIN(test_glyphs_and_place, test_attributes, test_cursor, test_dirty_rows_only, test_clipping,
+          test_font)

@@ -7,6 +7,11 @@ static void *term_alloc(void *ctx, size_t bytes) {
     return calloc(1, bytes);
 }
 
+static void term_free(void *ctx, void *buffer) {
+    (void)ctx;
+    free(buffer);
+}
+
 /* The terminal's answers to status requests (a cursor position report)
  * come back as typed input, as a real terminal's do. */
 static void term_reply(void *ctx, const char *bytes, size_t length) {
@@ -67,8 +72,49 @@ static void flush(console_t *c) {
     }
     term_render_flush(&c->render);
     c->cursor_col = t->col;
-    screen_damage(c->screen, 0, low * TERM_CELL_HEIGHT, (int)c->screen->width,
-                  (high - low + 1) * TERM_CELL_HEIGHT);
+    int cell_height = (int)c->render.font->height;
+    screen_damage(c->screen, 0, low * cell_height, (int)c->screen->width,
+                  (high - low + 1) * cell_height);
+}
+
+int console_set_font(console_t *c, const void *psf, size_t size) {
+    term_font_t font = term_font_builtin;
+    void *data = NULL;
+    if (psf != NULL) {
+        /* The font is read from the console's own copy: the sender's memory
+         * is lent only until the reply. */
+        data = malloc(size);
+        if (data == NULL) {
+            return -1;
+        }
+        memcpy(data, psf, size);
+        if (term_font_psf2(&font, data, size) != 0) {
+            free(data);
+            return -1;
+        }
+    }
+    screen_t *s = c->screen;
+    if (!term_resize(&c->term, s->width / font.width, s->height / font.height)) {
+        free(data);  /* larger than the screen, or no memory */
+        return -1;
+    }
+    free(c->font_data);
+    c->font_data = data;
+    c->font = font;
+    c->render.font = &c->font;
+    /* The cells may not reach the screen's right and bottom edges: blank
+     * what they leave. */
+    for (unsigned y = 0; y < s->height; y++) {
+        unsigned *row = (unsigned *)((char *)s->pixels + (size_t)y * s->pitch);
+        for (unsigned x = 0; x < s->width; x++) {
+            row[x] = TERM_DEFAULT_BG;
+        }
+    }
+    c->render.cursor_drawn = false;
+    term_render_all(&c->render);
+    c->cursor_col = c->term.col;
+    screen_damage(s, 0, 0, (int)s->width, (int)s->height);
+    return 0;
 }
 
 console_t *console_open(screen_t *s) {
@@ -77,7 +123,7 @@ console_t *console_open(screen_t *s) {
         return NULL;
     }
     c->screen = s;
-    term_host_t host = {term_alloc, term_reply, c};
+    term_host_t host = {term_alloc, term_reply, c, term_free};
     if (!term_init(&c->term, s->width / TERM_CELL_WIDTH, s->height / TERM_CELL_HEIGHT,
                    CONSOLE_HISTORY_LINES, &host)) {
         free(c);
@@ -195,6 +241,9 @@ static void packets(console_t *c) {
             con_edit_mode(&c->edit, (int)packet->length);
             answer(packet, 0);
             break;
+        case CON_FONT:
+            answer(packet, console_set_font(c, packet->buf, packet->length));
+            break;
         default:
             answer(packet, -1);
             break;
@@ -311,5 +360,8 @@ void console_close(console_t *c) {
     port_delete(c->port);
     sig_free(c->port_bit);
     sig_free(c->end_bit);
+    free(c->term.main_buf.cells);
+    free(c->term.alt_buf.cells);
+    free(c->font_data);
     free(c);
 }

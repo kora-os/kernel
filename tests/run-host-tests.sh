@@ -52,10 +52,23 @@ python3 "$ROOT/tests/check-console-fds.py" || failed=1
 python3 "$ROOT/tests/run-write-image-tests.py" || failed=1
 python3 "$ROOT/tests/run-ramdisk-image-tests.py" || failed=1
 run_test blkdev src/fs/blkdev.c
-# The console library (user/libconsole), built as the kernel builds it.
-TEST_FLAGS=(-DKORAOS_KERNEL -I "$ROOT/user")
+# The console library (user/libconsole), built as the kernel builds it. The
+# font test also reads a real font: Spleen 8x16, converted as the build does
+# (scripts/bdf2psf.py), as a C array.
+python3 "$ROOT/tests/run-font-tests.py" || failed=1
+python3 "$ROOT/scripts/bdf2psf.py" "$ROOT/third_party/spleen/spleen-8x16.bdf" "$OUT/spleen-8x16.psf"
+python3 - "$OUT/spleen-8x16.psf" > "$OUT/spleen_8x16_psf.h" <<'PY'
+import sys
+data = open(sys.argv[1], "rb").read()
+print("static const unsigned char spleen_8x16_psf[] = {")
+for i in range(0, len(data), 16):
+    print("    " + ", ".join("0x%02x" % b for b in data[i:i + 16]) + ",")
+print("};")
+PY
+TEST_FLAGS=(-DKORAOS_KERNEL -I "$ROOT/user" -I "$OUT")
 run_test term user/libconsole/term.c
-run_test term_render user/libconsole/term_render.c user/libconsole/term.c
+run_test font user/libconsole/font.c user/libconsole/term.c
+run_test term_render user/libconsole/term_render.c user/libconsole/font.c user/libconsole/term.c
 run_test edit user/libconsole/edit.c user/libconsole/keys.c user/libconsole/term.c
 TEST_FLAGS=()
 run_test printf src/lib/printf.c

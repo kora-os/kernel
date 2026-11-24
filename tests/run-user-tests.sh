@@ -79,13 +79,13 @@ run_test libk_console
 run_test libk_threads user/libk/mutex.c user/libk/job.c user/libk/heap.c
 run_test tools
 run_test demos user/libk/job.c user/libscreen/screen.c
-run_test condemo user/libconsole/term.c user/libconsole/term_render.c user/libscreen/screen.c
+run_test condemo user/libconsole/term.c user/libconsole/term_render.c user/libconsole/font.c user/libscreen/screen.c
 run_test screens user/libscreen/screen.c
 run_test console user/libscreen/console.c user/libscreen/screen.c user/libconsole/term.c \
-    user/libconsole/term_render.c user/libconsole/edit.c user/libconsole/keys.c
+    user/libconsole/term_render.c user/libconsole/font.c user/libconsole/edit.c user/libconsole/keys.c
 run_test cp
 run_test shell_input user/libscreen/console.c user/libscreen/screen.c user/libconsole/term.c \
-    user/libconsole/term_render.c user/libconsole/edit.c user/libconsole/keys.c
+    user/libconsole/term_render.c user/libconsole/font.c user/libconsole/edit.c user/libconsole/keys.c
 
 if [ "$failed" -ne 0 ]; then
     echo "user tests: FAILED"

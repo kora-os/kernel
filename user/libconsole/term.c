@@ -51,6 +51,27 @@ const uint8_t *term_glyph(uint8_t code) {
     return glyphs[code - 0x80];
 }
 
+// The Unicode code point each TERM_GLYPH_* code stands for, as a font's
+// Unicode table names it.
+static const uint32_t glyph_codepoints[TERM_GLYPH_END - 0x80] = {
+    [TERM_GLYPH_HLINE - 0x80] = 0x2500,     [TERM_GLYPH_VLINE - 0x80] = 0x2502,
+    [TERM_GLYPH_ULCORNER - 0x80] = 0x250C,  [TERM_GLYPH_URCORNER - 0x80] = 0x2510,
+    [TERM_GLYPH_LLCORNER - 0x80] = 0x2514,  [TERM_GLYPH_LRCORNER - 0x80] = 0x2518,
+    [TERM_GLYPH_LTEE - 0x80] = 0x251C,      [TERM_GLYPH_RTEE - 0x80] = 0x2524,
+    [TERM_GLYPH_TTEE - 0x80] = 0x252C,      [TERM_GLYPH_BTEE - 0x80] = 0x2534,
+    [TERM_GLYPH_CROSS - 0x80] = 0x253C,     [TERM_GLYPH_CHECKER - 0x80] = 0x2592,
+    [TERM_GLYPH_BLOCK - 0x80] = 0x2588,     [TERM_GLYPH_DIAMOND - 0x80] = 0x25C6,
+    [TERM_GLYPH_BULLET - 0x80] = 0x00B7,    [TERM_GLYPH_DEGREE - 0x80] = 0x00B0,
+    [TERM_GLYPH_PLUSMINUS - 0x80] = 0x00B1,
+};
+
+uint32_t term_glyph_codepoint(uint8_t code) {
+    if (code < 0x80 || code >= TERM_GLYPH_END) {
+        return '?';
+    }
+    return glyph_codepoints[code - 0x80];
+}
+
 // DEC special graphics (ESC ( 0) for 0x5F..0x7E. Symbols the font lacks fall
 // back to a close ASCII character.
 static const uint8_t dec_graphics[0x7F - 0x5F] = {
@@ -1134,6 +1155,133 @@ int term_init(term_t *t, uint32_t cols, uint32_t rows, uint32_t history,
     t->buf = &t->alt_buf;
     clear_screen(t);  // the memory holds anything, not blanks
     full_reset(t);    // switches to and clears the main screen
+    return 1;
+}
+
+// --- Resizing -------------------------------------------------------------------
+
+// Line `row` of a buffer whose lines are `cols` wide (negative rows reach
+// into its history).
+static term_cell_t *ring_line(const term_buffer_t *b, uint32_t cols, int64_t row) {
+    int64_t idx = ((int64_t)b->top + row) % (int64_t)b->total_lines;
+    if (idx < 0) {
+        idx += b->total_lines;
+    }
+    return b->cells + (uint64_t)idx * cols;
+}
+
+// How many rows from the top of `b`'s screen must stay: down to the last
+// line with text, or the row the cursor is on.
+static uint32_t rows_used(const term_t *t, const term_buffer_t *b, uint32_t cursor_row) {
+    uint32_t used = cursor_row + 1;
+    for (uint32_t r = used; r < t->rows; r++) {
+        const term_cell_t *l = ring_line(b, t->cols, r);
+        for (uint32_t c = 0; c < t->cols; c++) {
+            if (l[c].ch != ' ') {
+                used = r + 1;
+                break;
+            }
+        }
+    }
+    return used;
+}
+
+// Fill `fresh` (cols x rows, its total_lines set) from `old` (the terminal's
+// present size): old screen row `shift` becomes row 0, and the history keeps
+// what fits. The pen's colours do not apply: padding is a default blank.
+static void move_lines(const term_t *t, term_buffer_t *fresh, const term_buffer_t *old,
+                       uint32_t cols, uint32_t rows, uint32_t shift) {
+    term_cell_t blank = {TERM_DEFAULT_FG, TERM_DEFAULT_BG, ' ', 0};
+    uint32_t capacity = fresh->total_lines - rows;
+    uint32_t history = old->history + shift < capacity ? old->history + shift : capacity;
+    uint32_t keep = cols < t->cols ? cols : t->cols;
+    fresh->top = history;
+    fresh->history = history;
+    for (int64_t row = -(int64_t)history; row < (int64_t)rows; row++) {
+        term_cell_t *to = ring_line(fresh, cols, row);
+        int64_t from_row = row + shift;
+        uint32_t c = 0;
+        if (from_row >= -(int64_t)old->history && from_row < (int64_t)t->rows) {
+            const term_cell_t *from = ring_line(old, t->cols, from_row);
+            for (; c < keep; c++) {
+                to[c] = from[c];
+            }
+        }
+        for (; c < cols; c++) {
+            to[c] = blank;
+        }
+    }
+    fresh->saved = old->saved;
+    fresh->saved.row = old->saved.row > shift ? old->saved.row - shift : 0;
+    if (fresh->saved.row >= rows) {
+        fresh->saved.row = rows - 1;
+    }
+    if (fresh->saved.col >= cols) {
+        fresh->saved.col = cols - 1;
+    }
+}
+
+static void give_back(term_t *t, void *cells) {
+    if (cells != NULL && t->host.free != NULL) {
+        t->host.free(t->host.ctx, cells);
+    }
+}
+
+int term_resize(term_t *t, uint32_t cols, uint32_t rows) {
+    cols = cols < TERM_MAX_COLS ? cols : TERM_MAX_COLS;
+    rows = rows < TERM_MAX_ROWS ? rows : TERM_MAX_ROWS;
+    if (cols == 0 || rows == 0 || t->host.alloc == NULL) {
+        return 0;
+    }
+    if (cols == t->cols && rows == t->rows) {
+        return 1;
+    }
+    uint32_t capacity = t->main_buf.total_lines - t->rows;
+    term_buffer_t main = {0}, alt = {0};
+    size_t line_bytes = (size_t)cols * sizeof(term_cell_t);
+    // The screens first: the scrollback is a nicety, kept if it fits.
+    alt.cells = t->host.alloc(t->host.ctx, rows * line_bytes);
+    alt.total_lines = rows;
+    if (alt.cells == NULL) {
+        return 0;
+    }
+    if (capacity > 0) {
+        main.cells = t->host.alloc(t->host.ctx, (rows + capacity) * line_bytes);
+        main.total_lines = rows + capacity;
+    }
+    if (main.cells == NULL) {
+        main.cells = t->host.alloc(t->host.ctx, rows * line_bytes);
+        main.total_lines = rows;
+    }
+    if (main.cells == NULL) {
+        give_back(t, alt.cells);
+        return 0;
+    }
+
+    bool on_main = t->buf == &t->main_buf;
+    uint32_t main_used = rows_used(t, &t->main_buf, on_main ? t->row : t->main_buf.saved.row);
+    uint32_t alt_used = rows_used(t, &t->alt_buf, on_main ? t->alt_buf.saved.row : t->row);
+    uint32_t main_shift = main_used > rows ? main_used - rows : 0;
+    uint32_t alt_shift = alt_used > rows ? alt_used - rows : 0;
+    move_lines(t, &main, &t->main_buf, cols, rows, main_shift);
+    move_lines(t, &alt, &t->alt_buf, cols, rows, alt_shift);
+    give_back(t, t->main_buf.cells);
+    give_back(t, t->alt_buf.cells);
+    t->main_buf = main;
+    t->alt_buf = alt;
+    t->buf = on_main ? &t->main_buf : &t->alt_buf;
+
+    uint32_t shift = on_main ? main_shift : alt_shift;
+    t->cols = cols;
+    t->rows = rows;
+    t->row = t->row > shift ? t->row - shift : 0;
+    t->row = t->row < rows ? t->row : rows - 1;
+    t->col = t->col < cols ? t->col : cols - 1;
+    t->wrap_pending = false;
+    t->margin_top = 0;
+    t->margin_bottom = rows - 1;
+    t->view_offset = 0;
+    mark_all(t);
     return 1;
 }
 

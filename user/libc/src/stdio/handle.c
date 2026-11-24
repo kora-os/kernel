@@ -105,6 +105,18 @@ int __con_mode(int mode) {
     return result == 0 ? 0 : -1;
 }
 
+int __con_font(const void *font, unsigned long size) {
+    __stdio_std_init();
+    if (stdout->port == 0) {
+        return -1;
+    }
+    fflush(stdout);  // what was written shows in the old font, before the change
+    __lock(&stdout->lock);
+    long result = transact(stdout, CON_FONT, (void *)font, size);
+    __unlock(&stdout->lock);
+    return result == 0 ? 0 : -1;
+}
+
 // POSIX isatty for the standard streams' numbers: whether stdin (0), stdout
 // (1) or stderr (2) is a console, the kernel's or a handler's. Files and every
 // other number are not.

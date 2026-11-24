@@ -48,7 +48,7 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
     foreach(name hello init echo termdemo ls cat)
         koraos_add_user_program(${name} "${USER_DIR}/${name}.c")
     endforeach()
-    foreach(name cp rm mkdir rmdir mv ps pindemo)
+    foreach(name cp rm mkdir rmdir mv ps pindemo font)
         koraos_add_user_program(${name} "${USER_DIR}/${name}.c")
     endforeach()
     # The console library (user/libconsole) is linked into the programs that
@@ -97,6 +97,27 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
     string(JOIN "\n" _programs ${USER_PROGRAM_ELVES})
     file(GENERATE OUTPUT "${USER_PROGRAM_MANIFEST}" CONTENT "${_programs}\n")
 
+    # The console fonts (sys:fonts): Spleen's BDFs (third_party/spleen),
+    # converted to PSF2.
+    find_package(Python3 REQUIRED COMPONENTS Interpreter)
+    set(FONT_BUILD_DIR "${CMAKE_CURRENT_BINARY_DIR}/fonts")
+    file(MAKE_DIRECTORY "${FONT_BUILD_DIR}")
+    set(FONT_FILES "")
+    foreach(size 5x8 6x12 8x16 12x24 16x32)
+        set(bdf "${SOURCE_ROOT}/third_party/spleen/spleen-${size}.bdf")
+        set(psf "${FONT_BUILD_DIR}/spleen-${size}.psf")
+        add_custom_command(
+            OUTPUT "${psf}"
+            COMMAND "${Python3_EXECUTABLE}" -I "${SOURCE_ROOT}/scripts/bdf2psf.py" "${bdf}" "${psf}"
+            DEPENDS "${bdf}" "${SOURCE_ROOT}/scripts/bdf2psf.py"
+            COMMENT "Converting font spleen-${size} to PSF2"
+            VERBATIM)
+        list(APPEND FONT_FILES "${psf}")
+    endforeach()
+    set(FONT_MANIFEST "${CMAKE_CURRENT_BINARY_DIR}/userfs-fonts.txt")
+    string(JOIN "\n" _fonts ${FONT_FILES})
+    file(GENERATE OUTPUT "${FONT_MANIFEST}" CONTENT "${_fonts}\n")
+
     set(FS_ROOT_DIR "${SOURCE_ROOT}/fsroot")
     set(FS_IMAGE_SCRIPT "${SOURCE_ROOT}/create-fs-image.sh")
     file(GLOB_RECURSE FS_ROOT_FILES LIST_DIRECTORIES true CONFIGURE_DEPENDS "${FS_ROOT_DIR}/*")
@@ -106,9 +127,10 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
     add_custom_command(
         OUTPUT "${IMAGE_PATH}"
         COMMAND "${FS_IMAGE_SCRIPT}" --fsroot "${FS_ROOT_DIR}" --output "${IMAGE_PATH}"
-                --programs-file "${USER_PROGRAM_MANIFEST}"
+                --programs-file "${USER_PROGRAM_MANIFEST}" --fonts-file "${FONT_MANIFEST}"
         DEPENDS ${FS_ROOT_FILES} ${USER_PROGRAM_ELVES} "${FS_IMAGE_SCRIPT}" "${FS_INPUT_MANIFEST}"
-                "${USER_PROGRAM_MANIFEST}" "${CMAKE_CURRENT_FUNCTION_LIST_FILE}"
+                "${USER_PROGRAM_MANIFEST}" ${FONT_FILES} "${FONT_MANIFEST}"
+                "${CMAKE_CURRENT_FUNCTION_LIST_FILE}"
         COMMENT "Building FAT32 ramdisk image koraos.img"
         VERBATIM)
     # Single dependency target prevents parallel kernel variants from racing to

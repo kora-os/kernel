@@ -32,6 +32,7 @@ Options:
   --volume LABEL     FAT32 volume label (default: KORAOS)
   --bindir DIR       Install DIR/*.elf into /bin (suffix stripped)
   --programs-file FILE  Install only the ELF paths listed in FILE, one per line
+  --fonts-file FILE  Install the font files listed in FILE, one per line, into /fonts
   -h, --help         Show this message
 EOF
 }
@@ -44,6 +45,7 @@ size_mb=4
 volume_label="KORAOS"
 bindir=""
 programs_file=""
+fonts_file=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -62,6 +64,9 @@ while [[ $# -gt 0 ]]; do
   --bindir)
     shift; [[ $# -gt 0 ]] || { echo "Missing value for --bindir" >&2; exit 1; }
     bindir="$1" ;;
+  --fonts-file)
+    shift; [[ $# -gt 0 ]] || { echo "Missing value for --fonts-file" >&2; exit 1; }
+    fonts_file="$1" ;;
   --programs-file)
     shift; [[ $# -gt 0 ]] || { echo "Missing value for --programs-file" >&2; exit 1; }
     programs_file="$1" ;;
@@ -134,6 +139,17 @@ if [[ ${#programs[@]} -gt 0 ]]; then
     stem=$(basename "$elf" .elf)
     mcopy -Q -i "$image_temp" "$elf" "::/bin/$stem"
   done
+fi
+
+if [[ -n "$fonts_file" ]]; then
+  [[ -f "$fonts_file" ]] || { echo "Missing font manifest: $fonts_file" >&2; exit 1; }
+  echo "Installing fonts into /fonts"
+  mmd -i "$image_temp" ::/fonts 2>/dev/null || true
+  while IFS= read -r font || [[ -n "$font" ]]; do
+    [[ -n "$font" ]] || continue
+    [[ -f "$font" ]] || { echo "Missing font: $font" >&2; exit 1; }
+    mcopy -Q -i "$image_temp" "$font" "::/fonts/$(basename "$font")"
+  done < "$fonts_file"
 fi
 
 echo "Contents:"

@@ -2,7 +2,7 @@
 //
 // Host test of a console on a screen (user/libscreen/console.c) on the fake
 // kernel: its programs' packets (writes shown, reads held until a line is
-// ready and answered in order, modes), readers that end, Ctrl+C, the
+// ready and answered in order, modes, fonts), readers that end, Ctrl+C, the
 // scrollback keys, and the rows it reports changed to the screen manager. The
 // screen and the manager are played here.
 
@@ -360,6 +360,68 @@ static void test_modes_and_keys(void) {
     CHECK(typed.count == 0 && !typed_out, "every key was taken");
 }
 
+// A PSF2 font of 12x16 cells (two bytes a row): '?' blank, 'A' all set.
+static uint8_t psf[32 + 2 * 32 + 4];
+
+static void put32(uint8_t *p, uint32_t v) {
+    for (int i = 0; i < 4; i++) {
+        p[i] = (uint8_t)(v >> (8 * i));
+    }
+}
+
+static void make_font(void) {
+    memset(psf, 0, sizeof(psf));
+    uint32_t header[8] = {0x864AB572u, 0, 32, 1, 2, 32, 16, 12};
+    for (int i = 0; i < 8; i++) {
+        put32(psf + 4 * i, header[i]);
+    }
+    memset(psf + 32 + 32, 0xFF, 32);
+    memcpy(psf + 32 + 64, "?\xff" "A\xff", 4);
+}
+
+static void test_fonts(void) {
+    make_font();
+    for (int i = 0; i < WIDTH * HEIGHT; i++) {
+        pixels[i] = 0x123456;
+    }
+    struct con_packet font = {CON_FONT, -9, psf, sizeof(psf)};
+    put(&font, 50);
+    answer_count = 0;
+    damages = 0;
+    service(SIG_MASK(PORT_BIT));
+    CHECK(answer_count == 1 && font.result == 0, "a PSF2 font is taken");
+    CHECK(c->term.cols == 26 && c->term.rows == 6 && c->font.width == 12 &&
+              c->render.font == &c->font,
+          "the console is 26x6 cells of 12x16 (%ux%u)", c->term.cols, c->term.rows);
+    CHECK(c->font_data != NULL && c->font_data != (void *)psf, "drawn from its own copy");
+    CHECK(damages == 1 && damage_y == 0 && damage_height == HEIGHT, "drawn again whole");
+    CHECK(pixels[WIDTH - 1] == TERM_DEFAULT_BG && pixels[(HEIGHT - 1) * WIDTH + 315] == TERM_DEFAULT_BG,
+          "the margin the cells leave is blanked");
+    memset(psf, 0, sizeof(psf));  // the sender's memory is its own again
+    uint32_t row = c->term.row, col = c->term.col;
+    damages = 0;
+    console_write(c, "A", 1);
+    CHECK(pixels[row * 16 * WIDTH + col * 12] == TERM_DEFAULT_FG &&
+              pixels[(row * 16 + 15) * WIDTH + col * 12 + 11] == TERM_DEFAULT_FG,
+          "'A' fills its 12x16 cell, from the copy");
+    CHECK(damages == 1 && damage_y == (int)row * 16 && damage_height == 16,
+          "and its row, 16 pixels high, is reported");
+
+    static char junk[40] = "not a font";
+    struct con_packet bad = {CON_FONT, -9, junk, sizeof(junk)};
+    put(&bad, 50);
+    service(SIG_MASK(PORT_BIT));
+    CHECK(bad.result == -1 && c->term.cols == 26 && c->font.width == 12,
+          "a file that is not a font is refused; the console stays as it was");
+
+    struct con_packet builtin = {CON_FONT, -9, NULL, 0};
+    put(&builtin, 50);
+    service(SIG_MASK(PORT_BIT));
+    CHECK(builtin.result == 0 && c->term.cols == 40 && c->term.rows == 12 &&
+              c->font_data == NULL && c->font.glyphs == NULL,
+          "NULL: back to the built-in font, 40x12");
+}
+
 static void test_run(void) {
     int code = 0;
     CHECK(console_run(c, "nosuch", 1, (char *[]){"nosuch", NULL}, CONSOLE_BREAK_KILL, &code) == -1,
@@ -410,5 +472,6 @@ static void test_close(void) {
     fake_set_handler(NULL);
 }
 
-TEST_MAIN(setup, test_writes, test_reads, test_modes_and_keys, test_run, test_manager_ends,
+TEST_MAIN(setup, test_writes, test_reads, test_modes_and_keys, test_fonts, test_run,
+          test_manager_ends,
           test_close)

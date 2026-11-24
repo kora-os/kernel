@@ -27,7 +27,7 @@ static void *host_alloc(void *ctx, size_t bytes) {
     return p;
 }
 
-static const term_host_t host = {host_alloc, NULL, NULL};
+static const term_host_t host = {host_alloc, NULL, NULL, NULL};
 static term_t t;
 static con_edit_t e;
 

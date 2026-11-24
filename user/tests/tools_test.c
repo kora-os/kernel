@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
 // Host tests of the small tools on the fake kernel: echo, hello, cat, ls,
-// mkdir, rmdir, rm, mv, ps and init. Each program's actual source is
+// mkdir, rmdir, rm, mv, ps, init and font. Each program's actual source is
 // included with its main renamed; a test runs it with an argv and checks its
 // exit status, what it printed on stdout and on stderr, and what it did to
 // the filesystem. Messages belong on stderr, results on stdout.
@@ -43,6 +43,9 @@
 #define main init_main
 #include "../init.c"
 #undef main
+#define main font_main
+#include "../font.c"
+#undef main
 
 // The calls the fake kernel leaves to the test: a directory listing, a task
 // list, and a child that prints straight to the console.
@@ -62,6 +65,12 @@ static int have_handles;
 static struct std_handle handles[3];
 static const char *typed;
 static int modes_asked;
+// The fonts the handler was given (CON_FONT): the last one's bytes, and
+// whether it takes them.
+static int fonts_given, font_refused;
+static char font_got[64];
+static unsigned long font_got_length;
+static int font_got_null;
 static struct con_packet *pending;
 static int pending_reply;
 
@@ -143,6 +152,15 @@ static long kernel(long number, long a0, long a1, long a2, long a3) {
         if (packet->op == CON_MODE) {
             modes_asked++;
             packet->result = packet->length == CON_COOKED ? 0 : -1;
+        } else if (packet->op == CON_FONT) {
+            fonts_given++;
+            font_got_null = packet->buf == NULL;
+            font_got_length = packet->length;
+            if (packet->buf != NULL && packet->length < sizeof(font_got)) {
+                memcpy(font_got, packet->buf, packet->length);
+                font_got[packet->length] = '\0';
+            }
+            packet->result = font_refused ? -1 : 0;
         } else if (packet->op == CON_READ) {
             size_t n = 0;
             while (n < packet->length && typed[n] && (n == 0 || typed[n - 1] != '\n')) {
@@ -179,6 +197,14 @@ static void stdin_is(struct std_handle handle) {
     handles[1] = handles[2] = (struct std_handle){STD_CONSOLE, 0};
 }
 
+// stdout a console handler's (fonts go there), stdin and stderr the console.
+static void stdout_is_handler(void) {
+    fake_reset_std_streams();
+    have_handles = 1;
+    handles[0] = handles[2] = (struct std_handle){STD_CONSOLE, 0};
+    handles[1] = (struct std_handle){STD_PORT, HANDLER_PORT};
+}
+
 // Back to the kernel console for all three.
 static void console_stdin(void) {
     fake_reset_std_streams();
@@ -192,6 +218,8 @@ static void reset(void) {
     fake_set_handler(kernel);
     listing_size = listing_next = 0;
     readdir_fails = 0;
+    fonts_given = font_refused = font_got_null = 0;
+    font_got_length = 0;
     have_display = runs = 0;
     memset(run_us, 0, sizeof(run_us));
 }
@@ -217,6 +245,7 @@ static int run(int (*program)(int, char **), char **argv) {
 #define rmdir_run rmdir_main
 #define rm_run rm_main
 #define mv_run mv_main
+#define font_run font_main
 
 // The programs whose main takes no arguments.
 static int hello_run(int argc, char **argv) {
@@ -456,4 +485,71 @@ static void test_init(void) {
           "init reports a manager that cannot start");
 }
 
-TEST_MAIN(test_echo_hello, test_cat, test_ls, test_mkdir_rmdir, test_rm_mv, test_ps, test_init)
+static void test_font(void) {
+    static const struct listing fonts[] = {
+        {"spleen-8x16.psf", 0}, {"README", 0}, {"old.psf", 1}, {"tiny.psf", 0}};
+    reset();
+    console_stdin();
+    fake_mkdir("sys:fonts");
+    listing = fonts;
+    listing_size = 4;
+    CHECK(RUN(font, "font") == 0 && printed("spleen-8x16\ntiny\nbuiltin\n", ""),
+          "font lists the .psf files of sys:fonts, and builtin");
+    CHECK(fake_open_fds() == 0 && fonts_given == 0, "closes the directory, sends no font");
+    reset();
+    console_stdin();
+    CHECK(RUN(font, "font") == 1 && printed("", "font: no sys:fonts\n"), "no sys:fonts");
+
+    reset();
+    fake_put_file("sys:fonts/tiny.psf", "PSF2 bytes", 10);
+    stdout_is_handler();
+    CHECK(RUN(font, "font", "tiny") == 0 && fonts_given == 1 && font_got_length == 10 &&
+              strcmp(font_got, "PSF2 bytes") == 0,
+          "font NAME sends sys:fonts/NAME.psf to stdout's console, whole");
+    CHECK(fake_open_fds() == 0, "and closes it");
+    reset();
+    fake_put_file("work:my.font", "other", 5);
+    stdout_is_handler();
+    CHECK(RUN(font, "font", "work:my.font") == 0 && strcmp(font_got, "other") == 0,
+          "a name with ':' (or '/') is a path");
+    reset();
+    stdout_is_handler();
+    CHECK(RUN(font, "font", "builtin") == 0 && fonts_given == 1 && font_got_null &&
+              font_got_length == 0,
+          "font builtin sends no font: the built-in one");
+
+    reset();
+    stdout_is_handler();
+    CHECK(RUN(font, "font", "nosuch") == 1 && fonts_given == 0 &&
+              printed("", "font: cannot read sys:fonts/nosuch.psf\n"),
+          "a font that is not there");
+    reset();
+    fake_mkdir("sys:fonts/dir.psf");
+    stdout_is_handler();
+    CHECK(RUN(font, "font", "dir") == 1 && fonts_given == 0, "a directory is not a font");
+    reset();
+    fake_put_file("sys:fonts/tiny.psf", "PSF2 bytes", 10);
+    stdout_is_handler();
+    font_refused = 1;
+    CHECK(RUN(font, "font", "tiny") == 1 && fonts_given == 1 &&
+              printed("", "font: cannot use sys:fonts/tiny.psf here: not a PSF2 font, too large, "
+                          "or not on a console with fonts\n"),
+          "a font the console refuses");
+    reset();
+    console_stdin();
+    fake_put_file("sys:fonts/tiny.psf", "PSF2 bytes", 10);
+    CHECK(RUN(font, "font", "tiny") == 1 && fonts_given == 0, "the kernel console has no fonts");
+    reset();
+    console_stdin();
+    CHECK(RUN(font, "font", "builtin") == 1 &&
+              strcmp(fake_output(2, NULL), "font: this console has no fonts\n") == 0,
+          "not even the built-in one to go back to");
+    CHECK(fake_open_fds() == 0, "every file closed");
+    reset();
+    console_stdin();
+    CHECK(RUN(font, "font", "a", "b") == 2 &&
+              printed("", "usage: font [NAME | path | builtin]\n"), "usage");
+}
+
+TEST_MAIN(test_echo_hello, test_cat, test_ls, test_mkdir_rmdir, test_rm_mv, test_ps, test_init,
+          test_font)

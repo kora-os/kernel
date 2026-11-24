@@ -2,14 +2,16 @@
 #pragma once
 
 #include "libconsole/con_base.h"
+#include "libconsole/font.h"
 #include "libconsole/term.h"
 
-// Draws a terminal (libconsole/term.h) into a surface with the built-in 8x8
-// font. The terminal marks the rows that changed; a flush redraws just those,
-// then the cursor. It only writes pixels, never reads them, so a surface may
-// be uncached memory such as a framebuffer.
+// Draws a terminal (libconsole/term.h) into a surface with a font
+// (libconsole/font.h): the built-in 8x8 one unless the program sets another.
+// The terminal marks the rows that changed; a flush redraws just those, then
+// the cursor. It only writes pixels, never reads them, so a surface may be
+// uncached memory such as a framebuffer.
 
-// The size of a cell in pixels.
+// The size of a cell of the built-in font, in pixels.
 #define TERM_CELL_WIDTH 8
 #define TERM_CELL_HEIGHT 8
 
@@ -37,13 +39,16 @@ typedef struct {
     term_t *term;
     term_surface_t surface;
     int32_t x, y;          // where the top-left cell goes on the surface
+    const term_font_t *font;  // a cell is font->width by font->height pixels
     bool cursor_drawn;     // the cursor is drawn, in row cursor_row
     uint32_t cursor_row;
 } term_render_t;
 
 // Draw `term` on a copy of `surface` with its top-left cell at (x, y), which
-// may lie partly or wholly outside the surface. Draws nothing yet. A program
-// may change `surface`, `x` and `y` later, then call term_render_all().
+// may lie partly or wholly outside the surface, with the built-in font. Draws
+// nothing yet. A program may change `surface`, `x`, `y` and `font` later (the
+// font as large as the terminal's cells were sized for), then call
+// term_render_all().
 void term_render_init(term_render_t *render, term_t *term, const term_surface_t *surface,
                       int32_t x, int32_t y);
 

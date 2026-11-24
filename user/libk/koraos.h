@@ -383,6 +383,13 @@ int isatty(int fd);
 static inline int console_mode(int mode) {
     return __con_mode(mode);
 }
+/* A console handler's font, for stdout: a PSF2 font (`size` bytes at `psf`,
+ * which the handler copies), or NULL for its built-in 8x8 font. The console
+ * resizes to the cells the font gives. 0, or -1 when stdout is not a handler
+ * that has fonts, or the font is not one it can use. */
+static inline int console_font(const void *psf, unsigned long size) {
+    return __con_font(psf, size);
+}
 
 int waitpid(int pid, int *code, int flags);
 int getpid(void);  /* the program's pid, the same in all its threads */

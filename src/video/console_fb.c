@@ -23,7 +23,7 @@ static void console_reply(void *ctx, const char *bytes, size_t length) {
     }
 }
 
-static const term_host_t console_host = {console_alloc, console_reply, NULL};
+static const term_host_t console_host = {console_alloc, console_reply, NULL, NULL};
 
 void fb_console_flush(fb_console_t *console) {
     if (console) {

@@ -33,6 +33,12 @@ static size_t shown_len;
 static const char *typed;  // what a CON_READ hands out, a byte at a time per request
 static unsigned packets, writes, reads, modes, reply_ports;
 static long last_mode = -1, mode_result;
+// CON_FONT packets: how many, the last one's buffer and length, and the
+// text shown before it came.
+static unsigned fonts;
+static const void *font_buf;
+static unsigned long font_length;
+static char shown_before_font[64];
 static int handler_gone, return_unhandled;
 static struct {
     void *msg;
@@ -88,6 +94,12 @@ static long kernel(long number, long a0, long a1, long a2, long a3) {
                 CHECK(p->buf == NULL, "a mode packet carries no buffer");
                 last_mode = (long)p->length;
                 p->result = mode_result;
+            } else if (p->op == CON_FONT) {
+                fonts++;
+                font_buf = p->buf;
+                font_length = p->length;
+                memcpy(shown_before_font, shown, shown_len + 1);
+                p->result = mode_result;
             }
         }
         pending.msg = p;
@@ -129,7 +141,9 @@ static void reset(void) {
     asked = 0;
     shown_len = 0;
     shown[0] = '\0';
-    packets = writes = reads = modes = reply_ports = 0;
+    packets = writes = reads = modes = reply_ports = fonts = 0;
+    font_buf = NULL;
+    font_length = 0;
     last_mode = -1;
     mode_result = 0;
     handler_gone = return_unhandled = 0;
@@ -302,4 +316,33 @@ static void test_modes(void) {
     CHECK(__con_mode(CON_RAW) == -1, "a handler that is gone");
 }
 
-TEST_MAIN(test_console, test_files, test_console_handler, test_freopen, test_modes)
+static void test_fonts(void) {
+    static const char psf[] = "a font";
+    reset();
+    CHECK(__con_font(psf, 6) == -1 && packets == 0, "the kernel console has no fonts");
+    reset();
+    have_handles = 1;
+    set(0, STD_PORT, HANDLER_PORT);
+    set(1, STD_FILE, open_file("fonts.txt", 0x102));  // O_RDWR | O_CREAT
+    set(2, STD_CONSOLE, 0);
+    CHECK(__con_font(psf, 6) == -1 && packets == 0, "a file stdout has none, a handler's stdin aside");
+    reset();
+    have_handles = 1;
+    set(0, STD_CONSOLE, 0);
+    set(1, STD_PORT, HANDLER_PORT);
+    set(2, STD_CONSOLE, 0);
+    printf("before");
+    CHECK(__con_font(psf, 6) == 0 && fonts == 1 && font_buf == psf && font_length == 6,
+          "a handler's stdout gets a CON_FONT packet with the font, in place");
+    CHECK(strcmp(shown_before_font, "before") == 0, "what was written before is shown first");
+    CHECK(__con_font(NULL, 0) == 0 && fonts == 2 && font_buf == NULL && font_length == 0,
+          "NULL: the built-in font");
+    mode_result = -1;
+    CHECK(__con_font(psf, 6) == -1, "a handler that refuses it");
+    mode_result = 0;
+    handler_gone = 1;
+    CHECK(__con_font(psf, 6) == -1, "a handler that is gone");
+}
+
+TEST_MAIN(test_console, test_files, test_console_handler, test_modes, test_fonts,
+          test_freopen)  // last: it closes stdout

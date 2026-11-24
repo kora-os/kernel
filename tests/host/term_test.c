@@ -9,8 +9,8 @@
 // --- The host the terminal runs on -------------------------------------------
 
 // Memory comes from a static arena rather than the heap, so LeakSanitizer (on
-// by default with ASan on Linux) has nothing to report: a terminal never
-// frees. The arena is filled with junk first: the terminal must not rely on
+// by default with ASan on Linux) has nothing to report: buffers a resize
+// replaces are only counted. The arena is filled with junk first: the terminal must not rely on
 // zeroed memory.
 static uint8_t arena[16 * 1024 * 1024] __attribute__((aligned(16)));
 static size_t arena_used;
@@ -46,7 +46,7 @@ static void host_reply(void *ctx, const char *bytes, size_t length) {
     }
 }
 
-static const term_host_t host = {host_alloc, host_reply, arena};
+static const term_host_t host = {host_alloc, host_reply, arena, NULL};
 
 // --- Helpers ------------------------------------------------------------------
 
@@ -284,18 +284,107 @@ static void test_host(void) {
     CHECK(!term_init(&t, 10, 4, 100, &host), "too little memory for both screens fails");
     arena_limit = sizeof(arena);
 
-    term_host_t silent = {host_alloc, NULL, arena};
+    term_host_t silent = {host_alloc, NULL, arena, NULL};
     CHECK(term_init(&t, 10, 4, 0, &silent), "a host may take no replies");
     nreplies = 0;
     feed("\x1b[6n\x1b[c");
     CHECK(nreplies == 0, "status requests without a reply hook are dropped");
-    term_host_t none = {NULL, NULL, NULL};
+    term_host_t none = {NULL, NULL, NULL, NULL};
     CHECK(!term_init(&t, 10, 4, 0, &none), "a host with no memory gets no terminal");
     CHECK(!term_init(&t, 0, 4, 0, &host), "zero columns fail");
     CHECK(term_init(&t, TERM_MAX_COLS + 50, TERM_MAX_ROWS + 50, 0, &host) &&
           t.cols == TERM_MAX_COLS && t.rows == TERM_MAX_ROWS, "the grid is clamped to its maximum");
 }
 
+// Buffers given back by term_resize: the arena keeps them, as a host that
+// never frees does; here they are only counted.
+static void *freed[8];
+static unsigned frees;
+
+static void host_free(void *ctx, void *buffer) {
+    CHECK(ctx == &arena, "the host context reaches free");
+    freed[frees++ % 8] = buffer;
+}
+
+static void test_resize(void) {
+    term_host_t freeing = {host_alloc, host_reply, arena, host_free};
+    CHECK(term_init(&t, 10, 4, 5, &freeing), "a 10x4 terminal with 5 lines of scrollback");
+    feed("1\r\n2\r\nabcdefgh");
+    void *main_cells = t.main_buf.cells, *alt_cells = t.alt_buf.cells;
+    frees = 0;
+    unsigned before = allocations;
+    CHECK(term_resize(&t, 10, 4) == 1 && allocations == before && frees == 0,
+          "the same size: nothing to do");
+
+    // Fewer rows: the cursor's line stays, the lines above it go to the
+    // scrollback.
+    CHECK(term_resize(&t, 10, 2) == 1 && t.cols == 10 && t.rows == 2, "10x2");
+    ROW(0, "2");
+    ROW(1, "abcdefgh");
+    CHECK(t.row == 1 && t.col == 8 && t.main_buf.history == 1 && t.main_buf.total_lines == 7,
+          "the cursor follows its line; one line of history, its capacity kept");
+    CHECK(frees == 2 && freed[0] == main_cells && freed[1] == alt_cells,
+          "the old buffers are given back");
+    term_scroll_view(&t, 1);
+    ROW(0, "1");
+    term_scroll_view(&t, -1);
+
+    // Narrower: lines cut; wider: padded with default blanks, whatever the pen.
+    CHECK(term_resize(&t, 3, 2) == 1, "3x2");
+    ROW(1, "abc");
+    CHECK(t.col == 2, "the cursor's column clamped (%u)", t.col);
+    feed("\x1b[41m");
+    CHECK(term_resize(&t, 6, 5) == 1, "6x5");
+    ROW(0, "2");
+    ROW(1, "abc");
+    ROW(2, "");
+    CHECK(cell(1, 5)->ch == ' ' && cell(1, 5)->bg == TERM_DEFAULT_BG && cell(4, 0)->bg == TERM_DEFAULT_BG,
+          "the padding is a default blank, not the pen's red");
+    CHECK(t.row == 1 && t.main_buf.history == 1, "more rows take nothing back from the history");
+
+    // Text below the cursor stays too.
+    feed("\x1b[5;1HZ\x1b[1;1H");
+    CHECK(term_resize(&t, 6, 3) == 1, "6x3");
+    ROW(0, "");
+    ROW(1, "");
+    ROW(2, "Z");
+    CHECK(t.row == 0 && t.main_buf.history == 3, "the cursor at the top; two more lines of history");
+    term_scroll_view(&t, 3);
+    ROW(0, "1");
+    ROW(1, "2");
+    ROW(2, "abc");
+    term_scroll_view(&t, -3);
+
+    // The margins and the view are reset.
+    feed("\x1b[2;3r");
+    term_scroll_view(&t, 1);
+    CHECK(term_resize(&t, 6, 4) == 1 && t.margin_top == 0 && t.margin_bottom == 3 &&
+              t.view_offset == 0, "margins and the view reset");
+
+    // The alternate screen is resized too, and the main one is there after it.
+    feed("\x1b[?1049h\x1b[HALT");
+    CHECK(term_resize(&t, 8, 2) == 1 && t.buf == &t.alt_buf, "resized on the alternate screen");
+    ROW(0, "ALT");
+    feed("\x1b[?1049l");
+    CHECK(t.buf == &t.main_buf, "back on the main screen");
+    ROW(1, "Z");
+
+    // Short of memory: as it was.
+    arena_limit = arena_used;
+    frees = 0;
+    CHECK(term_resize(&t, 20, 10) == 0 && t.cols == 8 && t.rows == 2 && frees == 0,
+          "with no memory for the new buffers, the terminal stays as it was");
+    ROW(1, "Z");
+    arena_limit = arena_used + (size_t)20 * 10 * sizeof(term_cell_t) * 2 + 64;
+    CHECK(term_resize(&t, 20, 10) == 1 && t.main_buf.total_lines == 10 &&
+              t.main_buf.history == 0, "with memory for the screens only, no scrollback");
+    arena_limit = sizeof(arena);
+    CHECK(term_resize(&t, 0, 5) == 0 && t.cols == 20, "no columns: refused");
+    term_host_t no_alloc = {NULL, NULL, arena, NULL};
+    t.host = no_alloc;
+    CHECK(term_resize(&t, 5, 5) == 0, "no allocator: refused");
+}
+
 TEST_MAIN(test_host, test_autowrap, test_scrollback, test_history_ring_wraps, test_scroll_region,
           test_insert_delete_erase, test_alternate_screen, test_status_replies,
-          test_colours, test_utf8_and_line_drawing, test_modes_and_misc)
+          test_colours, test_utf8_and_line_drawing, test_modes_and_misc, test_resize)
