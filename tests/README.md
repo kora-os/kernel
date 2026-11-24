@@ -159,7 +159,15 @@ tests/run-micropython-tests.sh
 
 On the target, the QEMU smoke test runs `micropython` in the shell and
 types into its REPL (`print(1+1)`, big integers, a float), ends it with
-Ctrl+D and checks the shell's console is cooked again.
+Ctrl+D and checks the shell's console is cooked again. It presses Ctrl+C at
+the REPL's prompt (a new line, twice, and the REPL lives) and in a loop
+typed there (`KeyboardInterrupt`). Then it runs the Python probes the image
+carries in `sys:tests` (from `tests/user/*.py`): `mpprobe.py break` catches
+Ctrl+C in a loop and in a sleep and ends with 130 on one it does not catch;
+`mpprobe.py files` checks `sys.argv`, `sys.path` and a module beside it,
+`os` over volumes and assigns, `kora`, `time`, a 3 MB allocation on the
+growing heap and the stack check, writes, reads, renames and removes files
+where the boot volume is writable, and ends with `sys.exit(3)`.
 
 ## User program tests (`user/tests/`)
 

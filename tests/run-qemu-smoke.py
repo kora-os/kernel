@@ -1579,19 +1579,64 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         q.send("echo cooked\r")
         q.expect(rb"^cooked\r?$")
         q.expect(PROMPT)
-        # Ctrl+C ends it for now (KeyboardInterrupt is step 0b), in raw mode:
-        # the shell sets its console cooked again.
+    yield "micropython: a REPL on the console, and the console cooked after it", micropython
+
+    def micropython_break():
+        # Ctrl+C is KeyboardInterrupt: at the prompt a new line, in running
+        # code an exception, and the REPL goes on.
         q.send("micropython\r")
         q.expect(rb">>> ", timeout=30)
         time.sleep(0.2)
+        for _ in range(2):  # more than one: none is left pending at the prompt
+            q.key("ctrl-c")
+            q.expect(rb">>> ")
+            time.sleep(0.2)
+        q.send("while True: pass\r")
+        q.expect(rb"\.\.\. ")
+        q.send("\r")
+        time.sleep(0.5)
         q.key("ctrl-c")
-        q.expect(rb"\] exited with -9")
+        q.expect(rb"^KeyboardInterrupt")
+        q.expect(rb">>> ")
+        q.send("6 * 7\r")
+        q.expect(rb"^42\r?$")
+        q.expect(rb">>> ")
+        time.sleep(0.2)
+        q.key("ctrl-d")
+        q.expect(rb"\] exited with 0")
         q.expect(PROMPT)
-        q.send("echo again\r")
-        q.expect(rb"^again\r?$")
+        # A script catches it in a loop and in a sleep; one it does not catch
+        # ends it with 130.
+        q.send("micropython sys:tests/mpprobe.py break\r")
+        q.expect(rb"^mpprobe: looping", timeout=30)
+        time.sleep(0.3)
+        q.key("ctrl-c")
+        q.expect(rb"^mpprobe: KeyboardInterrupt in a loop")
+        q.expect(rb"^mpprobe: sleeping")
+        time.sleep(0.3)
+        q.key("ctrl-c")
+        q.expect(rb"^mpprobe: KeyboardInterrupt in a sleep")
+        q.expect(rb"^mpprobe: looping, not catching it")
+        time.sleep(0.3)
+        q.key("ctrl-c")
+        q.expect(rb"^KeyboardInterrupt")
+        q.expect(rb"\] exited with 130")
         q.expect(PROMPT)
-    yield ("micropython: a REPL on the console, and the console cooked after it, "
-           "also when Ctrl+C ends it"), micropython
+    yield "micropython: Ctrl+C is KeyboardInterrupt, at the prompt and in code", micropython_break
+
+    def micropython_files():
+        # A script from the userfs: its arguments, a module beside it, os over
+        # volumes and assigns, kora, time, a heap that grows, the stack
+        # check, and files written where the boot volume is writable.
+        q.send("micropython sys:tests/mpprobe.py files \"A B\"\r")
+        m = q.expect(rb"^mpprobe: (files written, read, renamed and removed|read-only boot volume"
+                     rb"|FAILED[^\r\n]*)", timeout=30)
+        if m.group(1).startswith(b"FAILED"):
+            raise Failure("mpprobe: %s" % m.group(1).decode(errors="replace"))
+        q.expect(rb"^mpprobe: ok")
+        q.expect(rb"\] exited with 3")
+        q.expect(PROMPT)
+    yield "micropython: a script with os, files, imports, kora and time", micropython_files
 
     def fonts():
         # `font` lists sys:fonts and switches the shell's console to another

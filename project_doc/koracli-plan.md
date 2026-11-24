@@ -1,6 +1,6 @@
 # KoraCLI plan
 
-Status: **step 0a done** (MicroPython runs as a program); the rest is planned. Phases 0 and 1 are broken into PRs
+Status: **phase 0 done** (MicroPython runs as a program, with files, `os` and Ctrl+C); the rest is planned. Phases 0 and 1 are broken into PRs
 below; the later phases are listed and get their PRs when they come up. The
 plan was agreed in a discussion on 2026-11-24.
 
@@ -122,7 +122,7 @@ From the spec's §17, with the PRs of phases 0 and 1:
   KoraOS's language (`user/micropython/unix/koraos`), and the shell sets its
   console back to cooked before each prompt, since a program killed in raw
   mode (Ctrl+C on `micropython`, until 0b) leaves it raw.
-- [ ] **0b. The port's essentials.** The GC heap (taken from `malloc` at
+- [x] **0b. The port's essentials.** The GC heap (taken from `malloc` at
   start, size *proposed* 4 MB), the stack limit from the declared size,
   `KeyboardInterrupt` from a break (step 21), `os` over volumes and assigns
   (`listdir`, `stat`, `mkdir`, `remove`, `rename`, `getcwd`, `chdir`), files
@@ -132,6 +132,18 @@ From the spec's §17, with the PRs of phases 0 and 1:
   Tests: smoke steps run a script from the userfs that lists a directory and
   writes a file (writable runs only), and Ctrl+C interrupts a loop with
   `KeyboardInterrupt`.
+  *Built:* the heap **grows** (the user's choice, 2026-11-24): it starts at
+  256 KB and MicroPython adds areas as allocations need them, doubling the
+  total, each at most half the free memory, and frees areas left empty
+  (`MICROPY_GC_SPLIT_HEAP_AUTO`). The break is polled by the VM at most
+  every 10 ms (the counter is read in user mode, the signal syscall only
+  then), and console reads go as the port's own packets so that waiting for
+  a key and for the break is one `sig_wait`: Ctrl+C at the prompt is a new
+  line, and no break is left pending there. `os` and files are the port's
+  own over libk and the libc (no VFS); `time` is extmod's. `sys.path` is the
+  script's directory, then `sys:python` (*proposed*). Also: line numbers in
+  tracebacks, exit codes as CPython's (130 for Ctrl+C), and the smoke test's
+  Python probes shipped in `sys:tests`.
 - [ ] **1a. The console's new parts.** In `user/libconsole` and
   `user/libscreen`, with libk wrappers:
   - F1 to F12 in `keys.c`, as xterm sends them, for every console;
@@ -214,9 +226,9 @@ Later phases, in a line each, to be split into PRs when they come up:
   Whether the others (the port, the Python side) wait too, as the console
   work did, or merge on green CI like the libc work.
 - **Where things live on the userfs:** KoraCLI's Python modules
-  (`sys:koracli/` proposed), the user's folder for wrappers and the startup
+  (`sys:koracli/` proposed), the library directory on `sys.path`
+  (`sys:python` for now), the user's folder for wrappers and the startup
   file.
-- **The GC heap size**, and whether it grows.
 - **Freezing** KoraCLI's modules into the binary later (faster start), at the
   cost of editing them on the machine.
 - **Which graphics layer is on top**, for the later layer (spec §10.2).

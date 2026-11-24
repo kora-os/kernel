@@ -5,8 +5,8 @@
 #pragma once
 
 // Ctrl+C reaches a program as a break (SIG_BREAK in libk), not as a byte, so
-// there is no interrupt character to watch for. KeyboardInterrupt from a
-// break is step 0b.
+// there is no interrupt character to watch for: hal.c turns the break into
+// KeyboardInterrupt.
 static inline void mp_hal_set_interrupt_char(int c) {
     (void)c;
 }

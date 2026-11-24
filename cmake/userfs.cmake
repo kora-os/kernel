@@ -139,6 +139,14 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
     string(JOIN "\n" _fonts ${FONT_FILES})
     file(GENERATE OUTPUT "${FONT_MANIFEST}" CONTENT "${_fonts}\n")
 
+    # Test files the smoke test runs on the target (sys:tests): the Python
+    # probes of tests/user, which programs cannot be.
+    file(GLOB TEST_FILES CONFIGURE_DEPENDS "${SOURCE_ROOT}/tests/user/*.py")
+    list(SORT TEST_FILES)
+    set(TEST_MANIFEST "${CMAKE_CURRENT_BINARY_DIR}/userfs-tests.txt")
+    string(JOIN "\n" _tests ${TEST_FILES})
+    file(GENERATE OUTPUT "${TEST_MANIFEST}" CONTENT "${_tests}\n")
+
     set(FS_ROOT_DIR "${SOURCE_ROOT}/fsroot")
     set(FS_IMAGE_SCRIPT "${SOURCE_ROOT}/create-fs-image.sh")
     file(GLOB_RECURSE FS_ROOT_FILES LIST_DIRECTORIES true CONFIGURE_DEPENDS "${FS_ROOT_DIR}/*")
@@ -149,8 +157,10 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
         OUTPUT "${IMAGE_PATH}"
         COMMAND "${FS_IMAGE_SCRIPT}" --fsroot "${FS_ROOT_DIR}" --output "${IMAGE_PATH}"
                 --programs-file "${USER_PROGRAM_MANIFEST}" --fonts-file "${FONT_MANIFEST}"
+                --tests-file "${TEST_MANIFEST}"
         DEPENDS ${FS_ROOT_FILES} ${USER_PROGRAM_ELVES} "${FS_IMAGE_SCRIPT}" "${FS_INPUT_MANIFEST}"
                 "${USER_PROGRAM_MANIFEST}" ${FONT_FILES} "${FONT_MANIFEST}"
+                ${TEST_FILES} "${TEST_MANIFEST}"
                 "${CMAKE_CURRENT_FUNCTION_LIST_FILE}"
         COMMENT "Building FAT32 ramdisk image koraos.img"
         VERBATIM)
