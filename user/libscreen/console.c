@@ -191,6 +191,8 @@ static void drop_waiting(console_t *c, int i) {
     c->waiting_count--;
 }
 
+static void break_read(console_t *c);
+
 static void keys(console_t *c) {
     struct input_event event;
     while (screen_event(c->screen, &event)) {
@@ -213,8 +215,11 @@ static void keys(console_t *c) {
         }
         con_edit_place(&c->edit, c->term.cols, c->term.col);
         con_edit_input(&c->edit, key.bytes, key.length);
-        if (con_edit_break(&c->edit) && c->on_break != NULL) {
-            c->on_break(c->break_ctx);
+        if (con_edit_break(&c->edit)) {
+            if (c->on_break != NULL) {
+                c->on_break(c->break_ctx);
+            }
+            break_read(c);
         }
     }
 }
@@ -270,6 +275,21 @@ static void ended_readers(console_t *c) {
     }
 }
 
+/* Answer the oldest read with `result`, and stop watching its program when
+ * it has no other read waiting. */
+static void answer_oldest(console_t *c, long result) {
+    answer(c->waiting[0].packet, result);
+    int sender = c->waiting[0].sender;
+    drop_waiting(c, 0);
+    bool still = false;
+    for (int i = 0; i < c->waiting_count; i++) {
+        still |= c->waiting[i].sender == sender;
+    }
+    if (!still) {
+        sig_on_end(sender, -1);
+    }
+}
+
 /* Answer the oldest reads while there is input for them. */
 static void reads(console_t *c) {
     while (c->waiting_count > 0) {
@@ -279,17 +299,20 @@ static void reads(console_t *c) {
         if (n == 0 && !end) {
             return;
         }
-        answer(packet, (long)n);
-        int sender = c->waiting[0].sender;
-        drop_waiting(c, 0);
-        bool still = false;
-        for (int i = 0; i < c->waiting_count; i++) {
-            still |= c->waiting[i].sender == sender;
-        }
-        if (!still) {
-            sig_on_end(sender, -1);
-        }
+        answer_oldest(c, (long)n);
     }
+}
+
+/* Ctrl+C in cooked mode dropped the line being typed: the oldest read waiting
+ * for a line ends with an empty one, after the break callback, so its program
+ * goes on (the shell prints a new prompt) knowing of the break. A waiting
+ * read never asks for 0 bytes (packets() answers those at once). */
+static void break_read(console_t *c) {
+    if (c->edit.mode != CON_COOKED || c->waiting_count == 0) {
+        return;
+    }
+    ((char *)c->waiting[0].packet->buf)[0] = '\n';
+    answer_oldest(c, 1);
 }
 
 void console_service(console_t *c, unsigned got) {

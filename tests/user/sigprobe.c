@@ -62,7 +62,9 @@ static void allocation(void) {
     int high = sig_alloc(-1), next = sig_alloc(-1);
     check(high == 31 && next == 30, "sig_alloc(-1) hands out the highest free bits");
     check(sig_alloc(31) == -1, "a bit is allocated once");
-    check(sig_alloc(FIRST_BIT - 1) == -1 && sig_alloc(0) == -1 && sig_alloc(32) == -1,
+    // Bit 0, the break, is the one system bit a program may take (breakprobe
+    // covers it): its allocation is not tried here.
+    check(sig_alloc(FIRST_BIT - 1) == -1 && sig_alloc(1) == -1 && sig_alloc(32) == -1,
           "system bits and bits past 31 are refused");
     check(sig_alloc(FIRST_BIT) == FIRST_BIT, "a free bit is allocated by number");
     int count = 3;

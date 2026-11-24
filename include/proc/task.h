@@ -224,15 +224,23 @@ void wait_queue_wake_all(struct wait_queue *wq);
 // happened: one set again before it is waited for counts once, so a waiter
 // looks at every source its signal stands for (all the messages on a port)
 // and must cope with finding nothing. A thread allocates the bits it uses;
-// bits 0 to SIG_SYSTEM_BITS - 1 are kept for the system (bit 0 is the break,
-// Ctrl+C, that user consoles send: SIG_BREAK in libk). The bits are
+// bits 0 to SIG_SYSTEM_BITS - 1 are kept for the system. The bits are
 // sched_lock-protected, so interrupt handlers may signal.
+//
+// Bit 0 is the break (SIG_BREAK_BIT; SIG_BREAK in libk): Ctrl+C, which user
+// consoles send. Sent with task_send_signal (the sig_send syscall), it has a
+// default action: it ends the program, unless the thread it goes to has
+// allocated the bit, which says it handles breaks itself. Even then a break
+// arriving while the previous one is still pending (received, not yet waited
+// for or cleared) ends it, so two presses stop a program that is stuck.
 #define SIG_BITS 32
 #define SIG_SYSTEM_BITS 8
+#define SIG_BREAK_BIT 0
 
 // Allocate signal `bit` of the calling thread, or for -1 its highest free one,
 // and clear it. Returns the bit, or -1 (taken, kept for the system, or none
-// free).
+// free). Of the system bits only SIG_BREAK_BIT can be allocated, and only by
+// asking for it: -1 never picks it.
 int task_sig_alloc(int bit);
 
 // Free signal `bit` of the calling thread; ports that set it stop (ipc/port.h),
@@ -256,6 +264,13 @@ uint32_t task_sig_set(uint32_t values, uint32_t mask);
 // waits for one. Returns 0, or -1 if there is no such live thread. Safe from
 // interrupt handlers.
 int task_signal(int tid, uint32_t mask);
+
+// task_signal for the sig_send syscall, which gives a break its default
+// action (SIG_BREAK_BIT above): when the break is not the thread's to handle,
+// its program is ended instead, and the other signals in `mask` are set.
+// Returns 0, or -1 if there is no such live thread. Not from interrupt
+// handlers (ending a program needs the BKL).
+int task_send_signal(int tid, uint32_t mask);
 
 // Set the calling thread's signal `bit` when process `pid` ends (any
 // process, not only a child: SPAWN_SIGNAL is the same for one's own), once.

@@ -505,8 +505,9 @@ void task_msleep(uint64_t ms) {
 // like its state, so an interrupt handler may signal. Only the thread itself
 // allocates and frees its bits, under the BKL.
 
+// A bit a thread may allocate: its own, or the break (to handle it itself).
 static bool sig_bit_ok(int bit) {
-    return bit >= SIG_SYSTEM_BITS && bit < SIG_BITS;
+    return (bit >= SIG_SYSTEM_BITS && bit < SIG_BITS) || bit == SIG_BREAK_BIT;
 }
 
 // The live thread `tid` (not exited), under sched_lock: its pid cannot change
@@ -540,6 +541,34 @@ int task_signal(int tid, uint32_t mask) {
     bool found = signal_locked(tid, mask);
     spin_unlock_irqrestore(&sched_lock, flags);
     return found ? 0 : -1;
+}
+
+int task_send_signal(int tid, uint32_t mask) {
+    const uint32_t brk = 1u << SIG_BREAK_BIT;
+    if ((mask & brk) == 0) {
+        return task_signal(tid, mask);
+    }
+    int end_pid = 0;
+    uint64_t flags = spin_lock_irqsave(&sched_lock);
+    task_t *t = live_task(tid);
+    if (t == NULL) {
+        spin_unlock_irqrestore(&sched_lock, flags);
+        return -1;
+    }
+    // A kernel task has no program to end. A thread that allocated the bit
+    // handles breaks, unless the last one is still pending.
+    bool caught = t->proc == NULL ||
+                  ((t->sig_allocated & brk) != 0 && (t->sig_received & brk) == 0);
+    if (!caught) {
+        end_pid = t->proc->pid;
+        mask &= ~brk;
+    }
+    signal_locked(tid, mask);
+    spin_unlock_irqrestore(&sched_lock, flags);
+    if (end_pid != 0) {
+        task_kill(end_pid);  // under the BKL: gone already is fine
+    }
+    return 0;
 }
 
 // End watches (task_sig_on_end): whom to signal when a process ends. Under

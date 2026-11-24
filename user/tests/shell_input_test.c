@@ -25,7 +25,9 @@ static bool background_job_live;
 static bool last_argument_terminated, maximal_assign_received;
 // The break signal: with signals on, a foreground child's end is a signal
 // (bit 20), and the first wait sees Ctrl+C instead.
-static bool signals_on, child_killed;
+static bool signals_on, child_killed, break_allocated;
+static int kills, breaks_sent;
+static bool main_gone;  // the child's main thread ended, its others run
 static unsigned waits, cleared;
 #define END_BIT 20
 
@@ -128,16 +130,32 @@ static long kernel(long number, long a0, long a1, long a2, long a3) {
     }
     case SYS_KILL:
         child_killed |= a0 == 123;
+        kills++;
         return a0 == 999 ? -1 : 0;
     case SYS_SIG_ALLOC:
+        if (a0 == SIG_BREAK) {  // the shell handles breaks itself
+            break_allocated = true;
+            return SIG_BREAK;
+        }
         return signals_on ? END_BIT : -1;
+    case SYS_SIG_SEND:
+        // A break for the child, which does not handle breaks: the kernel ends
+        // it. With main_gone its main thread has ended: no thread to take it.
+        if (a0 == 123 && a1 == SIG_MASK(SIG_BREAK)) {
+            breaks_sent++;
+            if (main_gone) {
+                return -1;
+            }
+            child_killed = true;
+        }
+        return 0;
     case SYS_SIG_SET:
         cleared |= (unsigned)a1 & ~(unsigned)a0;
         return 0;
     case SYS_SIG_WAIT:
         CHECK(a0 == (SIG_MASK(END_BIT) | SIG_MASK(SIG_BREAK)), "it waits for the end or Ctrl+C");
         if (waits >= 10) {  // a break that kills nothing: end the test's child anyway
-            CHECK(false, "the shell kills its foreground program on Ctrl+C");
+            CHECK(false, "the shell passes Ctrl+C on to its foreground program");
             child_killed = true;
         }
         return waits++ == 0 ? SIG_MASK(SIG_BREAK) : SIG_MASK(END_BIT);
@@ -158,8 +176,10 @@ static void reset(void) {
     last_argc = last_spawn_flags = 0;
     background_job_live = false;
     last_argument_terminated = maximal_assign_received = false;
-    signals_on = child_killed = false;
+    signals_on = child_killed = break_allocated = false;
     waits = cleared = 0;
+    kills = breaks_sent = 0;
+    main_gone = false;
 }
 // The console input so far; the next read starts at its first byte again.
 static void feed(void) {
@@ -470,8 +490,16 @@ static void break_ends_the_foreground(void) {
     CHECK(last_spawn_flags == (SPAWN_NOWAIT | SPAWN_SIGNAL(END_BIT)),
           "starts at once, its end a signal (flags %#x)", last_spawn_flags);
     CHECK(cleared & SIG_MASK(SIG_BREAK), "an earlier Ctrl+C is forgotten first");
-    CHECK(child_killed && waits == 2 && output_contains("[123] exited with -9"),
-          "Ctrl+C kills it, and its end is reported");
+    CHECK(break_allocated, "the shell handles breaks itself");
+    CHECK(breaks_sent == 1 && kills == 0 && child_killed && waits == 2 &&
+              output_contains("[123] exited with -9"),
+          "Ctrl+C is passed on to it as a break, which ends it, and its end is reported");
+    reset();
+    signals_on = main_gone = true;
+    append("echo a\nexit\n");
+    CHECK(session() == 0 && breaks_sent == 1 && kills == 1 && child_killed &&
+              output_contains("[123] exited with -9"),
+          "a program whose main thread has ended is killed instead");
     reset();
     signals_on = true;
     append("echo a &\nexit\n");

@@ -361,7 +361,10 @@ in front at the end. A probe in front gets the debug console's mouse at the
 pointer's position in pixels (moved, clicked, the wheel turned); a
 screendump finds the pointer drawn there, and gone again once a key is
 typed. Ctrl+C ends the shell's program in front (`conprobe
-hang`), and at the prompt drops the line without touching the next program.
+hang`), and at the prompt drops the line for a new prompt without touching the
+next program; more of them at the prompt leave the shell running.
+`breakprobe` handles breaks itself (`sig_alloc(SIG_BREAK)`): the first Ctrl+C
+reaches it as a signal, and once it is stuck the second ends it.
 `font` lists the fonts, and switches the shell's console to Spleen 8x16 and
 16x32 and back to the built-in font: `conprobe size` asks the console its
 size each time (128x96, 128x48, 64x24); a missing font and a file that is

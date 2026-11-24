@@ -130,7 +130,12 @@ A program runs in EL0 with a deliberately small runtime:
   font (NULL: the built-in 8x8 one), as the `font` command does; the
   console resizes, so ask for its size again (`ESC [ 18 t`) if you lay
   text out by it. Ctrl+C ends the
-  program: the shell kills the one it runs in front, newcon its own. On the
+  program: the shell sends the one it runs in front a break, which ends it,
+  and newcon kills its own. A program that wants to stop cleanly instead
+  calls `sig_alloc(SIG_BREAK)` and checks the bit (`sig_set(0, 0)`) or waits
+  for it; a second Ctrl+C while the first is still set ends it anyway. In
+  cooked mode Ctrl+C also drops the line being typed and ends a waiting read
+  with an empty line. On the
   kernel console these do nothing: it is always raw, with no
   editing at all.
 - **`main` signature.** Either `int main(void)` or `int main(int argc, char

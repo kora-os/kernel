@@ -303,6 +303,32 @@ static void test_reads(void) {
     service(SIG_MASK(PORT_BIT) | SIG_MASK(KEY_BIT));
     CHECK(answer_count == 1 && eof.result == 0, "Ctrl+D: a read returns 0");
 
+    // Ctrl+C in cooked mode: the line typed is dropped, and the oldest read
+    // ends with an empty line after the break callback; one behind it waits on.
+    static char cut_buf[16], behind_buf[16];
+    struct con_packet cut = {CON_READ, -9, cut_buf, sizeof(cut_buf)};
+    struct con_packet behind = {CON_READ, -9, behind_buf, sizeof(behind_buf)};
+    put(&cut, 50);
+    put(&behind, 51);
+    service(SIG_MASK(PORT_BIT));
+    type_text("drop");
+    type_key(0x06, INPUT_MOD_LEFT_CTRL, 'c');
+    answer_count = 0;
+    service(SIG_MASK(KEY_BIT));
+    CHECK(broke == 1 && answer_count == 1 && answered[0] == &cut && cut.result == 1 &&
+              cut_buf[0] == '\n', "Ctrl+C ends the oldest read with an empty line");
+    CHECK(c->waiting_count == 1 && !watched[50] && watched[51], "the next read still waits");
+    type_text("kept\n");
+    answer_count = 0;
+    service(SIG_MASK(KEY_BIT));
+    CHECK(answer_count == 1 && answered[0] == &behind && behind.result == 5 &&
+              memcmp(behind_buf, "kept\n", 5) == 0, "and gets the next line, not the dropped one");
+    type_key(0x06, INPUT_MOD_LEFT_CTRL, 'c');
+    answer_count = 0;
+    service(SIG_MASK(KEY_BIT));
+    CHECK(broke == 2 && answer_count == 0, "Ctrl+C with no read waiting leaves nothing to read");
+    broke = 0;
+
     // Too many readers.
     static struct con_packet many[CONSOLE_READERS + 1];
     for (int i = 0; i <= CONSOLE_READERS; i++) {
@@ -334,9 +360,12 @@ static void test_modes_and_keys(void) {
     service(SIG_MASK(PORT_BIT));
     CHECK(answer_count == 1 && bad.result == -1, "an unknown packet is refused");
 
+    int waiting = c->waiting_count;
     type_key(0x06, INPUT_MOD_LEFT_CTRL, 'c');
+    answer_count = 0;
     service(SIG_MASK(KEY_BIT));
     CHECK(broke == 1, "Ctrl+C calls the break");
+    CHECK(answer_count == 0 && c->waiting_count == waiting, "and in raw mode ends no read");
 
     for (int i = 0; i < 30; i++) {
         console_write(c, "more output\n", 12);

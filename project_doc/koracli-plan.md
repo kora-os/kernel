@@ -38,8 +38,8 @@ What KoraCLI builds on:
 | # | Theme | Status (2026-11-24) |
 |---|---|---|
 | 19 | `<assert.h>`, `<inttypes.h>` | merged (#116) |
-| 20 | Stack size declared at link time; `thread_new` takes a size | done (#119) |
-| 21 | A break a program can catch: opt-in, a second break ends it anyway | planned |
+| 20 | Stack size declared at link time; `thread_new` takes a size | merged (#119) |
+| 21 | A break a program can catch: opt-in, a second break ends it anyway | done (#120) |
 
 Step 0a needs 19 and 20; step 0b needs 21.
 
