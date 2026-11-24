@@ -191,10 +191,15 @@ void kernel_main(uintptr_t dtb) {
   }
   task_reap_all();  // release anything left unreaped
 
-  // Nothing left to run: keep serving the serial line (the debug console) for
-  // as long as the machine is up, without the BKL.
+  // Nothing left to run: the serial line (the debug console) is served by its
+  // receive interrupt for as long as the machine is up, without the BKL. Wait
+  // for interrupts with them open (as since irq_enable above), not spinning:
+  // a poll loop would empty the UART before its interrupt is taken, keep the
+  // core busy and leave the interrupt path untried. The poll after each wake
+  // only picks up a byte the interrupt may have left behind.
   bkl_release_for_good();
   for (;;) {
     tty_poll_serial();
+    asm volatile("wfi" ::: "memory");
   }
 }
