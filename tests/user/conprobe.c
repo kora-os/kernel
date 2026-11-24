@@ -8,6 +8,10 @@
 //                   to raw mode and reports the bytes of the next 4 keys
 //                   ("conprobe: raw 71 1b 5b 41 ..."), and "conprobe: done"
 //   conprobe hang   reports "conprobe: hanging" and sleeps until killed
+//   conprobe size   asks its console for its size in characters (CSI 18 t,
+//                   answered in raw mode as typed input) and reports
+//                   "conprobe: size COLSxROWS" ("conprobe: no size" if the
+//                   answer is not one)
 #include "../../user/libk/koraos.h"
 
 static void report(const char *text) {
@@ -21,6 +25,30 @@ int main(int argc, char **argv) {
         for (;;) {
             msleep(1000);
         }
+    }
+    if (argc > 1 && !strcmp(argv[1], "size")) {
+        console_mode(CON_RAW);
+        fputs("\x1b[18t", stdout);
+        fflush(stdout);
+        char answer[32];  // ESC [ 8 ; rows ; cols t
+        size_t n = 0;
+        int c;
+        while (n < sizeof(answer) - 1 && (c = getchar()) != EOF) {
+            answer[n++] = (char)c;
+            if (c == 't') {
+                break;
+            }
+        }
+        answer[n] = '\0';
+        console_mode(CON_COOKED);
+        unsigned rows, cols;
+        if (sscanf(answer, "\x1b[8;%u;%ut", &rows, &cols) == 2) {
+            snprintf(text, sizeof(text), "conprobe: size %ux%u\n", cols, rows);
+        } else {
+            snprintf(text, sizeof(text), "conprobe: no size\n");
+        }
+        report(text);
+        return 0;
     }
     snprintf(text, sizeof(text), "conprobe: isatty %d %d %d\n", isatty(0), isatty(1), isatty(2));
     report(text);
