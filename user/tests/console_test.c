@@ -204,7 +204,7 @@ static const char *row_text(uint32_t row) {
     static char text[64];
     uint32_t n = 0;
     for (uint32_t col = 0; col < c->term.cols; col++) {
-        uint8_t ch = term_view_cell(&c->term, row, col)->ch;
+        uint32_t ch = term_view_cell(&c->term, row, col)->ch;
         text[n++] = ch ? (char)ch : ' ';
     }
     while (n > 0 && text[n - 1] == ' ') {

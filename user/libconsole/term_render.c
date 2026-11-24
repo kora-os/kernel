@@ -33,13 +33,13 @@ static bounds_t drawable(const term_surface_t *s) {
 
 // Pixel (x, y) of a cell's glyph: from its bitmap, or (NULL) the built-in
 // symbol scaled.
-static bool glyph_pixel(const term_font_t *font, const uint8_t *bitmap, uint8_t code, int64_t x,
+static bool glyph_pixel(const term_font_t *font, const uint8_t *bitmap, uint32_t cp, int64_t x,
                         int64_t y) {
     if (x < 0) {
         return false;
     }
     if (bitmap == NULL) {
-        return term_font_pixel(font, code, (uint32_t)x, (uint32_t)y);
+        return term_font_pixel(font, cp, (uint32_t)x, (uint32_t)y);
     }
     return (bitmap[y * font->row_bytes + (x >> 3)] & (0x80u >> (x & 7))) != 0;
 }
