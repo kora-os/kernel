@@ -139,14 +139,6 @@
 #define signal kora_signal
 #define raise kora_raise
 
-#define __assert_fail kora__assert_fail
-#define imaxabs kora_imaxabs
-#define imaxdiv kora_imaxdiv
-#define strtoimax kora_strtoimax
-#define strtoumax kora_strtoumax
-#define wcstoimax kora_wcstoimax
-#define wcstoumax kora_wcstoumax
-
 #define clock kora_clock
 #define difftime kora_difftime
 #define mktime kora_mktime
