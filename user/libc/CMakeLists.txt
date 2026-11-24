@@ -147,6 +147,19 @@ add_custom_command(
     COMMENT "Header check: static assertions on AArch64"
     VERBATIM)
 list(APPEND LIBC_HEADER_STAMPS "${stamp}")
+# The <inttypes.h> format macros against the AArch64 types, with the compiler's
+# format checking (tests/inttypes_format_check.c, generated from the header).
+set(stamp "${LIBC_HEADER_CHECK_DIR}/inttypes_formats.stamp")
+add_custom_command(
+    OUTPUT "${stamp}"
+    COMMAND ${CMAKE_C_COMPILER} --target=aarch64-none-elf -ffreestanding -nostdinc -std=c11
+            -Wall -Wextra -Wformat=2 -Werror -isystem "${LIBC_INCLUDE_DIR}"
+            -fsyntax-only "${LIBC_DIR}/tests/inttypes_format_check.c"
+    COMMAND ${CMAKE_COMMAND} -E touch "${stamp}"
+    DEPENDS "${LIBC_DIR}/tests/inttypes_format_check.c" ${LIBC_PUBLIC_HEADERS}
+    COMMENT "Header check: <inttypes.h> format macros against the AArch64 types"
+    VERBATIM)
+list(APPEND LIBC_HEADER_STAMPS "${stamp}")
 if(LIBC_STANDALONE)
     add_custom_target(libc_header_check ALL DEPENDS ${LIBC_HEADER_STAMPS})
 else()
@@ -226,6 +239,10 @@ if(KORAOS_HOST_CC)
         src/stdio/format.c src/stdio/format_float.c src/stdio/snprintf.c src/string/string.c
         src/string/search.c src/string/strerror.c src/errno/errno.c src/stdlib/exit.c
         src/stdlib/malloc.c ${LIBC_FAKE_KERNEL})
+    libc_host_test(assert SOURCES src/assert/assert.c src/stdlib/abort.c src/signal/signal.c
+                   ${LIBC_STDIO_SOURCES})
+    libc_host_test(inttypes SOURCES src/inttypes/inttypes.c ${LIBC_STDIO_SOURCES}
+                   src/stdlib/convert.c)
     libc_host_test(stdio_write SOURCES ${LIBC_STDIO_SOURCES} FLAGS -pthread -Wno-format)
     libc_host_test(stdio_file SOURCES ${LIBC_STDIO_SOURCES})
     libc_host_test(stdio_handles SOURCES ${LIBC_STDIO_SOURCES})
