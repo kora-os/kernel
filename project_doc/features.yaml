@@ -279,6 +279,7 @@ categories:
         name: KoraCLI shell
         status: in_progress
         description: The fullscreen shell on its own screen, with a top bar, a mode indicator and function-key labels; it replaces the shell.
+        prs: [124]
       - id: python
         name: MicroPython
         status: in_progress
@@ -293,6 +294,7 @@ categories:
         name: Python mode
         status: in_progress
         description: A Python prompt with multi-line blocks, block history and one-character prefixes for BASIC lines and OS commands.
+        prs: [124]
       - id: koracli-os-commands
         name: OS commands from Python
         status: planned

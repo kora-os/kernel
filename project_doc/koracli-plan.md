@@ -168,7 +168,7 @@ From the spec's §17, with the PRs of phases 0 and 1:
   the console and drawn again when the font changes. ESC as a break goes to
   the program that asked, which must have allocated `SIG_BREAK`; it lapses
   when that program ends. `keyprobe` is the probe.
-- [x] **1b. KoraCLI with Python mode.** A `koracli` program: the console task
+- [x] **1b. KoraCLI with Python mode.** (#124) A `koracli` program: the console task
   in C runs the interpreter as its program (`console_run`). The Python side
   lives on the userfs (location *proposed*: `sys:koracli/`): the editor
   (blocks, one blank line kept, two end the block, Ctrl+Enter, PgUp and PgDn
