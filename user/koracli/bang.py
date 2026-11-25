@@ -10,7 +10,8 @@
 # at a statement's start: the line typed at >>>, or a line of a block that
 # does not continue open brackets. The command line:
 #
-#   - words separated by spaces, '...' or "..." grouping them;
+#   - words separated by spaces, '...' or "..." grouping them, a backslash
+#     taking the next character as it is (outside quotes and in "...");
 #   - {expr} a Python value: a list or tuple alone as a word gives one
 #     argument per item, any other value str(value), inside a word or not;
 #     {{ and }} are braces;
@@ -80,6 +81,13 @@ def tokens(text, interpolate=True):
         quoted = False
         while i < n:
             c = text[i]
+            if c == "\\" and quote != "'":
+                if i + 1 >= n:
+                    raise CommandError("a backslash at the end")
+                current.append(text[i + 1])
+                quoted = True  # an escaped & or @N is no suffix
+                i += 2
+                continue
             if quote is None and c in " \t<>":
                 break
             if quote is None and c in "'\"":

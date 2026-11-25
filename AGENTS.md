@@ -103,12 +103,12 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
   manager only reads; keys are the manager's messages on the screen's port.
   Meta+M is its hotkey. It keeps the mouse pointer, drawn over the front
   screen (hidden by typing), and sends mouse events at its position.
-  init runs `screens shell` with a display (no shell without one) and starts
-  it again when it ends. A program that claims the display or the keyboard
+  init runs `screens koracli` with a display (no shell without one) and
+  starts it again when it ends. A program that claims the display or the keyboard
   itself borrows them first (`screens_borrow`), as `inputprobe` does.
-- A console on a screen (`user/libscreen/console.c`, `newcon`, and the
-  shell's own: started on the kernel console, the shell opens one and runs
-  itself there) serves its programs' packets; line editing is `user/libconsole/edit.c` and key bytes
+- A console on a screen (`user/libscreen/console.c`, `newcon`, and
+  KoraCLI's, which `koracli` opens and runs the interpreter on) serves its
+  programs' packets; line editing is `user/libconsole/edit.c` and key bytes
   `keys.c`, both pure (built into the kernel too, like `term.c`) and tested
   on the host (`tests/host/edit_test.c`). For KoraCLI it also has a
   key-event mode (`CON_EVENTS`, libk `console_events`), bars above and

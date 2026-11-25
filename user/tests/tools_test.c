@@ -455,17 +455,17 @@ static void test_init(void) {
     spawn_result = 5;
     child_exit_code = 3;
     run_us[0] = run_us[1] = 2000000;  // then ends at once
-    CHECK(RUN(init, "init") == 3 && strcmp(spawned_as, "screens shell") == 0,
-          "with one, the shell under the screen manager");
-    CHECK(screen_is("init: starting the shell (screens shell)\n<shell>\n"
+    CHECK(RUN(init, "init") == 3 && strcmp(spawned_as, "screens koracli") == 0,
+          "with one, the shell (KoraCLI) under the screen manager");
+    CHECK(screen_is("init: starting the shell (screens koracli)\n<shell>\n"
                     "init: the shell ended (exit 3); starting it again\n"
-                    "init: starting the shell (screens shell)\n<shell>\n"
+                    "init: starting the shell (screens koracli)\n<shell>\n"
                     "init: the shell ended (exit 3); starting it again\n"
-                    "init: starting the shell (screens shell)\n<shell>\n"
+                    "init: starting the shell (screens koracli)\n<shell>\n"
                     "init: the shell ended (exit 3); starting it again\n"
-                    "init: starting the shell (screens shell)\n<shell>\n"
+                    "init: starting the shell (screens koracli)\n<shell>\n"
                     "init: the shell ended (exit 3); starting it again\n"
-                    "init: starting the shell (screens shell)\n<shell>\n"
+                    "init: starting the shell (screens koracli)\n<shell>\n"
                     "init: the shell ended at once 3 times (exit 3); not starting it again\n"),
           "started again as it ends, until it ends at once three times in a row:\n%s",
           fake_screen(NULL));
@@ -480,7 +480,7 @@ static void test_init(void) {
     have_display = 1;
     spawn_result = -1;
     CHECK(RUN(init, "init") == 1 &&
-              printed("init: starting the shell (screens shell)\n",
+              printed("init: starting the shell (screens koracli)\n",
                       "init: cannot start /bin/screens\n"),
           "init reports a manager that cannot start");
 }

@@ -353,7 +353,8 @@ class Editor:
         self.redraw()
         return None
 
-    def cancel(self):
-        """Ctrl+C at the prompt: the block is dropped, a new prompt comes."""
+    def cancel(self, mark=True):
+        """The block is dropped, a new prompt comes: at Ctrl+C with ^C after
+        it (mark), as a terminal shows it."""
         self._to_end()
-        self.write("\n")
+        self.write("^C\n" if mark else "\n")

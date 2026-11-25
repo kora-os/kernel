@@ -78,20 +78,22 @@ class Commands:
 cmd = Commands()
 
 
-def _execute(name, args, capture, background, core, stdin, stdout, append):
+def _execute(name, args, capture, background, core, stdin, stdout, append, report=False):
     return _kora.execute([name] + [str(a) for a in args], stdin=stdin, stdout=stdout,
                          append=append, core=-1 if core is None else core,
-                         background=background, capture=capture)
+                         background=background, capture=capture, report=report)
 
 
-def run(name, *args, background=False, core=None, stdin=None, stdout=None, append=False):
+def run(name, *args, background=False, core=None, stdin=None, stdout=None, append=False,
+        report=False):
     """Run `name`: a wrapper's result, or the program's exit status (its pid
-    with background=True)."""
+    with background=True). With report=True a program's end is reported as
+    KoraOS's shells do: "[pid] exited with N", or "[pid] started"."""
     global status
     wrapper = cmd.find(name)
     if wrapper is not None:
         return wrapper(*args)
-    code = _execute(name, args, False, background, core, stdin, stdout, append)
+    code = _execute(name, args, False, background, core, stdin, stdout, append, report)
     if not background:
         status = code
     return code
@@ -140,10 +142,16 @@ def _argv(words):
 
 
 def _bang(capturing, words, stdin=None, stdout=None, append=False, background=False,
-          core=None):
+          core=None, report=False):
+    """A command line typed with ! (or in OS mode, with report=True): the
+    output captured or not; a background job's start reported; a program
+    that cannot run said so, as KoraOS's shells say it."""
     argv = _argv(words)
     if not argv:
         raise ValueError("no command")
+    if len(argv) > 16:
+        print("koracli: too many arguments")
+        return None
     stdin = _word(stdin) if stdin is not None else None
     stdout = _word(stdout) if stdout is not None else None
     try:
@@ -151,14 +159,14 @@ def _bang(capturing, words, stdin=None, stdout=None, append=False, background=Fa
             return capture(argv[0], *argv[1:], background=background, core=core,
                            stdin=stdin, stdout=stdout, append=append)
         result = run(argv[0], *argv[1:], background=background, core=core, stdin=stdin,
-                     stdout=stdout, append=append)
+                     stdout=stdout, append=append, report=report or background)
     except OSError:
-        print("%s: no such program, or it cannot run so" % argv[0])
+        if core is not None:
+            print("koracli: cannot run %s on cpu %d (no such program, or no such core)"
+                  % (argv[0], core))
+        else:
+            print("koracli: no such program: %s" % argv[0])
         return None
-    if capturing:
-        return result
-    if background:
-        print("[%d]" % result)
-    elif cmd.find(argv[0]) is not None and result is not None:
+    if cmd.find(argv[0]) is not None and result is not None:
         print(result)  # a wrapper's result is shown; a program's status is not
     return None

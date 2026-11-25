@@ -1,9 +1,10 @@
 /* KoraOS init: the first and only program the kernel starts (loaded from
  * /bin/init). Following the classic Unix model, the kernel knows nothing about
- * what to run -- init owns that policy. With a display it runs the shell on a
- * screen of its own, under the screen manager (`screens shell`), and starts
- * it again when it ends (unless it keeps ending at once). Without one there is no shell: the serial line's
- * kernel debug console is all there is.
+ * what to run -- init owns that policy. With a display it runs the shell,
+ * KoraCLI, on a screen of its own, under the screen manager (`screens
+ * koracli`), and starts it again when it ends (unless it keeps ending at
+ * once). Without one there is no shell: the serial line's kernel debug
+ * console is all there is.
  */
 #include "libk/koraos.h"
 
@@ -18,10 +19,10 @@ int main(void) {
         puts("init: no display, so no shell; the serial line is the debug console");
         return 0;
     }
-    char *argv[] = {"screens", "shell", NULL};
+    char *argv[] = {"screens", "koracli", NULL};
     int quick = 0;
     for (;;) {
-        puts("init: starting the shell (screens shell)");
+        puts("init: starting the shell (screens koracli)");
         unsigned long start = uptime_us();
         int pid = spawn("screens", 2, argv);
         if (pid < 0) {

@@ -277,33 +277,40 @@ categories:
     features:
       - id: koracli
         name: KoraCLI shell
-        status: in_progress
+        status: completed
         description: The fullscreen shell on its own screen, with a top bar, a mode indicator and function-key labels; it replaces the shell.
-        prs: [124]
+        prs: [124, 126]
+        completed: 2026-11-25
       - id: python
         name: MicroPython
-        status: in_progress
+        status: completed
         description: MicroPython ported to KoraOS, KoraCLI's main language, with a kora module over the OS API.
         prs: [121, 122]
+        completed: 2026-11-25
       - id: koracli-console
         name: KoraCLI console
-        status: in_progress
+        status: completed
         description: The console task behind KoraCLI, with bars outside the text grid and keys delivered as events.
         prs: [123]
+        completed: 2026-11-25
       - id: koracli-python-mode
         name: Python mode
-        status: in_progress
+        status: completed
         description: A Python prompt with multi-line blocks, block history and one-character prefixes for BASIC lines and OS commands.
         prs: [124]
+        completed: 2026-11-25
       - id: koracli-os-commands
         name: OS commands from Python
-        status: in_progress
+        status: completed
         description: Run or capture programs with !cmd and kora.run, and add commands as Python wrappers.
-        prs: [125]
+        prs: [125, 126]
+        completed: 2026-11-25
       - id: koracli-os-mode
         name: OS mode
-        status: planned
+        status: completed
         description: A plain command shell with redirection, background jobs and core pinning, everything the shell before it had.
+        prs: [126]
+        completed: 2026-11-25
       - id: basic
         name: Classic BASIC
         status: planned

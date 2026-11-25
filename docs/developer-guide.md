@@ -161,7 +161,7 @@ retain `install_hw`, using their cached `BOOTMNT` destination.
 
 List the files on the boot volume to ensure `kernel8-hw.img` is present, eject the volume safely, and boot the Raspberry Pi. The kernel prints `K` on the serial console, followed by its boot log.
 
-On hardware the serial console and the user console are separate. The UART carries the kernel's diagnostic log (`printf`, `console_log`); the shell runs on the HDMI screen and reads the USB keyboard: through the DWC2 controller on the Pi 3, and through the VL805 USB 3 (xHCI) controller behind PCIe on the Pi 4, on any of its four type-A ports (USB 2 or USB 3), directly or through a hub.
+On hardware the serial console and the user console are separate. The UART carries the kernel's diagnostic log (`printf`, `console_log`); the shell (KoraCLI, `docs/koracli.md`) runs on the HDMI screen and reads the USB keyboard: through the DWC2 controller on the Pi 3, and through the VL805 USB 3 (xHCI) controller behind PCIe on the Pi 4, on any of its four type-A ports (USB 2 or USB 3), directly or through a hub.
 
 USB limitations: devices are enumerated once at boot, so plug the keyboard and any USB drives (or a hub with them) in before powering on; there is no hot-plug yet. On the Pi 4 only the four type-A ports are supported (the VL805 xHCI controller); the USB-C port is a different controller (DWC2) that the Pi 4 build does not include, and it normally powers the board anyway. On the Pi 3 a keyboard behind an extra hub does not work yet: low/full-speed devices behind a High Speed hub need split transactions, which the DWC2 has to schedule in software (the Pi 4's xHCI does this in hardware). Keyboard auto-repeat is not enabled yet.
 

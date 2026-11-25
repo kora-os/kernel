@@ -32,6 +32,11 @@ check(c["words"] == [["cat"], ["a.txt"], ["b c.txt"], ["de"]], "words, quotes jo
 check(c["stdin"] is None and c["stdout"] is None and not c["background"] and c["core"] is None,
       "nothing else")
 check(bang.parse("echo ''")["words"] == [["echo"], [""]], "an empty quoted argument")
+c = bang.parse('rm a\\ b.txt \\& \'\\x\' "q\\""')  # rm a\ b.txt \& '\x' "q\""
+check(c["words"] == [["rm"], ["a b.txt"], ["&"], ["\\x"], ['q"']] and not c["background"],
+      "backslash: escapes a space and &, literal in '...', escapes a quote in \"...\": %r"
+      % c["words"])
+raises(lambda: bang.parse("echo a\\"), "a backslash at the end")
 
 # {expr}, {{ and }}.
 c = bang.parse("cat {files} file{n}.txt {d['k']} {{x}}")

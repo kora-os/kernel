@@ -18,6 +18,8 @@
 //   execute(argv, ...)               a program run, its output captured or
 //                                    not, or started in the background
 //   reap()                           background jobs that ended
+//   kill(pid)                        end a program
+//   assign(name[, target])           set an assign, or (no target) remove it
 //
 // The console parts are KoraCLI's (step 1b, on step 1a's console); running
 // programs is step 1c.
@@ -61,16 +63,18 @@ static mp_obj_t kora_volumes(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(kora_volumes_obj, kora_volumes);
 
-// assigns(): a (name, target) tuple for each assign, as `assign` lists them.
+// assigns(): a (name, target, fixed) tuple for each assign, as `assign`
+// lists them; a fixed one (sys:) cannot be changed or removed.
 static mp_obj_t kora_assigns(void) {
     mp_obj_t list = mp_obj_new_list(0, NULL);
     static struct assign_info a;  // 4 KB of target: kept off the stack
     for (unsigned i = 0; assign_info(i, &a) == 1; i++) {
-        mp_obj_t items[2] = {
+        mp_obj_t items[3] = {
             field_str(a.name, sizeof a.name),
             field_str(a.target, sizeof a.target),
+            mp_obj_new_bool(a.flags & ASSIGN_IMMUTABLE),
         };
-        mp_obj_list_append(list, mp_obj_new_tuple(2, items));
+        mp_obj_list_append(list, mp_obj_new_tuple(3, items));
     }
     return list;
 }
@@ -259,12 +263,15 @@ static void capture_close(capture_t *c) {
 //   - core: the core it runs on, -1 for the kernel's choice;
 //   - background: start it and return its pid at once (reap() later);
 //   - capture: its stdout and stderr kept instead of shown: the result is
-//     (status, stdout, stderr), the texts as str.
+//     (status, stdout, stderr), the texts as str;
+//   - report: "[pid] exited with N" printed when it ends in front, "[pid]
+//     started" when it goes to the background, as KoraOS's shells say.
 // Otherwise it runs in front, with the console cooked for it, and the result
 // is its exit status. Ctrl+C meanwhile is passed on to it as a break (which
 // ends it unless it handles breaks), and ESC is a key again for it.
 static mp_obj_t kora_execute(size_t n_args, const mp_obj_t *args, mp_map_t *kwargs) {
-    enum { ARG_argv, ARG_stdin, ARG_stdout, ARG_append, ARG_core, ARG_background, ARG_capture };
+    enum { ARG_argv, ARG_stdin, ARG_stdout, ARG_append, ARG_core, ARG_background, ARG_capture,
+           ARG_report };
     static const mp_arg_t allowed[] = {
         { MP_QSTR_argv, MP_ARG_OBJ | MP_ARG_REQUIRED, {.u_rom_obj = MP_ROM_NONE} },
         { MP_QSTR_stdin, MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
@@ -273,6 +280,7 @@ static mp_obj_t kora_execute(size_t n_args, const mp_obj_t *args, mp_map_t *kwar
         { MP_QSTR_core, MP_ARG_INT, {.u_int = -1} },
         { MP_QSTR_background, MP_ARG_BOOL, {.u_bool = false} },
         { MP_QSTR_capture, MP_ARG_BOOL, {.u_bool = false} },
+        { MP_QSTR_report, MP_ARG_BOOL, {.u_bool = false} },
     };
     mp_arg_val_t vals[MP_ARRAY_SIZE(allowed)];
     mp_arg_parse_all(n_args, args, kwargs, MP_ARRAY_SIZE(allowed), allowed, vals);
@@ -392,6 +400,9 @@ static mp_obj_t kora_execute(size_t n_args, const mp_obj_t *args, mp_map_t *kwar
     if (pid < 0) {
         mp_raise_OSError(MP_ENOENT);  // no such program, or no such core
     }
+    if (vals[ARG_report].u_bool) {
+        printf(background ? "[%d] started\n" : "[%d] exited with %d\n", pid, code);
+    }
     return result;
 
 no_ports:
@@ -418,10 +429,27 @@ static mp_obj_t kora_reap(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(kora_reap_obj, kora_reap);
 
+// kill(pid): end program `pid`. False if there is none.
+static mp_obj_t kora_kill(mp_obj_t pid) {
+    return mp_obj_new_bool(kill(mp_obj_get_int(pid)) == 0);
+}
+static MP_DEFINE_CONST_FUN_OBJ_1(kora_kill_obj, kora_kill);
+
+// assign(name, target): `name:` is the existing directory `target` from now
+// on; assign(name) removes it (sys: is fixed). OSError if refused.
+static mp_obj_t kora_assign(size_t n_args, const mp_obj_t *args) {
+    const char *target = n_args > 1 && args[1] != mp_const_none ? mp_obj_str_get_str(args[1]) : NULL;
+    check(assign(mp_obj_str_get_str(args[0]), target) < 0 ? -1 : 0);
+    return mp_const_none;
+}
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(kora_assign_obj, 1, 2, kora_assign);
+
 static const mp_rom_map_elem_t kora_globals_table[] = {
     { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR__kora) },
     { MP_ROM_QSTR(MP_QSTR_execute), MP_ROM_PTR(&kora_execute_obj) },
     { MP_ROM_QSTR(MP_QSTR_reap), MP_ROM_PTR(&kora_reap_obj) },
+    { MP_ROM_QSTR(MP_QSTR_kill), MP_ROM_PTR(&kora_kill_obj) },
+    { MP_ROM_QSTR(MP_QSTR_assign), MP_ROM_PTR(&kora_assign_obj) },
     { MP_ROM_QSTR(MP_QSTR_uptime), MP_ROM_PTR(&kora_uptime_obj) },
     { MP_ROM_QSTR(MP_QSTR_volumes), MP_ROM_PTR(&kora_volumes_obj) },
     { MP_ROM_QSTR(MP_QSTR_assigns), MP_ROM_PTR(&kora_assigns_obj) },

@@ -503,7 +503,8 @@ flowchart TB
   handles breaks (libc-plan step 21). A break at the prompt drops the line,
   ends the shell's read with an empty line (a new prompt) and is cleared
   before the next program.
-- **init**: with a display, `screens shell`, started again when it ends
+- **init**: with a display, `screens shell` (since KoraCLI step 1d, `screens
+  koracli`: KoraCLI replaced `user/shell.c`), started again when it ends
   (unless within a second); without one, no shell.
 - **Lending.** A program borrows the display and the keyboard from the
   manager (`screens_borrow`, `screens_return`): the manager gives them back

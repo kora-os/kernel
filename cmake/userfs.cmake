@@ -71,8 +71,6 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
     koraos_add_user_program(screens "${USER_DIR}/screens.c" FLAGS -Wextra -Werror)
     koraos_add_user_program(newcon "${USER_DIR}/newcon.c" ${CONSOLE_SOURCES}
         FLAGS -Wextra -Werror)
-    # The shell serves its own console (user/shell.c).
-    koraos_add_user_program(shell "${USER_DIR}/shell.c" ${CONSOLE_SOURCES})
     # KoraCLI's console task: MicroPython with sys:koracli on a console of its own.
     koraos_add_user_program(koracli "${USER_DIR}/koracli.c" ${CONSOLE_SOURCES}
         FLAGS -Wextra -Werror)

@@ -18,7 +18,7 @@
 int main(void) {
     screen_t *screen = screen_open("koracli");
     if (screen == NULL) {
-        fputs("koracli: no screen manager runs (start one with: screens shell)\n", stderr);
+        fputs("koracli: no screen manager runs (start one with: screens koracli)\n", stderr);
         return 1;
     }
     console_t *console = console_open(screen);

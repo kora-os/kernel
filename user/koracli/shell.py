@@ -10,6 +10,7 @@ import sys
 import kora
 
 import bang
+import commands
 import dispatch
 import editor
 import keys
@@ -66,16 +67,22 @@ def run_python(text, ns):
 
 
 def run_os(text):
-    """An OS mode line: a command, without {expr}."""
+    """An OS mode line: a command, without {expr}, its end reported as the
+    shell before reported it; a volume or assign name alone changes there."""
     try:
         c = bang.os_line(text)
     except bang.CommandError as e:
         print("koracli: %s" % e)
         return
     words = [tuple(w) for w in c["words"]]
+    if len(words) == 1 and len(words[0][0]) > 1 and words[0][0].endswith(":") and \
+            c["stdin"] is None and c["stdout"] is None and not c["background"] and \
+            c["core"] is None:
+        kora.run("cd", words[0][0])
+        return
     kora._bang(False, words, stdin=tuple(c["stdin"]) if c["stdin"] else None,
                stdout=tuple(c["stdout"]) if c["stdout"] else None, append=c["append"],
-               background=c["background"], core=c["core"])
+               background=c["background"], core=c["core"], report=True)
 
 
 def run(text, mode, ns, program):
@@ -101,53 +108,78 @@ def run(text, mode, ns, program):
 def report_jobs():
     """Background jobs that ended, as the shell before reported them."""
     for pid, code in kora.reap():
-        print("[%d] exited with %d" % (pid, code))
+        print("[%d] done, exit %d" % (pid, code))
+
+
+def read_action(ed, state):
+    """One round at the prompt: the jobs that ended, a prompt, keys until
+    there is something to do (F2 switches mode on the way)."""
+    report_jobs()
+    prompts(ed, state["mode"])
+    while True:
+        action = ed.feed(*kora.key())
+        if action is None:
+            continue
+        if action[0] == "key" and action[1] == "F2":
+            mode = MODES[(MODES.index(state["mode"]) + 1) % len(MODES)]
+            state["mode"] = mode
+            bars(mode)
+            prompts(ed, mode, start=False)
+            continue
+        if action[0] == "key":  # F1
+            ed.cancel(mark=False)
+            print(HELP)
+            return ("help",)
+        return action
+
+
+def drop_line(ed):
+    """Ctrl+C at the prompt: the line is dropped (^C), even if another Ctrl+C
+    comes meanwhile."""
+    while True:
+        try:
+            ed.cancel()
+            return
+        except KeyboardInterrupt:
+            pass
 
 
 def main():
     size = kora.size()
     width = size[0] if size else 80
-    mode = "PY"
     ns = {"__name__": "__main__", "kora": kora}
     program = dispatch.Program()
     ed = editor.Editor(write, width)
-    bars(mode)
+    commands.register()
+    bars("PY")
     try:
         version = " " + ".".join(str(n) for n in sys.implementation.version[:3])
     except AttributeError:
         version = ""
     print("KoraCLI on MicroPython%s. F1 for help." % version)
     kora.mode(kora.EVENTS)
+    state = {"mode": "PY"}
     try:
         while True:
-            report_jobs()
-            prompts(ed, mode)
-            while True:
-                try:
-                    action = ed.feed(*kora.key())
-                except KeyboardInterrupt:  # Ctrl+C at the prompt
-                    ed.cancel()
-                    prompts(ed, mode)
-                    continue
-                if action is None:
-                    continue
-                if action[0] == "key" and action[1] == "F2":
-                    mode = MODES[(MODES.index(mode) + 1) % len(MODES)]
-                    bars(mode)
-                    prompts(ed, mode, start=False)
-                    continue
-                if action[0] == "key":  # F1
-                    ed.cancel()
-                    print(HELP)
-                    break
-                break
+            # A Ctrl+C may come at any moment, also while the editor works on
+            # a key or a first Ctrl+C is being handled: anywhere in a round
+            # it drops the line and starts a new one.
+            try:
+                action = read_action(ed, state)
+            except KeyboardInterrupt:
+                drop_line(ed)
+                continue
             if action[0] == "eof":
+                print("bye")
                 return
             if action[0] == "run":
                 try:
-                    run(action[1], mode, ns, program)
+                    run(action[1], state["mode"], ns, program)
                 except KeyboardInterrupt:  # a break that came late
-                    print("KeyboardInterrupt")
+                    try:
+                        print("KeyboardInterrupt")
+                    except KeyboardInterrupt:
+                        pass
     finally:
         kora.mode(kora.COOKED)
         kora.bar(kora.TOP, None)

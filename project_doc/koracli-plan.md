@@ -1,6 +1,6 @@
 # KoraCLI plan
 
-Status: **phase 0 done, phase 1 under way** (1a to 1c: `koracli` runs Python and OS commands); the rest is planned. Phases 0 and 1 are broken into PRs
+Status: **phases 0 and 1 done**: KoraCLI is the shell KoraOS starts in, with Python and OS modes; phase 2 (Classic BASIC) is next. Phases 0 and 1 are broken into PRs
 below; the later phases are listed and get their PRs when they come up. The
 plan was agreed in a discussion on 2026-11-24.
 
@@ -223,7 +223,7 @@ From the spec's §17, with the PRs of phases 0 and 1:
   queues 512 events; the editor writes a character typed at the line's
   end without redrawing. `fn.__name__` is on (`MICROPY_PY_FUNCTION_ATTRS`).
   Not yet: job objects (`job = !cmd &` gives the pid; phase 7).
-- [ ] **1d. OS mode, and KoraCLI replaces the shell.** The `$` prompt with
+- [x] **1d. OS mode, and KoraCLI replaces the shell.** (#126) The `$` prompt with
   every line an OS command; the old shell's built-ins as wrappers (`cd`,
   `pwd`, `volumes`, `sync`, `assign`, `kill`, `help`, `exit`); a volume or
   assign name alone changes directory. init runs `screens koracli`;
@@ -231,6 +231,18 @@ From the spec's §17, with the PRs of phases 0 and 1:
   move to KoraCLI. Background output goes straight to the screen, as before.
   Tests: the smoke steps that drove the shell now drive OS mode, unchanged
   where possible, so parity shows in the diff.
+  *Built:* the built-ins are `sys:koracli/commands.py` (the name
+  `builtins` is MicroPython's own module, which always wins), with the old
+  shell's messages; `_kora` gains `kill` and `assign`, `kora.assigns()`
+  the fixed flag. OS mode reports as the shell did: `execute(report=True)`
+  prints `[pid] exited with N` or `[pid] started` (only C knows the pid),
+  ended jobs `[pid] done, exit N`, Ctrl+C at the prompt `^C`; programs
+  that cannot run `koracli: no such program: x` and the `@N` and argument
+  count messages. A backslash escapes the next character, as in the shell.
+  KoraCLI starts in Python mode; the smoke test presses F2 after each start
+  (`koracli_os_mode`), and its steps are otherwise the shell's, with
+  `koracli:` messages, the bars' two rows and `micropython` as the task
+  that waits for input. Merged on green CI (the user's choice, 2026-11-25).
 
 Later phases, in a line each, to be split into PRs when they come up:
 
