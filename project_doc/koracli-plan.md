@@ -144,7 +144,7 @@ From the spec's §17, with the PRs of phases 0 and 1:
   script's directory, then `sys:python` (*proposed*). Also: line numbers in
   tracebacks, exit codes as CPython's (130 for Ctrl+C), and the smoke test's
   Python probes shipped in `sys:tests`.
-- [x] **1a. The console's new parts.** In `user/libconsole` and
+- [x] **1a. The console's new parts.** (#123) In `user/libconsole` and
   `user/libscreen`, with libk wrappers:
   - F1 to F12 in `keys.c`, as xterm sends them, for every console;
   - the key-event mode (a new `CON_MODE` value), with Shift+PgUp and
