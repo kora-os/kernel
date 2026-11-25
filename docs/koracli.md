@@ -3,11 +3,11 @@
 KoraCLI is the shell KoraOS starts in: a fullscreen prompt where you can type
 Python, a line of BASIC or an OS command, and see what happens.
 
-> **Status: not available yet.** This reference is written ahead of the
-> implementation and grows with it. Each section says whether what it
-> describes works today or which step brings it. So far only MicroPython
-> itself runs, as a program of its own, with files, `os` and Ctrl+C (see
-> Python mode). The
+> **Status: a first KoraCLI runs.** Type `koracli` in the shell: it opens a
+> screen of its own with Python mode (step 1b). It does not replace the
+> shell yet, and OS commands and BASIC are still to come. This reference is
+> written ahead of the implementation and grows with it: each section says
+> whether what it describes works today or which step brings it. The
 > design behind it is `project_doc/koracli-spec.md`, and the steps are in
 > `project_doc/koracli-plan.md`. Every change to KoraCLI updates this page in
 > the same pull request.
@@ -18,10 +18,9 @@ so in a **Differences** note.
 
 ## The screen
 
-*Planned (phase 1).* The console's parts it needs are there (step 1a): bars
-above and below the text grid, F1 to F12, a key-event mode and ESC as a
-break, which `keyprobe` shows (`newcon keyprobe`). KoraCLI itself does not
-use them yet.
+*Works (step 1b),* on a screen of KoraCLI's own: the top bar says
+`KoraCLI`, the bottom bar the mode (`PY` or `OS`) and the function keys
+there are so far (F1 Help, F2 Mode). Meta+M goes back to the shell's screen.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -98,14 +97,18 @@ Things to know:
 
 ## Python mode
 
-*Planned (phase 1).*
+*Works (step 1b),* with the editing below. Program lines are stored (BASIC
+comes in phase 2), and `!` says OS commands come in step 1c.
 
-KoraCLI's Python is MicroPython.
+KoraCLI's Python is MicroPython. Your code runs in a namespace of its own,
+with `kora` there already; the expressions you type have their value
+printed, as at Python's own prompt. ESC stops running code with
+`KeyboardInterrupt`, and so does Ctrl+C; `input()` works as usual.
 
-**Today (steps 0a and 0b):** type `micropython` in the shell for
-MicroPython's own REPL, on the shell's console, or `micropython script.py
-args` to run a script. It is not KoraCLI yet: none of the editing below, no
-bars, no prefixes. What it has:
+The same MicroPython also runs on its own: type `micropython` in the shell
+for MicroPython's own REPL, on the shell's console, or `micropython
+script.py args` to run a script (steps 0a and 0b). What it has, in KoraCLI
+too:
 
 - MicroPython v1.29.0's core language, with integers of any size, floats
   (double precision; `repr` gives the shortest form that reads back almost
@@ -237,7 +240,8 @@ scripting language.
 
 ## OS mode
 
-*Planned (phase 1b).*
+*Planned (phase 1b, steps 1c and 1d).* F2 switches to it already, with the
+`$` prompt, but a command only says that OS commands come with step 1c.
 
 A plain command shell with the `$` prompt: every line is an OS command, found
 and run as with `!` above, with the same `&`, `@N` and redirection.
@@ -360,14 +364,24 @@ The rules, and where they surprise:
 full-screen programs such as editors and games need ESC for themselves; stop
 those with Ctrl+C.
 
-**Today:** the keys reach programs: every console sends F1 to F12 as xterm
-does, and a program can read each key as an event (its position, modifiers
-and character) and ask for ESC as a break (step 1a). KoraCLI's own bindings
-above come with it (step 1b).
+**Today (step 1b):** F1 (help), F2 (between Python and OS mode), ESC and
+Ctrl+C on running code, PgUp and PgDn, Ctrl+Enter, Shift+PgUp and
+Shift+PgDn and Meta+M work. F3 to F7 come with BASIC. Every console sends F1
+to F12 as xterm does, and a program can read each key as an event and ask
+for ESC as a break (step 1a).
 
 ## Editing
 
-*Planned: the line editor in phase 1, the full-screen editor in phase 6.*
+*The line editor works (step 1b); the full-screen editor comes in phase 6.*
+
+Today's line editor: Left and Right, Home and End (Ctrl+A, Ctrl+E),
+Backspace and Delete, Ctrl+K and Ctrl+U, Tab (spaces to the next multiple
+of four) across the lines of a block; Up and Down move between them and,
+past the first or last, through the history, as PgUp and PgDn do a block at
+a time. A compound statement (`def`, `for`, `if`, ...) or an open bracket or
+triple-quoted string goes on at `...`, indented for you; in a block, one
+blank line is kept and the second ends it. Ctrl+D on an empty prompt ends
+KoraCLI. The editor is `sys:koracli/editor.py`.
 
 Two editor styles, chosen in the configuration:
 
@@ -380,6 +394,9 @@ Two editor styles, chosen in the configuration:
 
 The editor is written in Python and you can change it. If it ever fails,
 KoraCLI falls back to a plain line editor, so there is always a prompt.
+*Works (step 1b):* KoraCLI's Python side is in `sys:koracli` (`main.py`,
+`shell.py`, `editor.py`, `dispatch.py`, `keys.py`); if it raises an
+exception, MicroPython's own REPL takes over (Ctrl+D ends it).
 
 ## Graphics and sound
 

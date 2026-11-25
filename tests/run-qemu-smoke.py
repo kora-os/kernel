@@ -1599,6 +1599,56 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         q.expect(PROMPT)
     yield "console: bars, the key-event mode and ESC as a break (keyprobe)", console_events
 
+    def koracli():
+        # KoraCLI (step 1b): its own screen, the Python editor on key events,
+        # a block that ends at the second blank line, ESC stopping code, F2 to
+        # OS mode, and Ctrl+D to end.
+        q.send("koracli\r")
+        q.expect(rb"KoraCLI on MicroPython 1\.29\.0\. F1 for help\.", timeout=30)
+        q.expect(rb">>> ")
+        time.sleep(0.3)
+        q.send("def f(x):\r")      # the editor indents the next line itself
+        q.send("return x * 2\r")
+        q.send("\r")                # one blank line is kept,
+        q.send("\r")                # the second ends the block
+        time.sleep(0.3)
+        q.send("f(21)\r")
+        q.expect(rb"^42\r?$")
+        time.sleep(0.3)
+        width, height, rgb = q.screendump("koracli")
+        for name, y in (("top", 0), ("bottom", height - 1)):  # the bars, in reverse video
+            row = rgb[y * width * 3:(y + 1) * width * 3]
+            lit = sum(1 for i in range(0, len(row), 3 * 4) if row[i:i + 3] != b"\x00\x00\x00")
+            if lit < width // 8:
+                raise Failure("koracli's %s bar is not drawn" % name)
+        q.send("10 PRINT f(1)\r")   # a program line: stored, nothing printed
+        q.send("[n for n in range(3)]\r")
+        q.expect(rb"^\[0, 1, 2\]\r?$")
+        q.send("while True: pass\r\r\r")
+        # ESC is a break only once the code runs (before, it is a key the
+        # editor drops): pressed again until it stops the loop.
+        for attempt in range(5):
+            time.sleep(0.5)
+            q.key("esc")
+            try:
+                q.expect(rb"^KeyboardInterrupt\r?$", timeout=3)
+                break
+            except Failure:
+                if attempt == 4:
+                    raise
+        q.send("x = 1 / 0\r")  # ("1 / 0" would be a program line: it starts with a digit)
+        q.expect(rb"^ZeroDivisionError: ")
+        q.key("f2")
+        time.sleep(0.2)
+        q.send("ls\r")
+        q.expect(rb"^koracli: OS commands come with KoraCLI step 1c")
+        q.key("f2")
+        time.sleep(0.2)
+        q.key("ctrl-d")
+        q.expect(rb"\] exited with 0")
+        q.expect(PROMPT)
+    yield "koracli: Python at its prompt, blocks, ESC, F2 and Ctrl+D", koracli
+
     def micropython():
         # MicroPython's REPL on the shell's console, with its own line editor
         # (the console in raw mode); Ctrl+D on an empty line ends it, and the
@@ -1662,7 +1712,19 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         q.expect(rb"^KeyboardInterrupt")
         q.expect(rb"\] exited with 130")
         q.expect(PROMPT)
-    yield "micropython: Ctrl+C is KeyboardInterrupt, at the prompt and in code", micropython_break
+        # kora.repl(), KoraCLI's fallback: MicroPython's REPL inside a script.
+        q.send("micropython sys:tests/mpprobe.py repl\r")
+        q.expect(rb">>> ", timeout=30)
+        q.send("6 * 7\r")
+        q.expect(rb"^42\r?$")
+        q.expect(rb">>> ")
+        time.sleep(0.2)
+        q.key("ctrl-d")
+        q.expect(rb"^mpprobe: after the REPL")
+        q.expect(rb"\] exited with 0")
+        q.expect(PROMPT)
+    yield ("micropython: Ctrl+C is KeyboardInterrupt, at the prompt and in code; "
+           "kora.repl()"), micropython_break
 
     def micropython_files():
         # A script from the userfs: its arguments, a module beside it, os over

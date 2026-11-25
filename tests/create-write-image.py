@@ -59,11 +59,13 @@ def create_image(userfs, output):
         validate_output(userfs, output, registered)
         manifest = temporary / "programs.txt"
         manifest.write_text("".join(str(elf) + "\n" for elf in registered))
-        # The fonts (sys:fonts) and the test files (sys:tests), as the shared
-        # image has them.
+        # The fonts (sys:fonts), the test files (sys:tests) and KoraCLI's
+        # (sys:koracli), as the shared image has them.
+        # (Apart from the programs extracted above: a directory may share a
+        # program's name, as koracli does.)
         def copy_directory(directory):
-            target = temporary / directory
-            target.mkdir()
+            target = temporary / "directories" / directory
+            target.mkdir(parents=True)
             listed = subprocess.run(["mdir", "-b", "-i", str(shared), "::/" + directory], text=True,
                                     stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
             files = []
@@ -73,15 +75,17 @@ def create_image(userfs, output):
                     continue
                 subprocess.run(["mcopy", "-i", str(shared), path, str(target / name)], check=True)
                 files.append(target / name)
-            listing = temporary / (directory + ".txt")
+            listing = temporary / "directories" / (directory + ".txt")
             listing.write_text("".join(str(f) + "\n" for f in files))
             return files, listing
 
         fonts, fonts_manifest = copy_directory("fonts")
         _, tests_manifest = copy_directory("tests")
+        _, koracli_manifest = copy_directory("koracli")
         subprocess.run([str(ROOT / "create-fs-image.sh"), "--size", "64", "--volume", "WRITE",
                         "--fsroot", str(ROOT / "fsroot"), "--programs-file", str(manifest),
                         "--fonts-file", str(fonts_manifest), "--tests-file", str(tests_manifest),
+                        "--koracli-file", str(koracli_manifest),
                         "--output", str(output)], check=True)
     if digest(shared) != before:
         raise RuntimeError("immutable shared userfs changed during scratch generation")

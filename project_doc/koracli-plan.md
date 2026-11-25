@@ -1,6 +1,6 @@
 # KoraCLI plan
 
-Status: **phase 0 done** (MicroPython runs as a program, with files, `os` and Ctrl+C); the rest is planned. Phases 0 and 1 are broken into PRs
+Status: **phase 0 done, phase 1 begun** (1a, 1b: `koracli` runs with Python mode); the rest is planned. Phases 0 and 1 are broken into PRs
 below; the later phases are listed and get their PRs when they come up. The
 plan was agreed in a discussion on 2026-11-24.
 
@@ -168,7 +168,7 @@ From the spec's §17, with the PRs of phases 0 and 1:
   the console and drawn again when the font changes. ESC as a break goes to
   the program that asked, which must have allocated `SIG_BREAK`; it lapses
   when that program ends. `keyprobe` is the probe.
-- [ ] **1b. KoraCLI with Python mode.** A `koracli` program: the console task
+- [x] **1b. KoraCLI with Python mode.** A `koracli` program: the console task
   in C runs the interpreter as its program (`console_run`). The Python side
   lives on the userfs (location *proposed*: `sys:koracli/`): the editor
   (blocks, one blank line kept, two end the block, Ctrl+Enter, PgUp and PgDn
@@ -180,6 +180,20 @@ From the spec's §17, with the PRs of phases 0 and 1:
   Tests: host tests on the unix port feed key events to the editor and lines
   to the dispatcher; a smoke step starts `koracli` from the shell, types a
   two-line block and reads its output.
+  *Built:* `koracli` (user/koracli.c) opens a screen and runs `micropython
+  sys:koracli/main.py` on its console with `console_run`. The Python side
+  is `user/koracli/*.py`, shipped to `sys:koracli` (the user's choice,
+  2026-11-24): `shell.py` (the loop, bars, F1, F2, running), `editor.py`
+  (pure: key events in, xterm sequences out through a `write` function,
+  so it runs on the unix port), `dispatch.py`, `keys.py`. The `kora`
+  module gains `key()`, `mode()`, `bar()`, `esc_break()`, `size()` and
+  `repl()` (the C fallback). The console stays in key-event mode while
+  code runs, so keys typed ahead stay events; the HAL turns events into
+  terminal bytes (`keys.c`) for `input()`. Continuation is decided in
+  Python: a compound statement goes on until two blank lines in a row, an
+  open bracket or triple-quoted string until it closes; a prefixed first
+  line runs at Enter. Blocks compile in `single` mode (values printed),
+  falling back to `exec` for several statements.
 - [ ] **1c. OS commands from Python.** `kora.run` and `kora.capture` (the
   interpreter serves the child's stdout and stderr on a port of its own,
   waiting on it and on the child's end together); the captured `str`
@@ -232,13 +246,13 @@ Later phases, in a line each, to be split into PRs when they come up:
 
 ## Open decisions
 
-- **Merge policy.** Steps that touch kernel-built code (1a) wait for review.
-  Whether the others (the port, the Python side) wait too, as the console
-  work did, or merge on green CI like the libc work.
-- **Where things live on the userfs:** KoraCLI's Python modules
-  (`sys:koracli/` proposed), the library directory on `sys.path`
-  (`sys:python` for now), the user's folder for wrappers and the startup
-  file.
+(Settled 2026-11-24: steps merge on green CI unless they need testing on a
+Pi, kernel-built code included.)
+
+- **Where things live on the userfs:** the library directory on
+  `sys.path` (`sys:python` for now), the user's folder for wrappers and the
+  startup file. (KoraCLI's own modules are in `sys:koracli`, decided
+  2026-11-24.)
 - **Freezing** KoraCLI's modules into the binary later (faster start), at the
   cost of editing them on the machine.
 - **Which graphics layer is on top**, for the later layer (spec §10.2).

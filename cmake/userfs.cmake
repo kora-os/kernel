@@ -73,6 +73,9 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
         FLAGS -Wextra -Werror)
     # The shell serves its own console (user/shell.c).
     koraos_add_user_program(shell "${USER_DIR}/shell.c" ${CONSOLE_SOURCES})
+    # KoraCLI's console task: MicroPython with sys:koracli on a console of its own.
+    koraos_add_user_program(koracli "${USER_DIR}/koracli.c" ${CONSOLE_SOURCES}
+        FLAGS -Wextra -Werror)
     koraos_add_user_program(gfxdemo "${USER_DIR}/gfxdemo.c" ${LIBSCREEN_SOURCES})
     koraos_add_user_program(jobdemo "${USER_DIR}/jobdemo.c" ${LIBSCREEN_SOURCES})
     koraos_add_user_program(condemo "${USER_DIR}/condemo.c" ${LIBCONSOLE_SOURCES}
@@ -148,6 +151,13 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
     string(JOIN "\n" _tests ${TEST_FILES})
     file(GENERATE OUTPUT "${TEST_MANIFEST}" CONTENT "${_tests}\n")
 
+    # KoraCLI's Python side (sys:koracli), which the koracli program runs.
+    file(GLOB KORACLI_FILES CONFIGURE_DEPENDS "${USER_DIR}/koracli/*.py")
+    list(SORT KORACLI_FILES)
+    set(KORACLI_MANIFEST "${CMAKE_CURRENT_BINARY_DIR}/userfs-koracli.txt")
+    string(JOIN "\n" _koracli ${KORACLI_FILES})
+    file(GENERATE OUTPUT "${KORACLI_MANIFEST}" CONTENT "${_koracli}\n")
+
     set(FS_ROOT_DIR "${SOURCE_ROOT}/fsroot")
     set(FS_IMAGE_SCRIPT "${SOURCE_ROOT}/create-fs-image.sh")
     file(GLOB_RECURSE FS_ROOT_FILES LIST_DIRECTORIES true CONFIGURE_DEPENDS "${FS_ROOT_DIR}/*")
@@ -158,10 +168,10 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
         OUTPUT "${IMAGE_PATH}"
         COMMAND "${FS_IMAGE_SCRIPT}" --fsroot "${FS_ROOT_DIR}" --output "${IMAGE_PATH}"
                 --programs-file "${USER_PROGRAM_MANIFEST}" --fonts-file "${FONT_MANIFEST}"
-                --tests-file "${TEST_MANIFEST}"
+                --tests-file "${TEST_MANIFEST}" --koracli-file "${KORACLI_MANIFEST}"
         DEPENDS ${FS_ROOT_FILES} ${USER_PROGRAM_ELVES} "${FS_IMAGE_SCRIPT}" "${FS_INPUT_MANIFEST}"
                 "${USER_PROGRAM_MANIFEST}" ${FONT_FILES} "${FONT_MANIFEST}"
-                ${TEST_FILES} "${TEST_MANIFEST}"
+                ${TEST_FILES} "${TEST_MANIFEST}" ${KORACLI_FILES} "${KORACLI_MANIFEST}"
                 "${CMAKE_CURRENT_FUNCTION_LIST_FILE}"
         COMMENT "Building FAT32 ramdisk image koraos.img"
         VERBATIM)

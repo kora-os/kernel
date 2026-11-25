@@ -60,6 +60,12 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
   code is tested on the unix port from the same tree
   (`tests/run-micropython-tests.sh`), not on CPython; the smoke test's
   Python probes (`tests/user/*.py`) ship in `sys:tests`.
+- KoraCLI (`docs/koracli.md`, `project_doc/koracli-plan.md`) is `koracli`
+  (`user/koracli.c`, the console task) running `micropython
+  sys:koracli/main.py`; its Python side is `user/koracli/*.py`, shipped to
+  `sys:koracli`. The editor is pure Python over key events and tested on
+  the unix port (`tests/micropython/koracli_editor.py`). Every KoraCLI PR
+  updates `docs/koracli.md` and the `koracli` category of `features.yaml`.
 - Message ports (`src/ipc/port.c`, syscalls 48 to 54) carry pointers to the
   sender's memory; the kernel never touches a message and keeps an ended
   sender's memory until its held messages are replied (`docs/syscalls.md`).

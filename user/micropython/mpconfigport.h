@@ -26,6 +26,7 @@
 #define MICROPY_PY_BUILTINS_STR_UNICODE (1)
 #define MICROPY_ERROR_REPORTING (MICROPY_ERROR_REPORTING_NORMAL)
 #define MICROPY_ENABLE_SOURCE_LINE (1)  // tracebacks give line numbers
+#define MICROPY_PY_BUILTINS_COMPILE (1)  // KoraCLI runs blocks as the REPL does
 #define MICROPY_ALLOC_PATH_MAX (256)
 
 // sys: argv (a script's arguments), path (modules), exit.
