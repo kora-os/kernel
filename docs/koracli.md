@@ -3,11 +3,12 @@
 KoraCLI is the shell KoraOS starts in: a fullscreen prompt where you can type
 Python, a line of BASIC or an OS command, and see what happens.
 
-> **Status: a first KoraCLI runs.** Type `koracli` in the shell: it opens a
-> screen of its own with Python mode (step 1b). It does not replace the
-> shell yet, and OS commands and BASIC are still to come. This reference is
-> written ahead of the implementation and grows with it: each section says
-> whether what it describes works today or which step brings it. The
+> **Status: KoraCLI is the shell (phase 1 done).** KoraOS starts in it,
+> with Python mode and OS mode, OS commands from Python, and its own editor
+> (`koracli` starts another one). BASIC and the later phases are still to
+> come. This reference is written ahead of the implementation and grows
+> with it: each section says whether what it describes works today or which
+> step brings it. The
 > design behind it is `project_doc/koracli-spec.md`, and the steps are in
 > `project_doc/koracli-plan.md`. Every change to KoraCLI updates this page in
 > the same pull request.
@@ -18,9 +19,10 @@ so in a **Differences** note.
 
 ## The screen
 
-*Works (step 1b),* on a screen of KoraCLI's own: the top bar says
-`KoraCLI`, the bottom bar the mode (`PY` or `OS`) and the function keys
-there are so far (F1 Help, F2 Mode). Meta+M goes back to the shell's screen.
+*Works (steps 1b and 1d),* on a screen of KoraCLI's own, the one KoraOS
+starts in: the top bar says `KoraCLI`, the bottom bar the mode (`PY` or
+`OS`) and the function keys there are so far (F1 Help, F2 Mode). Meta+M
+switches between it and other programs' screens.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -156,10 +158,10 @@ Python, and in them you call `kora.run` and `kora.capture` instead of `!`.
 
 ## OS commands
 
-*Works (step 1c),* in Python mode and in code, as below. What is not there
-yet: `kill` and the other built-ins (step 1d), the startup file that loads
-wrappers (phase 6), and job objects: `job = !cmd &` gives the job's number
-for now (phase 7).
+*Works (steps 1c and 1d),* in Python mode and in code, as below; the old
+shell's built-ins (`cd`, `kill`, ...) are wrappers, so `!cd docs` works
+too. What is not there yet: the startup file that loads wrappers (phase 6),
+and job objects: `job = !cmd &` gives the job's number for now (phase 7).
 
 ### Running and capturing
 
@@ -212,8 +214,8 @@ They can be combined in either order (`@2 &`). Only a word of its own counts,
 so `bob@example.com` is an ordinary argument. A program stays on the core it
 started on. `kill` ends a background job.
 
-KoraCLI prints the job's number when it starts (`[12]`), and `[12] exited
-with 0` at the next prompt after it ends. A background job's output appears
+KoraCLI prints the job's number when it starts (`[12] started`), and `[12]
+done, exit 0` at the next prompt after it ends. A background job's output appears
 on the screen as it comes, even in the middle of a line you are typing.
 
 **Today:** Ctrl+C while a program runs in front is passed on to it, which
@@ -251,9 +253,13 @@ scripting language.
 
 ## OS mode
 
-*Begun (step 1c):* F2 switches to it, with the `$` prompt, and every line
-runs as a command, read as `!` reads one but without `{expr}`. The
-built-ins (`cd` and the rest) and a volume name alone come with step 1d.
+*Works (step 1d).* F2 switches to it, with the `$` prompt, and every line
+runs as a command, read as `!` reads one but without `{expr}`; a backslash
+takes the next character as it is (`my\ file.txt`), as quotes do. As the
+shell before KoraCLI did, each command's end is reported (`[12] exited with
+0`), a background job's start and end too (`[13] started`, `[13] done,
+exit 0`), and Ctrl+C at the prompt drops the line (`^C`). KoraCLI starts in
+Python mode: F2 once for OS mode.
 
 A plain command shell with the `$` prompt: every line is an OS command, found
 and run as with `!` above, with the same `&`, `@N` and redirection.

@@ -3,7 +3,8 @@
 """QEMU smoke test: boot the QEMU kernel on the raspi3b, raspi4b or virt
 machine, drive the shell on its screen from the serial line (the debug
 console's type, key and conlog), and check the output and the framebuffer.
-Without a display there is no shell: only the kernel checks run.
+Without a display there is no shell: only the kernel checks run. The shell
+is KoraCLI, whose OS mode the steps drive (F2 after each start).
 
 Waits for expected output (with timeouts) rather than sleeping, so it is not
 sensitive to how fast the machine runs QEMU. Standard library only.
@@ -208,6 +209,19 @@ def near(actual, expected, tolerance=8):
 
 
 PROMPT = rb"^\$ "
+# The shell is KoraCLI: its console task `koracli` runs the interpreter,
+# which waits for input and runs the commands.
+SHELL_TASK = "micropython"
+
+
+def koracli_os_mode(q, timeout=60):
+    """KoraCLI has started (in Python mode): to its OS mode, where the steps
+    type their commands, and its prompt."""
+    q.expect(rb"KoraCLI on MicroPython [0-9.]+\. F1 for help\.", timeout=timeout)
+    q.expect(rb">>> ")
+    time.sleep(0.3)
+    q.key("f2")
+    q.expect(rb"\x1b\[J\$ ")  # the prompt redrawn in place (a new one starts a line)
 TYPE_CHUNK = 32  # characters per `type` command: 64 events of the queue's 256
 DROPPED = re.compile(rb"^(?:type|key|mouse): the input queue dropped \d+ events|"
                      rb"^(?:type|key): (?:no key|unknown|a broken)", re.M)
@@ -431,21 +445,21 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         return
 
     def boot():
-        # init runs the shell under the screen manager; it opens a screen and
-        # a console there, and runs itself on it.
-        q.expect(rb"^init: starting the shell \(screens shell\)", timeout=90)
+        # init runs the shell, KoraCLI, under the screen manager: its console
+        # task opens a screen and a console there, and runs the interpreter
+        # on it. The steps type in its OS mode.
+        q.expect(rb"^init: starting the shell \(screens koracli\)", timeout=90)
         q.expect(rb"^screens: \d+x\d+, Meta\+M brings the next screen to front")
-        q.expect(rb"^screens: screen \d+ in front \(shell\)")
-        q.expect(rb"KoraOS shell\. Type 'help'\.", timeout=90)
-        q.expect(PROMPT)
-    yield "boots to the shell, on a screen of its own", boot
+        q.expect(rb"^screens: screen \d+ in front \(koracli\)")
+        koracli_os_mode(q, timeout=90)
+    yield "boots to the shell (KoraCLI), on a screen of its own", boot
 
     for what, label, writable in media:
         yield from storage_steps(q, what, label, writable, cores)
 
     def ls():
         q.send("ls /bin\r")
-        for name in (b"hello", b"shell", b"termdemo"):
+        for name in (b"hello", b"koracli", b"termdemo"):
             q.expect(rb"^" + name + rb"\r?$")
         q.expect(rb"exited with 0")
         q.expect(PROMPT)
@@ -503,7 +517,7 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         root = q.expect(rb"^([a-zA-Z0-9_-]+:)\r?$").group(1)
         q.expect(PROMPT)
         q.send("echo" + " a" * 16 + "\r")
-        q.expect(rb"shell: too many arguments")
+        q.expect(rb"koracli: too many arguments")
         q.expect(PROMPT)
         q.send("echo accepted\r")
         q.expect(rb"^accepted\r?$")
@@ -554,11 +568,11 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
             q.expect(PROMPT)
             command("assign c sys:docs")
             q.send("hello\r")
-            q.expect(rb"shell: no such program: hello")
+            q.expect(rb"koracli: no such program: hello")
             q.expect(PROMPT)
             command("assign c")
             q.send("hello\r")
-            q.expect(rb"shell: no such program: hello")
+            q.expect(rb"koracli: no such program: hello")
             q.expect(PROMPT)
             command("assign c sys:bin")
             command("sys:")
@@ -668,7 +682,7 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         # More than the kernel allows: the spawn fails, and says why.
         q.send("stackbig\r")
         q.expect(rb"spawn: 'stackbig' asks for a 2048 KB stack, more than 1024 KB")
-        q.expect(rb"shell: no such program: stackbig")
+        q.expect(rb"koracli: no such program: stackbig")
         q.expect(PROMPT)
         # A program that declares nothing keeps its one page.
         q.send("hello\r")
@@ -707,7 +721,7 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         for _ in range(5):
             listed, peak, size, holder = read_tasks_bkl()
             if (listed.get("init", ("",))[0] == "blocked" and
-                    listed.get("shell", ("",))[0] == "blocked" and holder is None):
+                    listed.get(SHELL_TASK, ("",))[0] == "blocked" and holder is None):
                 break
             time.sleep(0.2)
         else:
@@ -729,7 +743,7 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
 
         # A background job that never makes a syscall, on the shell's own core:
         # the shell only answers while it runs if the timer tick preempts it.
-        shell_core = core_of(q, "shell")
+        shell_core = core_of(q, SHELL_TASK)
         q.send("schedprobe spin 5000 @%d &\r" % shell_core)
         m = q.expect(rb"^\[(\d+)\] started")
         pid = m.group(1)
@@ -744,7 +758,7 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         # The shell may be asleep in read() or, preempted between its prompt and
         # that read, waiting for its next slice; the spinner is always runnable.
         listed, _, _ = read_tasks()
-        if listed.get("schedprobe", ("",))[0] != "runnable" or "shell" not in listed:
+        if listed.get("schedprobe", ("",))[0] != "runnable" or SHELL_TASK not in listed:
             raise Failure("expected a runnable schedprobe next to the shell, got %s" % listed)
         q.expect(rb"schedprobe: spun \d+ ms", timeout=60)
         # The job exits just after printing; the first prompt after that
@@ -766,7 +780,7 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         # slices (10 ms); while forbid()den it must not lose it at all. Host
         # scheduling noise can stretch a gap, so allow a few attempts.
         # Both on the shell's core, so they compete for it.
-        core = core_of(q, "shell")
+        core = core_of(q, SHELL_TASK)
         q.send("schedprobe spin 8000 @%d &\r" % core)
         m = q.expect(rb"^\[(\d+)\] started")
         spinner = m.group(1)
@@ -888,13 +902,13 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
     def placement_and_pinning():
         rows = ps_table(q)
         names = {name: core for _, _, core, _, name in rows}
-        if not {"init", "shell", "ps"} <= set(names):
+        if not {"init", "koracli", SHELL_TASK, "ps"} <= set(names):
             raise Failure("ps lists %s" % rows)
         if any(core >= cores for core in names.values()):
             raise Failure("ps shows a core outside 0..%d: %s" % (cores - 1, rows))
         if cores == 1:
             q.send("echo hi @1\r")
-            q.expect(rb"shell: cannot run echo on cpu 1")
+            q.expect(rb"koracli: cannot run echo on cpu 1")
             q.expect(PROMPT)
             return
         # Pinned: the task runs where it was put.
@@ -1207,7 +1221,7 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
             q.debug("keylog on")
             q.expect(rb"^keylog: on, events go to thread \d+")
             q.monitor("sendkey shift-k 10")
-            q.expect(rb"^KeyDown from " + device + rb" to screens \(pid \d+\) -> front: shell \(pid \d+\)\r?\n"
+            q.expect(rb"^KeyDown from " + device + rb" to screens \(pid \d+\) -> front: koracli \(pid \d+\)\r?\n"
                      rb"    time \d+ ms, keycode 0x0e \(K\), modifiers 0x0002 \(LShift\)\r?\n"
                      rb"    char U\+004B \"K\", repeat no")
             time.sleep(gap)
@@ -1233,7 +1247,7 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
             q.expect(rb"^keylog: off")
         yield "keylog traces %s keys to the console and to a claimer (Meta+M)" % keyboard, keylog
 
-    MOUSE_TO = rb"^Mouse from %s to screens \(pid \d+\) -> front: shell \(pid \d+\)\r?\n    time \d+ ms, "
+    MOUSE_TO = rb"^Mouse from %s to screens \(pid \d+\) -> front: koracli \(pid \d+\)\r?\n    time \d+ ms, "
 
     def debug_mouse():
         # The debug console is a mouse too: its events go to the screen
@@ -1428,7 +1442,7 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         """Two lines from different programs, in either order."""
         m = q.expect(first + b"|" + second, timeout=timeout)
         q.expect(second if re.fullmatch(first, m.group(0)) else first, timeout=timeout)
-    SHELL_FRONT = LINE + rb"screens: screen \d+ in front \(shell\)"
+    SHELL_FRONT = LINE + rb"screens: screen \d+ in front \(koracli\)"
 
     def screen_manager():
         # A second manager is refused.
@@ -1669,10 +1683,10 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         q.send("!greet you\r")
         q.expect(rb"^hi you\r?$")
         q.send("!hello &\r")
-        q.expect(rb"^\[\d+\]\r?$")
+        q.expect(rb"^\[\d+\] started\r?$")
         time.sleep(1)
-        q.send("\r")
-        q.expect(rb"^\[\d+\] exited with 0\r?$")
+        q.send("\r")  # reported at a prompt after its end
+        q.expect(rb"^\[\d+\] done, exit 0\r?$")
         q.send("!conprobe hang\r")
         q.expect(rb"^conprobe: hanging", timeout=30)
         time.sleep(0.3)
@@ -1786,7 +1800,8 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
     def fonts():
         # `font` lists sys:fonts and switches the shell's console to another
         # font: the console resizes, and a program asking for its size gets
-        # the new one. The display is 1024x768.
+        # the new one. The display is 1024x768; KoraCLI's bars take a row
+        # each.
         q.send("font\r")
         for name in (rb"spleen-5x8", rb"spleen-6x12", rb"spleen-8x16", rb"spleen-12x24",
                      rb"spleen-16x32", rb"builtin"):
@@ -1794,8 +1809,9 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         q.expect(PROMPT)
 
         def size(cols, rows):
+            rows -= 2  # the bars'
             q.send("conprobe size\r")
-            q.expect(rb"conprobe: size %dx%d" % (cols, rows))  # after the request, copied by conlog
+            q.expect(rb"conprobe: size %dx%d\r?\n" % (cols, rows))  # after the request, copied by conlog
             q.expect(PROMPT)
         size(128, 96)
         q.send("font spleen-8x16\r")
@@ -1813,13 +1829,14 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         with open(os.path.join(ROOT, "third_party", "spleen", "spleen-8x16.bdf")) as f:
             _, _, glyphs = bdf2psf.parse_bdf(f.read())
         rows = dict(glyphs)
+        top = 16  # the grid's first row, below KoraCLI's top bar
         for col, cp in enumerate((0xE9, 0x2500, 0x20AC, 0xFC)):
             for y in range(16):
                 for x in range(8):
                     want = (255, 255, 255) if rows[cp][y][x] else (0, 0, 0)
-                    if not near(pixel(shot, col * 8 + x, y), want):
+                    if not near(pixel(shot, col * 8 + x, top + y), want):
                         raise Failure("U+%04X: pixel %d,%d of its cell is %s, not %s"
-                                      % (cp, x, y, pixel(shot, col * 8 + x, y), want))
+                                      % (cp, x, y, pixel(shot, col * 8 + x, top + y), want))
         q.send("font spleen-16x32\r")
         q.expect(PROMPT)
         size(64, 24)
@@ -1980,7 +1997,7 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         # The screen manager killed, as a crash would. Its programs' screens
         # are gone: the shell kills the program on its console and ends, and
         # gfxdemo ends; nothing of theirs is left drawing into memory the
-        # manager no longer has. init starts screens shell again.
+        # manager no longer has. init starts screens koracli again.
         q.send("gfxdemo &\r")
         q.expect(LINE + rb"gfxdemo: painted \d+x\d+ on screen \d+", timeout=30)
         q.key("meta_l-m")
@@ -1990,11 +2007,11 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
             raise Failure("ps shows screens as %s" % manager)
         q.send("kill %d\r" % manager[0])
         q.expect(LINE + rb"init: the shell ended \(exit -9\); starting it again", timeout=30)
-        q.expect(rb"KoraOS shell\. Type 'help'\.", timeout=60)
-        q.expect(PROMPT)
+        koracli_os_mode(q)
         for _ in range(20):
             names = [name for *_, name in ps_table(q)]
-            if names.count("shell") == 2 and names.count("screens") == 1 and "gfxdemo" not in names:
+            if names.count("koracli") == 1 and names.count(SHELL_TASK) == 1 and \
+                    names.count("screens") == 1 and "gfxdemo" not in names:
                 break
             time.sleep(0.2)
         else:
@@ -2012,12 +2029,11 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         # again, and the new shell runs programs.
         q.send("exit\r")
         q.expect(rb"^bye")
-        q.expect(rb"screens: screen \d+ closed \(shell\), closed by its program")
+        q.expect(rb"screens: screen \d+ closed \(koracli\), closed by its program")
         q.expect(LINE + rb"screens: done")
         q.expect(LINE + rb"init: the shell ended \(exit 0\); starting it again")
-        q.expect(LINE + rb"init: starting the shell \(screens shell\)")
-        q.expect(rb"KoraOS shell\. Type 'help'\.", timeout=60)
-        q.expect(PROMPT)
+        q.expect(LINE + rb"init: starting the shell \(screens koracli\)")
+        koracli_os_mode(q)
         q.send("hello\r")
         q.expect(rb"^Hello from userland \(ELF\)")
         q.expect(rb"exited with 0")
