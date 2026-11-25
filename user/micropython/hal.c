@@ -163,13 +163,28 @@ int mp_hal_stdin_rx_chr(void) {
     return got > 0 ? (unsigned char)in.buf[in.pos++] : got == 0 ? CHAR_CTRL_D : CHAR_CTRL_C;
 }
 
+// Key events read and not taken when the mode left CON_EVENTS (a command
+// run in cooked mode): they were typed for the reader of events, which gets
+// them first when the mode is CON_EVENTS again.
+static struct con_key_event stash[sizeof in.buf / sizeof(struct con_key_event)];
+static unsigned stash_count, stash_pos;
+
 int kora_console_mode(int mode) {
     input_ready();
     if (console_mode(mode) != 0) {
         return -1;
     }
-    // What came for the old mode is not for the new one. A read still with
-    // the console is answered in the new mode, and read as such.
+    if (in.mode == CON_EVENTS && mode != CON_EVENTS) {
+        if (stash_pos == stash_count) {
+            stash_pos = stash_count = 0;
+        }
+        while (in.len - in.pos >= sizeof stash[0] && stash_count < MP_ARRAY_SIZE(stash)) {
+            memcpy(&stash[stash_count++], in.buf + in.pos, sizeof stash[0]);
+            in.pos += sizeof stash[0];
+        }
+    }
+    // Otherwise, what came for the old mode is not for the new one. A read
+    // still with the console is answered in the new mode, and read as such.
     in.mode = mode;
     in.pos = in.len = 0;
     translated.length = translated_pos = 0;
@@ -184,6 +199,10 @@ int kora_read_key(struct con_key_event *event) {
     input_ready();
     if (in.port == 0 || in.mode != CON_EVENTS) {
         return -2;
+    }
+    if (stash_pos < stash_count) {
+        *event = stash[stash_pos++];
+        return 1;
     }
     for (;;) {
         int got = input_wait();

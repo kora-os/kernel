@@ -1,6 +1,6 @@
 # KoraCLI plan
 
-Status: **phase 0 done, phase 1 begun** (1a, 1b: `koracli` runs with Python mode); the rest is planned. Phases 0 and 1 are broken into PRs
+Status: **phase 0 done, phase 1 under way** (1a to 1c: `koracli` runs Python and OS commands); the rest is planned. Phases 0 and 1 are broken into PRs
 below; the later phases are listed and get their PRs when they come up. The
 plan was agreed in a discussion on 2026-11-24.
 
@@ -194,7 +194,7 @@ From the spec's §17, with the PRs of phases 0 and 1:
   open bracket or triple-quoted string until it closes; a prefixed first
   line runs at Enter. Blocks compile in `single` mode (values printed),
   falling back to `exec` for several statements.
-- [ ] **1c. OS commands from Python.** `kora.run` and `kora.capture` (the
+- [x] **1c. OS commands from Python.** `kora.run` and `kora.capture` (the
   interpreter serves the child's stdout and stderr on a port of its own,
   waiting on it and on the child's end together); the captured `str`
   subclass (`.status`, `.lines`, `.stderr`); `kora.status`; resolution
@@ -206,6 +206,23 @@ From the spec's §17, with the PRs of phases 0 and 1:
   Tests: host tests for the argument parser and the `!` translation; smoke
   steps capture `echo` into a variable, redirect to a file and back, and run
   a job in the background.
+  *Built:* the C module is `_kora` now; `kora` is `sys:python/kora.py`,
+  which takes it all and adds `run`, `capture`, `status` and `cmd` in
+  Python (a C module's names are fixed). `_kora.execute` spawns with
+  redirection or capture ports, waits on the child's end and the break
+  together (a break passed on with `sig_send`, `kill` when its main thread
+  is gone), turns ESC as a break off and the console cooked for the
+  child, and serves its stdout and stderr when capturing; `_kora.reap`
+  collects background jobs, reported at the next prompt. `!` lines are
+  translated by `sys:koracli/bang.py` into `kora._bang(...)` calls with
+  each `{expr}` compiled in place (so locals work); `kora._argv` expands
+  lists. OS mode lines already run as commands (no `{expr}`); its
+  built-ins are 1d. Type-ahead: the console keeps queued events across
+  modes and turns what was typed in cooked mode into events when the mode
+  is `CON_EVENTS` again; the HAL keeps events it had read; the console
+  queues 512 events; the editor writes a character typed at the line's
+  end without redrawing. `fn.__name__` is on (`MICROPY_PY_FUNCTION_ATTRS`).
+  Not yet: job objects (`job = !cmd &` gives the pid; phase 7).
 - [ ] **1d. OS mode, and KoraCLI replaces the shell.** The `$` prompt with
   every line an OS command; the old shell's built-ins as wrappers (`cd`,
   `pwd`, `volumes`, `sync`, `assign`, `kill`, `help`, `exit`); a volume or

@@ -297,7 +297,7 @@ categories:
         prs: [124]
       - id: koracli-os-commands
         name: OS commands from Python
-        status: planned
+        status: in_progress
         description: Run or capture programs with !cmd and kora.run, and add commands as Python wrappers.
       - id: koracli-os-mode
         name: OS mode

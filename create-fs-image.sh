@@ -35,6 +35,7 @@ Options:
   --fonts-file FILE  Install the font files listed in FILE, one per line, into /fonts
   --tests-file FILE  Install the test files listed in FILE, one per line, into /tests
   --koracli-file FILE  Install KoraCLI's files listed in FILE, one per line, into /koracli
+  --python-file FILE   Install the Python modules listed in FILE, one per line, into /python
   -h, --help         Show this message
 EOF
 }
@@ -50,6 +51,7 @@ programs_file=""
 fonts_file=""
 tests_file=""
 koracli_file=""
+python_file=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -71,6 +73,9 @@ while [[ $# -gt 0 ]]; do
   --fonts-file)
     shift; [[ $# -gt 0 ]] || { echo "Missing value for --fonts-file" >&2; exit 1; }
     fonts_file="$1" ;;
+  --python-file)
+    shift; [[ $# -gt 0 ]] || { echo "Missing value for --python-file" >&2; exit 1; }
+    python_file="$1" ;;
   --koracli-file)
     shift; [[ $# -gt 0 ]] || { echo "Missing value for --koracli-file" >&2; exit 1; }
     koracli_file="$1" ;;
@@ -160,6 +165,17 @@ if [[ -n "$fonts_file" ]]; then
     [[ -f "$font" ]] || { echo "Missing font: $font" >&2; exit 1; }
     mcopy -Q -i "$image_temp" "$font" "::/fonts/$(basename "$font")"
   done < "$fonts_file"
+fi
+
+if [[ -n "$python_file" ]]; then
+  [[ -f "$python_file" ]] || { echo "Missing Python manifest: $python_file" >&2; exit 1; }
+  echo "Installing Python modules into /python"
+  mmd -i "$image_temp" ::/python 2>/dev/null || true
+  while IFS= read -r file || [[ -n "$file" ]]; do
+    [[ -n "$file" ]] || continue
+    [[ -f "$file" ]] || { echo "Missing Python module: $file" >&2; exit 1; }
+    mcopy -Q -i "$image_temp" "$file" "::/python/$(basename "$file")"
+  done < "$python_file"
 fi
 
 if [[ -n "$koracli_file" ]]; then

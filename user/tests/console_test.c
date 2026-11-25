@@ -470,11 +470,32 @@ static void test_events_and_bars(void) {
     CHECK(broke == before + 1 && (int)c->event_count == events_before,
           "Ctrl+C is still the console's break, not an event");
     broke = before;  // as test_run expects it
+    unsigned queued_before = c->event_count;
     struct con_packet cooked = {CON_MODE, -9, NULL, CON_COOKED};
     put(&cooked, 50);
     service(SIG_MASK(PORT_BIT));
-    CHECK(!c->events && c->event_count == 0 && c->edit.mode == CON_COOKED,
-          "cooked again, the events not read are dropped");
+    CHECK(!c->events && queued_before > 0 && c->event_count == queued_before &&
+              c->edit.mode == CON_COOKED,
+          "cooked again, the events not read kept for the next reader of events");
+    c->event_head = c->event_count = 0;  // (read by nobody here)
+
+    // Typed ahead in cooked mode and not read: key presses in CON_EVENTS.
+    type_text("l1\n");  // a line entered,
+    type_key(0x08, 0, 0xE9);  // and é typed after it, the line not ended
+    service(SIG_MASK(KEY_BIT));
+    struct con_packet events_again = {CON_MODE, -9, NULL, CON_EVENTS};
+    put(&events_again, 50);
+    service(SIG_MASK(PORT_BIT));
+    CHECK(c->event_count == 4 && c->edit.ready_length == 0 && c->edit.length == 0,
+          "what was typed ahead became events (%u)", c->event_count);
+    put(&read, 50);
+    answer_count = 0;
+    service(SIG_MASK(PORT_BIT));
+    CHECK(answer_count == 1 && read.result == 4 * (long)sizeof(struct con_key_event) &&
+              got[0].codepoint == 'l' && got[1].codepoint == '1' && got[2].keycode == KEY_ENTER &&
+              got[3].codepoint == 0xE9, "in order, the line's end an Enter, é whole");
+    put(&cooked, 50);
+    service(SIG_MASK(PORT_BIT));
 
     // ESC as a break for the program that asks, until it asks no more.
     struct con_packet esc_on = {CON_ESC_BREAK, -9, NULL, 1};

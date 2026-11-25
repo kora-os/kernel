@@ -156,13 +156,17 @@ press(ed, keys.HOME)
 check(press(ed, 0x07, 0x01, "d") is None and ed.lines == ["b"], "elsewhere it deletes")
 check(press(ed, keys.F1) == ("key", "F1") and press(ed, keys.F2) == ("key", "F2"), "F1, F2")
 
-# Drawing: a wrapped line, and the cursor brought back to its place.
+# Drawing: typed at the end, a character is all that is written, until it
+# reaches the last column; a wrapped line, and the cursor brought back.
 ed, screen = new(width=10)
 screen.take()
-type_text(ed, "abcdefghij")  # ">>> " and 10 characters: two rows
-out = screen.take()
-check(out.endswith("\r\x1b[J>>> abcdefghij\r\x1b[4C"), "the cursor after a wrapped line: %r"
-      % out[-30:])
+type_text(ed, "abcde")
+check(screen.take() == "abcde", "typing at the end writes just the characters")
+type_text(ed, "f")  # ">>> abcdef": the last column
+check(screen.take() == "\r\x1b[J>>> abcdef\n\r",
+      "reaching the last column redraws, a newline taking the cursor down")
+type_text(ed, "ghij")  # ">>> " and 10 characters: two rows
+check(screen.take() == "ghij", "and the next row too: characters")
 press(ed, keys.HOME)
 out = screen.take()
 check(out == "\x1b[1A\r\x1b[J>>> abcdefghij\x1b[1A\r\x1b[4C", "Home goes back up a row: %r" % out)

@@ -59,8 +59,9 @@ def create_image(userfs, output):
         validate_output(userfs, output, registered)
         manifest = temporary / "programs.txt"
         manifest.write_text("".join(str(elf) + "\n" for elf in registered))
-        # The fonts (sys:fonts), the test files (sys:tests) and KoraCLI's
-        # (sys:koracli), as the shared image has them.
+        # The fonts (sys:fonts), the test files (sys:tests), KoraCLI's
+        # (sys:koracli) and the Python library (sys:python), as the shared
+        # image has them.
         # (Apart from the programs extracted above: a directory may share a
         # program's name, as koracli does.)
         def copy_directory(directory):
@@ -82,10 +83,12 @@ def create_image(userfs, output):
         fonts, fonts_manifest = copy_directory("fonts")
         _, tests_manifest = copy_directory("tests")
         _, koracli_manifest = copy_directory("koracli")
+        _, python_manifest = copy_directory("python")
         subprocess.run([str(ROOT / "create-fs-image.sh"), "--size", "64", "--volume", "WRITE",
                         "--fsroot", str(ROOT / "fsroot"), "--programs-file", str(manifest),
                         "--fonts-file", str(fonts_manifest), "--tests-file", str(tests_manifest),
                         "--koracli-file", str(koracli_manifest),
+                        "--python-file", str(python_manifest),
                         "--output", str(output)], check=True)
     if digest(shared) != before:
         raise RuntimeError("immutable shared userfs changed during scratch generation")

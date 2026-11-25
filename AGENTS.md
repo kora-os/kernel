@@ -63,7 +63,10 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
 - KoraCLI (`docs/koracli.md`, `project_doc/koracli-plan.md`) is `koracli`
   (`user/koracli.c`, the console task) running `micropython
   sys:koracli/main.py`; its Python side is `user/koracli/*.py`, shipped to
-  `sys:koracli`. The editor is pure Python over key events and tested on
+  `sys:koracli`. The `kora` module is `user/python/kora.py` (`sys:python`)
+  over the C module `_kora` (`user/micropython/modkora.c`): `kora.run`,
+  `kora.capture` and `kora.cmd` are Python; `!` lines are translated by
+  `user/koracli/bang.py`. The editor is pure Python over key events and tested on
   the unix port (`tests/micropython/koracli_editor.py`). Every KoraCLI PR
   updates `docs/koracli.md` and the `koracli` category of `features.yaml`.
 - Message ports (`src/ipc/port.c`, syscalls 48 to 54) carry pointers to the

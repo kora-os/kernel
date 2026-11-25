@@ -158,6 +158,13 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
     string(JOIN "\n" _koracli ${KORACLI_FILES})
     file(GENERATE OUTPUT "${KORACLI_MANIFEST}" CONTENT "${_koracli}\n")
 
+    # The Python library every MicroPython program finds (sys:python): kora.py.
+    file(GLOB PYTHON_FILES CONFIGURE_DEPENDS "${USER_DIR}/python/*.py")
+    list(SORT PYTHON_FILES)
+    set(PYTHON_MANIFEST "${CMAKE_CURRENT_BINARY_DIR}/userfs-python.txt")
+    string(JOIN "\n" _python ${PYTHON_FILES})
+    file(GENERATE OUTPUT "${PYTHON_MANIFEST}" CONTENT "${_python}\n")
+
     set(FS_ROOT_DIR "${SOURCE_ROOT}/fsroot")
     set(FS_IMAGE_SCRIPT "${SOURCE_ROOT}/create-fs-image.sh")
     file(GLOB_RECURSE FS_ROOT_FILES LIST_DIRECTORIES true CONFIGURE_DEPENDS "${FS_ROOT_DIR}/*")
@@ -169,9 +176,11 @@ function(koraos_add_userfs SOURCE_ROOT IMAGE_PATH)
         COMMAND "${FS_IMAGE_SCRIPT}" --fsroot "${FS_ROOT_DIR}" --output "${IMAGE_PATH}"
                 --programs-file "${USER_PROGRAM_MANIFEST}" --fonts-file "${FONT_MANIFEST}"
                 --tests-file "${TEST_MANIFEST}" --koracli-file "${KORACLI_MANIFEST}"
+                --python-file "${PYTHON_MANIFEST}"
         DEPENDS ${FS_ROOT_FILES} ${USER_PROGRAM_ELVES} "${FS_IMAGE_SCRIPT}" "${FS_INPUT_MANIFEST}"
                 "${USER_PROGRAM_MANIFEST}" ${FONT_FILES} "${FONT_MANIFEST}"
                 ${TEST_FILES} "${TEST_MANIFEST}" ${KORACLI_FILES} "${KORACLI_MANIFEST}"
+                ${PYTHON_FILES} "${PYTHON_MANIFEST}"
                 "${CMAKE_CURRENT_FUNCTION_LIST_FILE}"
         COMMENT "Building FAT32 ramdisk image koraos.img"
         VERBATIM)

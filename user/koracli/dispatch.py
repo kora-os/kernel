@@ -6,8 +6,8 @@
 # "%", the other language for this line; anything else, Python. In OS mode
 # every line is an OS command. Lines inside a block are Python.
 #
-# For now (KoraCLI step 1b) a program line is stored (nothing lists or runs
-# it yet), and OS commands and BASIC say when they come.
+# A program line is stored (nothing lists or runs it yet), and BASIC says when
+# it comes. `!` lines are Python's: bang.py turns them into calls.
 
 PYTHON = "python"
 PROGRAM_LINE = "program line"

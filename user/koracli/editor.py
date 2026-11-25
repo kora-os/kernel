@@ -167,7 +167,9 @@ class Editor:
         if row < end_row:
             out.append("\x1b[%dA" % (end_row - row))
         elif row > end_row:
-            out.append("\x1b[%dB" % (row - end_row))
+            # Below the text's end (a line exactly the width): newlines, which
+            # scroll at the screen's bottom where CSI B would not.
+            out.append("\n" * (row - end_row))
         out.append("\r")
         if col:
             out.append("\x1b[%dC" % col)
@@ -339,7 +341,13 @@ class Editor:
         elif key == keys.TAB:
             self._insert(" " * (INDENT - self.col % INDENT))
         elif ch and ch >= " " and not mods & (keys.ALT | keys.META):
+            at_end = self.row == len(self.lines) - 1 and self.col == len(self.lines[self.row])
             self._insert(ch)
+            if at_end and (len(self._prefix(self.row)) + self.col) % self.width != 0:
+                # Typed at the end, not reaching the last column: the
+                # character is all that changes on the screen.
+                self.write(ch)
+                return None
         else:
             return None  # ESC and the keys that type nothing
         self.redraw()

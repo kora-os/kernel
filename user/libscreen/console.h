@@ -43,7 +43,7 @@
 #define CONSOLE_HISTORY_LINES 500  /* scrollback */
 #define CONSOLE_READERS 16         /* reads waiting at once */
 #define CONSOLE_WHEEL_LINES 3      /* lines a turn of the wheel scrolls */
-#define CONSOLE_EVENTS 64          /* key events kept for reads (CON_EVENTS) */
+#define CONSOLE_EVENTS 512         /* key events kept for reads (CON_EVENTS): a paste's worth */
 
 typedef struct console {
     screen_t *screen;

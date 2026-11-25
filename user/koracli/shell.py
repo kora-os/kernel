@@ -9,6 +9,7 @@ import sys
 
 import kora
 
+import bang
 import dispatch
 import editor
 import keys
@@ -19,10 +20,15 @@ PROMPTS = {"PY": (">>> ", "... "), "OS": ("$ ", "$ ")}
 HELP = """KoraCLI: Python at the prompt.
   Enter runs a line; a block (def, for, if...) runs at the second blank line,
   or at once with Ctrl+Enter. PgUp and PgDn bring back earlier blocks.
-  ESC or Ctrl+C stops running code. Ctrl+D on an empty prompt ends KoraCLI.
+  ESC or Ctrl+C stops running code; Ctrl+C stops a program.
+  Ctrl+D on an empty prompt ends KoraCLI.
+  !cmd args runs a program, name = !cmd args keeps its output (a str with
+  .status, .lines, .stderr); {expr} puts a Python value in; < > >> redirect;
+  & runs it in the background, @N on core N. kora.run() and kora.capture()
+  do the same in code.
   F2 switches between Python (PY) and OS commands (OS).
-  A line starting with a number is a BASIC program line (kept for later),
-  ! runs an OS command and % a line of BASIC: those come in later steps."""
+  A line starting with a number is a BASIC program line (kept for later);
+  % runs a line of BASIC, which comes in a later step."""
 
 
 def write(s):
@@ -59,18 +65,43 @@ def run_python(text, ns):
         kora.esc_break(False)
 
 
+def run_os(text):
+    """An OS mode line: a command, without {expr}."""
+    try:
+        c = bang.os_line(text)
+    except bang.CommandError as e:
+        print("koracli: %s" % e)
+        return
+    words = [tuple(w) for w in c["words"]]
+    kora._bang(False, words, stdin=tuple(c["stdin"]) if c["stdin"] else None,
+               stdout=tuple(c["stdout"]) if c["stdout"] else None, append=c["append"],
+               background=c["background"], core=c["core"])
+
+
 def run(text, mode, ns, program):
     kind, rest = dispatch.classify(text, mode)
-    if kind == dispatch.PYTHON:
-        if text.strip():
-            run_python(text, ns)
-    elif kind == dispatch.PROGRAM_LINE:
+    if kind == dispatch.PROGRAM_LINE:
         program.enter(rest)
-    elif kind == dispatch.OS_COMMAND:
-        if rest.strip():
-            print("koracli: OS commands come with KoraCLI step 1c")
-    else:
+    elif kind == dispatch.OTHER_LANGUAGE:
         print("koracli: BASIC comes with KoraCLI phase 2")
+    elif mode == "OS":
+        if text.strip():
+            kora.esc_break(False)
+            run_os(text)
+    elif text.strip():
+        # Python, its ! lines made calls of kora's (bang.py).
+        try:
+            code = bang.translate(text)
+        except bang.CommandError as e:
+            print("koracli: %s" % e)
+            return
+        run_python(code, ns)
+
+
+def report_jobs():
+    """Background jobs that ended, as the shell before reported them."""
+    for pid, code in kora.reap():
+        print("[%d] exited with %d" % (pid, code))
 
 
 def main():
@@ -89,6 +120,7 @@ def main():
     kora.mode(kora.EVENTS)
     try:
         while True:
+            report_jobs()
             prompts(ed, mode)
             while True:
                 try:
