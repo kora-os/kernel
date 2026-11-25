@@ -34,6 +34,7 @@ Options:
   --programs-file FILE  Install only the ELF paths listed in FILE, one per line
   --fonts-file FILE  Install the font files listed in FILE, one per line, into /fonts
   --tests-file FILE  Install the test files listed in FILE, one per line, into /tests
+  --koracli-file FILE  Install KoraCLI's files listed in FILE, one per line, into /koracli
   -h, --help         Show this message
 EOF
 }
@@ -48,6 +49,7 @@ bindir=""
 programs_file=""
 fonts_file=""
 tests_file=""
+koracli_file=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
@@ -69,6 +71,9 @@ while [[ $# -gt 0 ]]; do
   --fonts-file)
     shift; [[ $# -gt 0 ]] || { echo "Missing value for --fonts-file" >&2; exit 1; }
     fonts_file="$1" ;;
+  --koracli-file)
+    shift; [[ $# -gt 0 ]] || { echo "Missing value for --koracli-file" >&2; exit 1; }
+    koracli_file="$1" ;;
   --tests-file)
     shift; [[ $# -gt 0 ]] || { echo "Missing value for --tests-file" >&2; exit 1; }
     tests_file="$1" ;;
@@ -155,6 +160,17 @@ if [[ -n "$fonts_file" ]]; then
     [[ -f "$font" ]] || { echo "Missing font: $font" >&2; exit 1; }
     mcopy -Q -i "$image_temp" "$font" "::/fonts/$(basename "$font")"
   done < "$fonts_file"
+fi
+
+if [[ -n "$koracli_file" ]]; then
+  [[ -f "$koracli_file" ]] || { echo "Missing KoraCLI manifest: $koracli_file" >&2; exit 1; }
+  echo "Installing KoraCLI into /koracli"
+  mmd -i "$image_temp" ::/koracli 2>/dev/null || true
+  while IFS= read -r file || [[ -n "$file" ]]; do
+    [[ -n "$file" ]] || continue
+    [[ -f "$file" ]] || { echo "Missing KoraCLI file: $file" >&2; exit 1; }
+    mcopy -Q -i "$image_temp" "$file" "::/koracli/$(basename "$file")"
+  done < "$koracli_file"
 fi
 
 if [[ -n "$tests_file" ]]; then

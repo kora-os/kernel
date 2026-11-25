@@ -11,6 +11,9 @@
 #                          "mpprobe: ok" and ends with sys.exit(3).
 #   mpprobe.py break       Ctrl+C as KeyboardInterrupt: caught in a loop, then
 #                          in a sleep, then left uncaught in a loop (exit 130).
+#   mpprobe.py repl        kora.repl(), KoraCLI's fallback: MicroPython's own
+#                          REPL inside the script, until Ctrl+D, then
+#                          "mpprobe: after the REPL".
 #
 # A failed check prints "mpprobe: FAILED ..." and the script exits with 1.
 import sys
@@ -129,6 +132,9 @@ if sys.argv[1:2] == ["files"]:
     files()
 elif sys.argv[1:2] == ["break"]:
     breaks()
+elif sys.argv[1:2] == ["repl"]:
+    kora.repl()
+    print("mpprobe: after the REPL")
 else:
-    print("usage: mpprobe.py files A B | break")
+    print("usage: mpprobe.py files A B | break | repl")
     sys.exit(2)

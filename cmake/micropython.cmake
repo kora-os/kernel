@@ -40,7 +40,7 @@ function(koraos_micropython_library SOURCE_ROOT)
         "${MICROPY_DIR}/shared/readline/readline.c"
         "${MICROPY_DIR}/shared/runtime/pyexec.c"
         "${MICROPY_DIR}/shared/runtime/gchelper_generic.c"
-        "${MICROPY_DIR}/extmod/modtime.c"
+        "${MICROPY_DIR}/extmod/modtime.c" "${SOURCE_ROOT}/user/libconsole/keys.c"
         "${MICROPY_PORT_DIR}/main.c" "${MICROPY_PORT_DIR}/hal.c" "${MICROPY_PORT_DIR}/file.c"
         "${MICROPY_PORT_DIR}/modos.c" "${MICROPY_PORT_DIR}/modkora.c")
 

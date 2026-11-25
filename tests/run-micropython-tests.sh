@@ -36,7 +36,8 @@ MICROPY_GIT_TAG="$TAG" MICROPY_GIT_HASH="$HASH" \
 failed=0
 for script in "$ROOT"/tests/micropython/*.py; do
     name="$(basename "$script")"
-    if diff -u "$script.exp" <("$OUT/micropython" "$script" 2>&1); then
+    # KoraCLI's Python side is importable, as on KoraOS (sys:koracli).
+    if diff -u "$script.exp" <(MICROPYPATH="$ROOT/user/koracli" "$OUT/micropython" "$script" 2>&1); then
         echo "ok   $name"
     else
         echo "FAIL $name"

@@ -156,6 +156,7 @@ tests/run-micropython-tests.sh
 | Test | Covers |
 |------|--------|
 | `basics.py` | The interpreter runs a script: integers past 64 bits, floats, generators, dicts, formatting, exceptions, Unicode string lengths |
+| `koracli_editor.py` | KoraCLI's editor and dispatcher (`user/koracli`, on the module path): a line that runs, a compound block that keeps one blank line and ends at the second, open brackets and triple-quoted strings going on, Ctrl+Enter, prefixed first lines running at Enter, the editing keys across a block's lines, block history by PgUp, PgDn and Up past the first line, Ctrl+D, F1, F2, the redraw of a wrapped line and the cursor moved back up; the dispatcher's routes, program lines stored and deleted, compound statements, a block's value printed |
 
 On the target, the QEMU smoke test runs `micropython` in the shell and
 types into its REPL (`print(1+1)`, big integers, a float), ends it with
@@ -164,6 +165,7 @@ the REPL's prompt (a new line, twice, and the REPL lives) and in a loop
 typed there (`KeyboardInterrupt`). Then it runs the Python probes the image
 carries in `sys:tests` (from `tests/user/*.py`): `mpprobe.py break` catches
 Ctrl+C in a loop and in a sleep and ends with 130 on one it does not catch;
+`mpprobe.py repl` runs `kora.repl()`, KoraCLI's fallback, until Ctrl+D;
 `mpprobe.py files` checks `sys.argv`, `sys.path` and a module beside it,
 `os` over volumes and assigns, `kora`, `time`, a 3 MB allocation on the
 growing heap and the stack check, writes, reads, renames and removes files
@@ -391,6 +393,12 @@ screendump finds the pointer drawn there, and gone again once a key is
 typed. Ctrl+C ends the shell's program in front (`conprobe
 hang`), and at the prompt drops the line for a new prompt without touching the
 next program; more of them at the prompt leave the shell running.
+`koracli` starts KoraCLI on a screen of its own: its banner, a two-line
+`def` typed with the editor's indentation and ended by two blank lines,
+`f(21)` printing 42, both bars found on a screendump, a program line taken
+quietly, a list's value printed, `while True: pass` stopped by ESC with
+`KeyboardInterrupt`, an exception's traceback, F2 to OS mode (a command
+there says when they come) and back, and Ctrl+D ending it.
 `newcon keyprobe` shows a console's new parts for KoraCLI: its size with a
 top and a bottom bar (two rows fewer, and a screendump finds the top bar
 drawn), the key-event mode (F1, Ctrl+F5, Shift+A and ESC as events, with
