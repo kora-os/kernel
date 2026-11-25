@@ -156,7 +156,10 @@ Python, and in them you call `kora.run` and `kora.capture` instead of `!`.
 
 ## OS commands
 
-*Planned (phase 1b).*
+*Works (step 1c),* in Python mode and in code, as below. What is not there
+yet: `kill` and the other built-ins (step 1d), the startup file that loads
+wrappers (phase 6), and job objects: `job = !cmd &` gives the job's number
+for now (phase 7).
 
 ### Running and capturing
 
@@ -209,8 +212,13 @@ They can be combined in either order (`@2 &`). Only a word of its own counts,
 so `bob@example.com` is an ordinary argument. A program stays on the core it
 started on. `kill` ends a background job.
 
-A background job's output appears on the screen as it comes, even in the
-middle of a line you are typing.
+KoraCLI prints the job's number when it starts (`[12]`), and `[12] exited
+with 0` at the next prompt after it ends. A background job's output appears
+on the screen as it comes, even in the middle of a line you are typing.
+
+**Today:** Ctrl+C while a program runs in front is passed on to it, which
+ends it unless it handles breaks; ESC is the program's own key. Keys typed
+while a program runs, and not read by it, reach the prompt afterwards.
 
 ### In Python code
 
@@ -234,14 +242,18 @@ def randombin(*args):
 ```
 
 Calling the program by its full path keeps the wrapper from calling itself.
+At the prompt, `!randombin` shows what the wrapper returns (unless that is
+`None`); `x = !randombin` keeps it. `kora.cmd.names()` lists the wrappers,
+and `kora.cmd.unregister("name")` takes one away.
 Wrappers kept in your folder are loaded by the startup file at every start.
 They are KoraCLI's only extension mechanism: there is no separate shell
 scripting language.
 
 ## OS mode
 
-*Planned (phase 1b, steps 1c and 1d).* F2 switches to it already, with the
-`$` prompt, but a command only says that OS commands come with step 1c.
+*Begun (step 1c):* F2 switches to it, with the `$` prompt, and every line
+runs as a command, read as `!` reads one but without `{expr}`. The
+built-ins (`cd` and the rest) and a volume name alone come with step 1d.
 
 A plain command shell with the `$` prompt: every line is an OS command, found
 and run as with `!` above, with the same `&`, `@N` and redirection.

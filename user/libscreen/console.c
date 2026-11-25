@@ -338,6 +338,55 @@ static void queue_event(console_t *c, const struct input_event *event) {
     c->event_count++;
 }
 
+/* Into CON_EVENTS: what was typed and not read yet (lines entered, and the
+ * line being typed in cooked mode) is not lost but becomes key presses, a
+ * line's end an Enter, after the events still queued from before, so keys
+ * typed while a program ran reach the program that reads events next
+ * (KoraCLI's editor after a command). Text only: escape sequences and other
+ * control bytes are dropped. */
+static void typed_ahead_as_events(console_t *c) {
+    con_edit_t *e = &c->edit;
+    static char text[CON_READY_MAX + CON_LINE_MAX];  /* 2.5 KB: off the stack */
+    size_t n = 0;
+    memcpy(text, e->ready, e->ready_length);
+    n = e->ready_length;
+    if (e->mode == CON_COOKED && e->length > 0) {
+        memcpy(text + n, e->line, e->length);
+        n += e->length;
+    }
+    e->ready_length = 0;
+    e->length = e->cursor = 0;
+    e->editing = false;
+    size_t i = 0;
+    while (i < n) {
+        unsigned char b = (unsigned char)text[i];
+        uint32_t cp;
+        if (b >= 0xF8) {  /* 0xFF: an end of input (Ctrl+D), no key */
+            i++;
+            continue;
+        }
+        size_t len = b < 0x80 ? 1 : b >= 0xF0 ? 4 : b >= 0xE0 ? 3 : b >= 0xC0 ? 2 : 1;
+        if (i + len > n) {
+            break;  /* a character cut short */
+        }
+        cp = len == 1 ? b : (uint32_t)(b & (0x7F >> len));
+        for (size_t k = 1; k < len; k++) {
+            cp = (cp << 6) | ((unsigned char)text[i + k] & 0x3F);
+        }
+        i += len;
+        struct input_event event = {.type = INPUT_EVENT_KEY_DOWN};
+        if (cp == '\n' || cp == '\r') {
+            event.keycode = KEY_ENTER;
+        } else if (cp >= 0x20 && cp != 0x7F && (b < 0x80 || b >= 0xC0)) {
+            event.keycode = KEY_A;  /* the character is what counts */
+            event.codepoint = cp;
+        } else {
+            continue;
+        }
+        queue_event(c, &event);
+    }
+}
+
 static void keys(console_t *c) {
     struct input_event event;
     while (screen_event(c->screen, &event)) {
@@ -406,11 +455,16 @@ static void packets(console_t *c) {
             break;
         case CON_MODE:
             if (packet->length == CON_EVENTS) {
+                if (!c->events) {
+                    typed_ahead_as_events(c);
+                }
                 c->events = true;
                 con_edit_mode(&c->edit, CON_RAW);  /* typed bytes are not echoed */
             } else {
+                /* Events not read yet stay for the next reader of events:
+                 * they were typed for it (KoraCLI's editor, while a command
+                 * runs in cooked mode). */
                 c->events = false;
-                c->event_head = c->event_count = 0;
                 con_edit_mode(&c->edit, (int)packet->length);
             }
             answer(packet, 0);

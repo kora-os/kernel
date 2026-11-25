@@ -1,6 +1,8 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 //
-// The `kora` module: KoraOS from Python.
+// The `_kora` module: KoraOS from Python, in C. Programs import `kora`
+// (sys:python/kora.py), which takes all of this and adds what is better in
+// Python: run(), capture(), status and the cmd wrappers.
 //
 //   uptime(), volumes(), assigns()   the system (KoraCLI step 0b)
 //   key()                            the next key press, in mode(EVENTS): a
@@ -13,9 +15,12 @@
 //   esc_break(on)                    ESC as a break (KeyboardInterrupt) for us
 //   size()                           the console's (columns, rows), or None
 //   repl()                           MicroPython's own REPL, until Ctrl+D
+//   execute(argv, ...)               a program run, its output captured or
+//                                    not, or started in the background
+//   reap()                           background jobs that ended
 //
-// The console parts are KoraCLI's (step 1b, on step 1a's console). Running
-// commands (kora.run, kora.capture) is step 1c.
+// The console parts are KoraCLI's (step 1b, on step 1a's console); running
+// programs is step 1c.
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
@@ -142,8 +147,11 @@ static mp_obj_t kora_bar(mp_obj_t which_in, mp_obj_t text_in) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_2(kora_bar_obj, kora_bar);
 
+static bool esc_on;  // ESC as a break, as last asked for
+
 static mp_obj_t kora_esc_break(mp_obj_t on) {
     check(console_esc_break(mp_obj_is_true(on)));
+    esc_on = mp_obj_is_true(on);
     return mp_const_none;
 }
 static MP_DEFINE_CONST_FUN_OBJ_1(kora_esc_break_obj, kora_esc_break);
@@ -192,8 +200,228 @@ static mp_obj_t kora_repl(void) {
 }
 static MP_DEFINE_CONST_FUN_OBJ_0(kora_repl_obj, kora_repl);
 
+// Running programs ---------------------------------------------------------
+
+#define MAX_ARGV 16  // the kernel's MAX_ARGS
+
+// A captured stream: the port the child writes to, and what came.
+typedef struct {
+    int port, bit;
+    vstr_t text;
+} capture_t;
+
+static bool capture_open(capture_t *c) {
+    c->bit = sig_alloc(-1);
+    c->port = c->bit >= 0 ? port_create(NULL) : -1;
+    if (c->port <= 0 || port_signal(c->port, c->bit) != 0) {
+        if (c->port > 0) {
+            port_delete(c->port);
+        }
+        if (c->bit >= 0) {
+            sig_free(c->bit);
+        }
+        return false;
+    }
+    vstr_init(&c->text, 64);
+    return true;
+}
+
+// Serve the packets on the port: writes are kept, the rest refused (the
+// child's stdin stays the console, so it never reads here).
+static void capture_serve(capture_t *c) {
+    struct port_message got;
+    while (port_get(c->port, &got) == 1) {
+        if (got.kind != PORT_MESSAGE) {
+            continue;
+        }
+        struct con_packet *packet = got.msg;
+        if (packet->op == CON_WRITE) {
+            vstr_add_strn(&c->text, packet->buf, packet->length);
+            packet->result = (long)packet->length;
+        } else {
+            packet->result = -1;
+        }
+        port_reply(packet);
+    }
+}
+
+static void capture_close(capture_t *c) {
+    capture_serve(c);  // what is still there
+    port_delete(c->port);
+    sig_free(c->bit);
+}
+
+// execute(argv, stdin=None, stdout=None, append=False, core=-1,
+//         background=False, capture=False): run the program argv[0] (a name
+// from c:, or a path) with the arguments argv[1:].
+//   - stdin, stdout: files to read from and write to (stdout appended to
+//     with append) instead of the console;
+//   - core: the core it runs on, -1 for the kernel's choice;
+//   - background: start it and return its pid at once (reap() later);
+//   - capture: its stdout and stderr kept instead of shown: the result is
+//     (status, stdout, stderr), the texts as str.
+// Otherwise it runs in front, with the console cooked for it, and the result
+// is its exit status. Ctrl+C meanwhile is passed on to it as a break (which
+// ends it unless it handles breaks), and ESC is a key again for it.
+static mp_obj_t kora_execute(size_t n_args, const mp_obj_t *args, mp_map_t *kwargs) {
+    enum { ARG_argv, ARG_stdin, ARG_stdout, ARG_append, ARG_core, ARG_background, ARG_capture };
+    static const mp_arg_t allowed[] = {
+        { MP_QSTR_argv, MP_ARG_OBJ | MP_ARG_REQUIRED, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_stdin, MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_stdout, MP_ARG_OBJ, {.u_rom_obj = MP_ROM_NONE} },
+        { MP_QSTR_append, MP_ARG_BOOL, {.u_bool = false} },
+        { MP_QSTR_core, MP_ARG_INT, {.u_int = -1} },
+        { MP_QSTR_background, MP_ARG_BOOL, {.u_bool = false} },
+        { MP_QSTR_capture, MP_ARG_BOOL, {.u_bool = false} },
+    };
+    mp_arg_val_t vals[MP_ARRAY_SIZE(allowed)];
+    mp_arg_parse_all(n_args, args, kwargs, MP_ARRAY_SIZE(allowed), allowed, vals);
+
+    size_t argc;
+    mp_obj_t *items;
+    mp_obj_get_array(vals[ARG_argv].u_obj, &argc, &items);
+    if (argc == 0 || argc > MAX_ARGV) {
+        mp_raise_ValueError(MP_ERROR_TEXT("1 to 16 arguments"));
+    }
+    char *argv[MAX_ARGV + 1];
+    for (size_t i = 0; i < argc; i++) {
+        argv[i] = (char *)mp_obj_str_get_str(items[i]);
+    }
+    argv[argc] = NULL;
+    mp_int_t core = vals[ARG_core].u_int;
+    if (core < -1 || core > 3) {
+        mp_raise_ValueError(MP_ERROR_TEXT("core 0 to 3"));
+    }
+    bool background = vals[ARG_background].u_bool;
+    bool capturing = vals[ARG_capture].u_bool && !background;
+
+    struct std_handle std[3];
+    if (std_handles(std) != 0) {
+        mp_raise_OSError(MP_EIO);
+    }
+    int in = -1, out = -1;
+    if (vals[ARG_stdin].u_obj != mp_const_none) {
+        in = open(mp_obj_str_get_str(vals[ARG_stdin].u_obj), O_RDONLY);
+        if (in < 0) {
+            mp_raise_OSError(MP_ENOENT);
+        }
+        std[0] = (struct std_handle){STD_FILE, in};
+    }
+    if (vals[ARG_stdout].u_obj != mp_const_none && !capturing) {
+        out = open(mp_obj_str_get_str(vals[ARG_stdout].u_obj),
+                   O_WRONLY | O_CREAT | (vals[ARG_append].u_bool ? O_APPEND : O_TRUNC));
+        if (out < 0) {
+            if (in >= 0) {
+                close(in);
+            }
+            mp_raise_OSError(MP_EIO);
+        }
+        std[1] = (struct std_handle){STD_FILE, out};
+    }
+    capture_t cap[2];
+    if (capturing) {
+        if (!capture_open(&cap[0])) {
+            goto no_ports;
+        }
+        if (!capture_open(&cap[1])) {
+            capture_close(&cap[0]);
+            vstr_clear(&cap[0].text);
+            goto no_ports;
+        }
+        std[1] = (struct std_handle){STD_PORT, cap[0].port};
+        std[2] = (struct std_handle){STD_PORT, cap[1].port};
+    }
+
+    int end_bit = background ? -1 : sig_alloc(-1);
+    int flags = SPAWN_NOWAIT | (core >= 0 ? SPAWN_CORE(core) : 0) |
+                (end_bit >= 0 ? SPAWN_SIGNAL(end_bit) : 0);
+    int mode = kora_console_get_mode();
+    bool esc = esc_on;
+    if (!background) {
+        kora_console_mode(CON_COOKED);  // the console as programs expect it
+        if (esc) {
+            console_esc_break(0);  // ESC is the program's key
+        }
+    }
+    int pid = spawn_std(argv[0], (int)argc, argv, flags, std);
+    if (in >= 0) {
+        close(in);  // the child has its own copies
+    }
+    if (out >= 0) {
+        close(out);
+    }
+    int code = 0;
+    if (pid >= 0 && !background) {
+        unsigned wait_mask = SIG_MASK(end_bit) | SIG_MASK(SIG_BREAK);
+        if (capturing) {
+            wait_mask |= SIG_MASK(cap[0].bit) | SIG_MASK(cap[1].bit);
+        }
+        for (;;) {
+            unsigned got = sig_wait(wait_mask);
+            if (capturing) {
+                capture_serve(&cap[0]);
+                capture_serve(&cap[1]);
+            }
+            if ((got & SIG_MASK(SIG_BREAK)) && sig_send(pid, SIG_MASK(SIG_BREAK)) != 0) {
+                kill(pid);  // its main thread has ended: nobody takes a break
+            }
+            if (waitpid(pid, &code, WNOHANG) == pid) {
+                break;
+            }
+        }
+    }
+    if (end_bit >= 0) {
+        sig_free(end_bit);
+    }
+    if (!background) {
+        if (esc) {
+            console_esc_break(1);
+        }
+        kora_console_mode(mode);
+    }
+    mp_obj_t result;
+    if (capturing) {
+        capture_close(&cap[0]);
+        capture_close(&cap[1]);
+        mp_obj_t items3[3] = {MP_OBJ_NEW_SMALL_INT(code), mp_obj_new_str_from_vstr(&cap[0].text),
+                              mp_obj_new_str_from_vstr(&cap[1].text)};
+        result = pid >= 0 ? mp_obj_new_tuple(3, items3) : mp_const_none;
+    } else {
+        result = MP_OBJ_NEW_SMALL_INT(background ? pid : code);
+    }
+    if (pid < 0) {
+        mp_raise_OSError(MP_ENOENT);  // no such program, or no such core
+    }
+    return result;
+
+no_ports:
+    if (in >= 0) {
+        close(in);
+    }
+    if (out >= 0) {
+        close(out);
+    }
+    mp_raise_OSError(MP_ENOMEM);
+}
+static MP_DEFINE_CONST_FUN_OBJ_KW(kora_execute_obj, 1, kora_execute);
+
+// reap(): the background jobs that ended since, a (pid, status) each. A
+// program run in front is reaped by execute() itself.
+static mp_obj_t kora_reap(void) {
+    mp_obj_t list = mp_obj_new_list(0, NULL);
+    int code, pid;
+    while ((pid = waitpid(-1, &code, WNOHANG)) > 0) {
+        mp_obj_t items[2] = {MP_OBJ_NEW_SMALL_INT(pid), MP_OBJ_NEW_SMALL_INT(code)};
+        mp_obj_list_append(list, mp_obj_new_tuple(2, items));
+    }
+    return list;
+}
+static MP_DEFINE_CONST_FUN_OBJ_0(kora_reap_obj, kora_reap);
+
 static const mp_rom_map_elem_t kora_globals_table[] = {
-    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR_kora) },
+    { MP_ROM_QSTR(MP_QSTR___name__), MP_ROM_QSTR(MP_QSTR__kora) },
+    { MP_ROM_QSTR(MP_QSTR_execute), MP_ROM_PTR(&kora_execute_obj) },
+    { MP_ROM_QSTR(MP_QSTR_reap), MP_ROM_PTR(&kora_reap_obj) },
     { MP_ROM_QSTR(MP_QSTR_uptime), MP_ROM_PTR(&kora_uptime_obj) },
     { MP_ROM_QSTR(MP_QSTR_volumes), MP_ROM_PTR(&kora_volumes_obj) },
     { MP_ROM_QSTR(MP_QSTR_assigns), MP_ROM_PTR(&kora_assigns_obj) },
@@ -215,4 +443,4 @@ const mp_obj_module_t kora_module = {
     .base = { &mp_type_module },
     .globals = (mp_obj_dict_t *)&kora_globals,
 };
-MP_REGISTER_MODULE(MP_QSTR_kora, kora_module);
+MP_REGISTER_MODULE(MP_QSTR__kora, kora_module);

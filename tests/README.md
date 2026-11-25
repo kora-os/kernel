@@ -156,6 +156,7 @@ tests/run-micropython-tests.sh
 | Test | Covers |
 |------|--------|
 | `basics.py` | The interpreter runs a script: integers past 64 bits, floats, generators, dicts, formatting, exceptions, Unicode string lengths |
+| `koracli_bang.py` | KoraCLI's `!` (`user/koracli/bang.py`) and kora's command helpers (`user/python/kora.py`, loaded without `_kora`): words, quotes, `{expr}` with `{{ }}`, errors, redirection glued or not, `&` and `@N` only as bare trailing words; `!` lines translated at a statement's start and not inside brackets or comparisons, capture by assignment; the arguments at run time (a list alone expanded, a value joined into a word, a list inside a word refused); wrappers registered, found, never for a path, run and captured, shown at the prompt, listed and taken away; the captured `str` |
 | `koracli_editor.py` | KoraCLI's editor and dispatcher (`user/koracli`, on the module path): a line that runs, a compound block that keeps one blank line and ends at the second, open brackets and triple-quoted strings going on, Ctrl+Enter, prefixed first lines running at Enter, the editing keys across a block's lines, block history by PgUp, PgDn and Up past the first line, Ctrl+D, F1, F2, the redraw of a wrapped line and the cursor moved back up; the dispatcher's routes, program lines stored and deleted, compound statements, a block's value printed |
 
 On the target, the QEMU smoke test runs `micropython` in the shell and
@@ -397,8 +398,13 @@ next program; more of them at the prompt leave the shell running.
 `def` typed with the editor's indentation and ended by two blank lines,
 `f(21)` printing 42, both bars found on a screendump, a program line taken
 quietly, a list's value printed, `while True: pass` stopped by ESC with
-`KeyboardInterrupt`, an exception's traceback, F2 to OS mode (a command
-there says when they come) and back, and Ctrl+D ending it.
+`KeyboardInterrupt`, an exception's traceback, F2 to OS mode (it runs a
+line as a command, `{x}` kept as typed) and back, and Ctrl+D ending it. OS commands from Python: `!echo` live and `kora.status`, a capture with
+`{6 * 7}` and its `.lines` and `.status`, a list expanded, a redirection to
+a file and back on a writable volume, a wrapper registered with a
+decorator and run, a background job reported when it ends, and Ctrl+C
+passed on to `conprobe hang` (status -9). Keys are typed while commands
+run, so type-ahead is covered too.
 `newcon keyprobe` shows a console's new parts for KoraCLI: its size with a
 top and a bottom bar (two rows fewer, and a screendump finds the top bar
 drawn), the key-event mode (F1, Ctrl+F5, Shift+A and ESC as events, with

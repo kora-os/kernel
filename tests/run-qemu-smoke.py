@@ -1638,16 +1638,59 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
                     raise
         q.send("x = 1 / 0\r")  # ("1 / 0" would be a program line: it starts with a digit)
         q.expect(rb"^ZeroDivisionError: ")
+        # OS commands from Python (step 1c): run live, captured, with {expr},
+        # redirected, in the background, a wrapper, Ctrl+C passed on.
+        q.send("!echo hello there\r")
+        q.expect(rb"^hello there\r?$")
+        q.send("kora.status\r")
+        q.expect(rb"^2\r?$")  # echo's status: how many words it echoed
+        q.send("out = !echo captured {6 * 7}\r")
+        q.send("out.lines, out.status\r")
+        q.expect(rb"^\(\['captured 42'\], 2\)\r?$")
+        q.send("files = ['a b', 'c']\r")
+        q.send("!echo {files} x{len(files)}y\r")
+        q.expect(rb"^a b c x2y\r?$")
+        q.send("writable = ['%s:kcli.txt' % v[0] for v in kora.volumes() if not v[3]][:1]\r")
+        q.send("r = 'read-only'\r")
+        q.send("for f in writable:\r")
+        q.send("!echo to a file > {f}\r")
+        q.send("r = !cat < {f}\r")
+        q.send("\r")
+        q.send("\r")
+        time.sleep(0.5)
+        q.send("print('redirect:', repr(str(r)))\r")
+        q.expect(rb"^redirect: '(to a file\\n|read-only)'\r?$")
+        q.send("@kora.cmd.register\r")
+        q.send("def greet(*args):\r")
+        q.send("return 'hi ' + ' '.join(args)\r")
+        q.send("\r")
+        q.send("\r")
+        time.sleep(0.5)
+        q.send("!greet you\r")
+        q.expect(rb"^hi you\r?$")
+        q.send("!hello &\r")
+        q.expect(rb"^\[\d+\]\r?$")
+        time.sleep(1)
+        q.send("\r")
+        q.expect(rb"^\[\d+\] exited with 0\r?$")
+        q.send("!conprobe hang\r")
+        q.expect(rb"^conprobe: hanging", timeout=30)
+        time.sleep(0.3)
+        q.key("ctrl-c")  # passed on: conprobe does not catch it
+        time.sleep(0.3)
+        q.send("kora.status\r")
+        q.expect(rb"^-9\r?$")
+        # OS mode runs every line as a command, with no {expr}.
         q.key("f2")
         time.sleep(0.2)
-        q.send("ls\r")
-        q.expect(rb"^koracli: OS commands come with KoraCLI step 1c")
+        q.send("echo os mode {x}\r")
+        q.expect(rb"^os mode \{x\}\r?$")
         q.key("f2")
         time.sleep(0.2)
         q.key("ctrl-d")
         q.expect(rb"\] exited with 0")
         q.expect(PROMPT)
-    yield "koracli: Python at its prompt, blocks, ESC, F2 and Ctrl+D", koracli
+    yield "koracli: Python at its prompt, blocks, ESC, OS commands, F2 and Ctrl+D", koracli
 
     def micropython():
         # MicroPython's REPL on the shell's console, with its own line editor
