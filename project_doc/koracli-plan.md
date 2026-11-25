@@ -223,7 +223,7 @@ From the spec's §17, with the PRs of phases 0 and 1:
   queues 512 events; the editor writes a character typed at the line's
   end without redrawing. `fn.__name__` is on (`MICROPY_PY_FUNCTION_ATTRS`).
   Not yet: job objects (`job = !cmd &` gives the pid; phase 7).
-- [x] **1d. OS mode, and KoraCLI replaces the shell.** The `$` prompt with
+- [x] **1d. OS mode, and KoraCLI replaces the shell.** (#126) The `$` prompt with
   every line an OS command; the old shell's built-ins as wrappers (`cd`,
   `pwd`, `volumes`, `sync`, `assign`, `kill`, `help`, `exit`); a volume or
   assign name alone changes directory. init runs `screens koracli`;
