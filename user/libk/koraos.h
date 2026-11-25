@@ -249,6 +249,7 @@ int sig_on_end(int pid, int bit);
 #define KEY_M 0x10
 #define KEY_ENTER 0x28
 #define KEY_ESCAPE 0x29
+#define KEY_F1 0x3A  /* F1 to F12 follow in order, to KEY_F1 + 11 */
 #define KEY_LEFT_CTRL 0xE0  /* the modifiers follow, to KEY_RIGHT_GUI */
 #define KEY_LEFT_GUI 0xE3
 #define KEY_RIGHT_GUI 0xE7
@@ -384,9 +385,10 @@ static inline int spawn_std(const char *name, int argc, char *const argv[], int 
  * console handler's, not a file. From the libc; any other number is not. */
 int isatty(int fd);
 /* A console handler's input mode, for stdin: CON_COOKED (the default: whole
- * lines, edited and echoed by the console) or CON_RAW (each key as typed, no
- * echo), as AmigaOS's CON: and RAW:. 0, or -1 when stdin is not a handler
- * that has modes (the kernel console is always raw). */
+ * lines, edited and echoed by the console), CON_RAW (each key as typed, no
+ * echo), as AmigaOS's CON: and RAW:, or CON_EVENTS (each key press as an
+ * event: console_events). 0, or -1 when stdin is not a handler that has the
+ * mode (the kernel console is always raw). */
 static inline int console_mode(int mode) {
     return __con_mode(mode);
 }
@@ -396,6 +398,32 @@ static inline int console_mode(int mode) {
  * that has fonts, or the font is not one it can use. */
 static inline int console_font(const void *psf, unsigned long size) {
     return __con_font(psf, size);
+}
+/* A bar of stdout's console handler, outside its text grid: CON_BAR_TOP or
+ * CON_BAR_BOTTOM, showing `text` (UTF-8, in reverse video, cut at the
+ * width), or NULL to take it away. The grid loses a row for each bar, and
+ * programs asking its size get the rest. 0, or -1 when stdout is not a
+ * handler that has bars. */
+static inline int console_bar(int which, const char *text) {
+    return __con_bar(which, text, text != NULL ? strlen(text) : 0);
+}
+/* In CON_EVENTS mode, wait for key presses and take up to `max` (at least
+ * 1) of them, oldest first: how many, 0 at the end of input, or -1 when stdin
+ * is not a handler in that mode. Each is a struct con_key_event: the key's
+ * position (KEY_*), the modifiers held (INPUT_MOD_*) and the character it
+ * types (0 for none). Shift+PageUp and Shift+PageDown still scroll the
+ * console, and Ctrl+C is still its break, not an event. A program reading
+ * events does not read stdin with stdio meanwhile. */
+static inline long console_events(struct con_key_event *events, unsigned long max) {
+    return __con_events(events, max);
+}
+/* ESC as a break for this program (1) or a key again (0), for stdin's console
+ * handler: while it is on, pressing ESC sends the program the break signal
+ * (SIG_BREAK) instead of reaching it as a key, and the kernel ends a program
+ * that does not handle breaks. It goes off when the program ends. 0, or -1
+ * when stdin is not a handler that has the setting. */
+static inline int console_esc_break(int on) {
+    return __con_esc_break(on);
 }
 
 int waitpid(int pid, int *code, int flags);

@@ -94,6 +94,14 @@ void con_key_bytes(unsigned type, unsigned modifiers, unsigned keycode, uint32_t
     case CON_KEY_ESCAPE: byte(out, 0x1B); return;
     default: break;
     }
+    if (keycode >= CON_KEY_F1 && keycode <= CON_KEY_F12) {
+        static const char *const fkeys[12] = {
+            "\x1BOP", "\x1BOQ", "\x1BOR", "\x1BOS", "\x1B[15~", "\x1B[17~",
+            "\x1B[18~", "\x1B[19~", "\x1B[20~", "\x1B[21~", "\x1B[23~", "\x1B[24~",
+        };
+        sequence(out, fkeys[keycode - CON_KEY_F1]);
+        return;
+    }
     if (codepoint == 0) {
         return;
     }

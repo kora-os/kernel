@@ -389,6 +389,15 @@ are in [`<_libc/console.h>`](../user/libc/includes/_libc/console.h), which
   libk's `console_font()` sends it for stdout. `isatty(0..2)`
   (libk) says whether a standard stream is a console, the kernel's or a
   handler's. Raw `read(0)` and `write(1)` still reach the kernel console.
+  For KoraCLI (`project_doc/koracli-plan.md`, step 1a) a console on a screen
+  also has `CON_MODE` `CON_EVENTS`, where a read gets whole `struct
+  con_key_event` records, one per key press (`console_events()`, which
+  reads stdin's handler directly, not through stdio); `CON_BAR` (`buf` a
+  `struct con_bar`: top or bottom, and text the handler copies, or NULL to
+  take the bar away), for stdout (`console_bar()`); and `CON_ESC_BREAK`
+  (`length` 1 or 0), which makes ESC a break signal for the program that
+  sent it instead of a key (`console_esc_break()`). The protocol is in
+  `<_libc/console.h>`.
 
 ## Structs and constants
 

@@ -323,6 +323,15 @@ static void test_keys(void) {
     CHECK(k.length == 4 && memcmp(k.bytes, "\x1b[6~", 4) == 0, "PageDown");
     con_key_bytes(CON_KEY_DOWN_EVENT, 0, CON_KEY_DELETE, 0, &k);
     CHECK(k.length == 4 && memcmp(k.bytes, "\x1b[3~", 4) == 0, "Delete");
+    static const char *const fkeys[12] = {
+        "\x1bOP", "\x1bOQ", "\x1bOR", "\x1bOS", "\x1b[15~", "\x1b[17~",
+        "\x1b[18~", "\x1b[19~", "\x1b[20~", "\x1b[21~", "\x1b[23~", "\x1b[24~",
+    };
+    for (unsigned i = 0; i < 12; i++) {
+        con_key_bytes(CON_KEY_DOWN_EVENT, i % 2 ? CON_MOD_SHIFT : 0, CON_KEY_F1 + i, 0, &k);
+        CHECK(k.length == (unsigned)strlen(fkeys[i]) && memcmp(k.bytes, fkeys[i], k.length) == 0,
+              "F%u as xterm sends it, with or without Shift", i + 1);
+    }
     con_key_bytes(CON_KEY_DOWN_EVENT, 0, CON_KEY_LEFT, 0, &k);
     CHECK(k.length == 3 && memcmp(k.bytes, "\x1b[D", 3) == 0, "Left");
     con_key_bytes(CON_KEY_DOWN_EVENT, CON_MOD_CTRL, 0x06, 'c', &k);
@@ -339,6 +348,16 @@ static void test_keys(void) {
     CHECK(k.length == 0, "a surrogate sends nothing");
     con_key_bytes(CON_KEY_DOWN_EVENT, 0, CON_KEY_KP_ENTER, 0, &k);
     CHECK(k.length == 1 && k.bytes[0] == '\n', "keypad Enter");
+
+    // The line editor has no use for the F-keys: it drops their sequences.
+    start(40, "");
+    type("ab");
+    key(CON_KEY_F1, 0);
+    key(CON_KEY_F1 + 4, 0);  // F5
+    key(CON_KEY_F12, 0);
+    type("c");
+    key(CON_KEY_ENTER, 0);
+    CHECK(strcmp(read_n(64), "abc\n") == 0, "F-keys type nothing in a line");
 }
 
 TEST_MAIN(test_typing, test_editing, test_wrapping, test_history, test_end_and_break, test_raw,

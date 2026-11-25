@@ -14,6 +14,8 @@
 #define CON_KEY_ESCAPE 0x29
 #define CON_KEY_BACKSPACE 0x2A
 #define CON_KEY_TAB 0x2B
+#define CON_KEY_F1 0x3A  // to F12, 0x45
+#define CON_KEY_F12 0x45
 #define CON_KEY_INSERT 0x49
 #define CON_KEY_HOME 0x4A
 #define CON_KEY_PAGE_UP 0x4B
@@ -43,6 +45,9 @@ typedef struct {
 // a key that types nothing. Arrows, Home, End, Insert, Delete and PageUp and
 // PageDown are xterm sequences, Enter is '\n', Backspace DEL (0x7F), Ctrl
 // with a letter or some punctuation a control code; the character a key
-// types under the layout comes as UTF-8. Alt and Meta are ignored.
+// types under the layout comes as UTF-8. F1 to F12 are xterm's sequences
+// (ESC O P to ESC O S, then ESC [ 15 ~ to ESC [ 24 ~), whatever the
+// modifiers: a console's key-event mode tells those apart. Alt and Meta are
+// ignored.
 void con_key_bytes(unsigned type, unsigned modifiers, unsigned keycode, uint32_t codepoint,
                    con_key_t *out);

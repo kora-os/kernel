@@ -117,6 +117,42 @@ int __con_font(const void *font, unsigned long size) {
     return result == 0 ? 0 : -1;
 }
 
+int __con_bar(int which, const char *text, unsigned long length) {
+    __stdio_std_init();
+    if (stdout->port == 0) {
+        return -1;
+    }
+    struct con_bar bar = {which, text, length};
+    fflush(stdout);
+    __lock(&stdout->lock);
+    long result = transact(stdout, CON_BAR, &bar, sizeof bar);
+    __unlock(&stdout->lock);
+    return result == 0 ? 0 : -1;
+}
+
+int __con_esc_break(int on) {
+    __stdio_std_init();
+    if (stdin->port == 0) {
+        return -1;
+    }
+    __lock(&stdin->lock);
+    long result = transact(stdin, CON_ESC_BREAK, NULL, on ? 1 : 0);
+    __unlock(&stdin->lock);
+    return result == 0 ? 0 : -1;
+}
+
+long __con_events(struct con_key_event *events, unsigned long max) {
+    __stdio_std_init();
+    if (stdin->port == 0 || max == 0) {
+        return -1;
+    }
+    fflush(stdout);  // what was written is on the screen while we wait
+    __lock(&stdin->lock);
+    long result = transact(stdin, CON_READ, events, max * sizeof *events);
+    __unlock(&stdin->lock);
+    return result < 0 ? -1 : result / (long)sizeof *events;
+}
+
 // POSIX isatty for the standard streams' numbers: whether stdin (0), stdout
 // (1) or stderr (2) is a console, the kernel's or a handler's. Files and every
 // other number are not.

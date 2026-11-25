@@ -144,7 +144,7 @@ From the spec's §17, with the PRs of phases 0 and 1:
   script's directory, then `sys:python` (*proposed*). Also: line numbers in
   tracebacks, exit codes as CPython's (130 for Ctrl+C), and the smoke test's
   Python probes shipped in `sys:tests`.
-- [ ] **1a. The console's new parts.** In `user/libconsole` and
+- [x] **1a. The console's new parts.** (#123) In `user/libconsole` and
   `user/libscreen`, with libk wrappers:
   - F1 to F12 in `keys.c`, as xterm sends them, for every console;
   - the key-event mode (a new `CON_MODE` value), with Shift+PgUp and
@@ -154,10 +154,20 @@ From the spec's §17, with the PRs of phases 0 and 1:
   - the "ESC means break" setting: ESC sends a break to the program that set
     it instead of a key.
 
-  `keys.c` is built into the kernel too, so this PR waits for review.
+  `keys.c` is built into the kernel too; the user chose to have it merged
+  on green CI all the same (2026-11-24).
   Tests: host tests for the F-key sequences (next to `tests/host/edit_test.c`)
   and the bars' layout; a small probe program in a `newcon` console prints
   the events it gets, driven by `q.key`.
+  *Built:* F-keys are xterm's sequences whatever the modifiers (the event
+  mode tells them apart). An event is a `struct con_key_event` (character,
+  key, modifiers; key presses only, a modifier alone is none), and a read
+  gets whole events; `console_events()` reads stdin's handler directly, not
+  through stdio. Ctrl+C stays the console's break in event mode. A bar is a
+  one-row terminal of its own in reverse video, cut at the width, kept by
+  the console and drawn again when the font changes. ESC as a break goes to
+  the program that asked, which must have allocated `SIG_BREAK`; it lapses
+  when that program ends. `keyprobe` is the probe.
 - [ ] **1b. KoraCLI with Python mode.** A `koracli` program: the console task
   in C runs the interpreter as its program (`console_run`). The Python side
   lives on the userfs (location *proposed*: `sys:koracli/`): the editor

@@ -18,7 +18,10 @@ so in a **Differences** note.
 
 ## The screen
 
-*Planned (phase 1).*
+*Planned (phase 1).* The console's parts it needs are there (step 1a): bars
+above and below the text grid, F1 to F12, a key-event mode and ESC as a
+break, which `keyprobe` shows (`newcon keyprobe`). KoraCLI itself does not
+use them yet.
 
 ```
 ┌──────────────────────────────────────────────────────────────┐
@@ -356,6 +359,11 @@ The rules, and where they surprise:
 **Differences:** ESC stops Python and BASIC code but not programs, because
 full-screen programs such as editors and games need ESC for themselves; stop
 those with Ctrl+C.
+
+**Today:** the keys reach programs: every console sends F1 to F12 as xterm
+does, and a program can read each key as an event (its position, modifiers
+and character) and ask for ESC as a break (step 1a). KoraCLI's own bindings
+above come with it (step 1b).
 
 ## Editing
 

@@ -22,6 +22,11 @@
  *       ...
  *   }
  *
+ * Its programs may also ask for the key-event mode (CON_EVENTS, each key
+ * press as a struct con_key_event), bars above and below the text grid
+ * (CON_BAR) and ESC as a break for them (CON_ESC_BREAK), as libk's
+ * console_events, console_bar and console_esc_break do.
+ *
  * Ctrl+C calls the break callback (console_on_break): a client kills its
  * foreground program there, or sends it the break. In cooked mode it also
  * drops the line being typed and ends the oldest waiting read with an empty
@@ -38,6 +43,7 @@
 #define CONSOLE_HISTORY_LINES 500  /* scrollback */
 #define CONSOLE_READERS 16         /* reads waiting at once */
 #define CONSOLE_WHEEL_LINES 3      /* lines a turn of the wheel scrolls */
+#define CONSOLE_EVENTS 64          /* key events kept for reads (CON_EVENTS) */
 
 typedef struct console {
     screen_t *screen;
@@ -57,6 +63,20 @@ typedef struct console {
     int waiting_count;
     void (*on_break)(void *ctx);
     void *break_ctx;
+    /* CON_EVENTS mode: the key presses not read yet, oldest first. */
+    bool events;
+    struct con_key_event event_queue[CONSOLE_EVENTS];
+    unsigned event_head, event_count;
+    int esc_break_pid;  /* the program ESC is a break for (CON_ESC_BREAK), or 0 */
+    /* The bars (CON_BAR), outside the grid: each a terminal of one row, in
+     * reverse video, drawn above or below it. */
+    struct {
+        bool shown;
+        char *text;  /* the console's copy, drawn again when the font changes */
+        size_t length;
+        term_t term;
+        term_render_t render;
+    } bars[2];
 } console_t;
 
 /* A console filling the screen `s`. NULL when out of memory or ports. */

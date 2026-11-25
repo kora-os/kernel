@@ -67,14 +67,147 @@ static void flush(console_t *c) {
             }
         }
     }
+    int cell_height = (int)c->render.font->height;
+    for (int i = 0; i < 2; i++) {
+        if (c->bars[i].shown && c->bars[i].term.dirty[0]) {
+            term_render_flush(&c->bars[i].render);
+            screen_damage(c->screen, 0, c->bars[i].render.y, (int)c->screen->width, cell_height);
+        }
+    }
     if (low < 0) {
         return;
     }
     term_render_flush(&c->render);
     c->cursor_col = t->col;
-    int cell_height = (int)c->render.font->height;
-    screen_damage(c->screen, 0, low * cell_height, (int)c->screen->width,
+    screen_damage(c->screen, 0, c->render.y + low * cell_height, (int)c->screen->width,
                   (high - low + 1) * cell_height);
+}
+
+/* A bar's text, from the start of its one row, in reverse video and cut at
+ * the width, the rest of the row filled. Nothing goes past the last column:
+ * the text ends where a glyph there would wrap. */
+static void bar_text(console_t *c, int which) {
+    term_t *t = &c->bars[which].term;
+    const char *text = c->bars[which].text;
+    size_t length = c->bars[which].length;
+    static const char start[] = "\x1b[?25l\x1b[7m\x1b[H";
+    for (const char *p = start; *p; p++) {
+        term_putc(t, *p);
+    }
+    for (uint32_t col = 0; col < t->cols; col++) {
+        term_putc(t, ' ');
+    }
+    term_putc(t, '\r');  /* the row is full: back to its start, no wrap */
+    t->wrap_pending = false;
+    for (size_t i = 0; i < length && !t->wrap_pending; i++) {
+        if (text[i] != '\n' && text[i] != '\r') {  /* one row: no new lines */
+            term_putc(t, text[i]);
+        }
+    }
+}
+
+/* Lay the screen out for `font`: the bars shown, a row each at the top and
+ * the bottom, and the grid between. 0, or -1 with the grid as it was when it
+ * does not fit. */
+static int layout(console_t *c, const term_font_t *font) {
+    screen_t *s = c->screen;
+    uint32_t cols = s->width / font->width, rows = s->height / font->height;
+    uint32_t bars = (uint32_t)c->bars[0].shown + (uint32_t)c->bars[1].shown;
+    if (rows <= bars || !term_resize(&c->term, cols, rows - bars)) {
+        return -1;
+    }
+    c->render.y = c->bars[0].shown ? (int32_t)font->height : 0;
+    for (int i = 0; i < 2; i++) {
+        if (c->bars[i].shown) {
+            term_resize(&c->bars[i].term, cols, 1);
+            bar_text(c, i);
+            c->bars[i].render.font = font;
+            c->bars[i].render.y = i == CON_BAR_TOP ? 0
+                                  : c->render.y + (int32_t)(c->term.rows * font->height);
+        }
+    }
+    return 0;
+}
+
+/* Repaint the whole screen: blank what the cells do not reach, then the
+ * bars and the grid. */
+static void repaint(console_t *c) {
+    screen_t *s = c->screen;
+    for (unsigned y = 0; y < s->height; y++) {
+        unsigned *row = (unsigned *)((char *)s->pixels + (size_t)y * s->pitch);
+        for (unsigned x = 0; x < s->width; x++) {
+            row[x] = TERM_DEFAULT_BG;
+        }
+    }
+    for (int i = 0; i < 2; i++) {
+        if (c->bars[i].shown) {
+            term_render_all(&c->bars[i].render);
+        }
+    }
+    c->render.cursor_drawn = false;
+    term_render_all(&c->render);
+    c->cursor_col = c->term.col;
+    screen_damage(s, 0, 0, (int)s->width, (int)s->height);
+}
+
+static void *term_alloc(void *ctx, size_t bytes);
+static void term_free(void *ctx, void *buffer);
+
+/* Show bar `which` with `text`, or (NULL) take it away. 0, or -1 when the
+ * grid would not fit or there is no memory. */
+static int set_bar(console_t *c, int which, const char *text, size_t length) {
+    if (which != CON_BAR_TOP && which != CON_BAR_BOTTOM) {
+        return -1;
+    }
+    bool was = c->bars[which].shown;
+    if (text == NULL) {
+        if (!was) {
+            return 0;
+        }
+        c->bars[which].shown = false;
+        layout(c, c->render.font);  /* a row more always fits */
+        free(c->bars[which].term.main_buf.cells);
+        free(c->bars[which].term.alt_buf.cells);
+        free(c->bars[which].text);
+        c->bars[which].text = NULL;
+        repaint(c);
+        return 0;
+    }
+    char *copy = malloc(length + 1);  /* the sender's memory is lent until the reply */
+    if (copy == NULL) {
+        return -1;
+    }
+    memcpy(copy, text, length);
+    free(c->bars[which].text);
+    c->bars[which].text = copy;
+    c->bars[which].length = length;
+    if (!was) {
+        term_host_t host = {term_alloc, NULL, c, term_free};
+        term_t *t = &c->bars[which].term;
+        bool fits = term_init(t, c->term.cols, 1, 0, &host);
+        c->bars[which].shown = fits;
+        if (fits && layout(c, c->render.font) != 0) {
+            c->bars[which].shown = fits = false;
+            free(t->main_buf.cells);
+            free(t->alt_buf.cells);
+        }
+        if (!fits) {
+            free(copy);
+            c->bars[which].text = NULL;
+            return -1;
+        }
+        term_surface_t surface;
+        screen_t *s = c->screen;
+        term_surface_init(&surface, s->pixels, s->width, s->height, s->pitch);
+        int32_t y = c->bars[which].render.y;
+        term_render_init(&c->bars[which].render, t, &surface, 0, y);
+        c->bars[which].render.font = c->render.font;
+    }
+    bar_text(c, which);
+    if (!was) {
+        repaint(c);
+    }
+    return 0;
 }
 
 int console_set_font(console_t *c, const void *psf, size_t size) {
@@ -99,8 +232,7 @@ int console_set_font(console_t *c, const void *psf, size_t size) {
             return -1;
         }
     }
-    screen_t *s = c->screen;
-    if (!term_resize(&c->term, s->width / font.width, s->height / font.height)) {
+    if (layout(c, &font) != 0) {
         free(data);  /* larger than the screen, or no memory */
         return -1;
     }
@@ -108,18 +240,12 @@ int console_set_font(console_t *c, const void *psf, size_t size) {
     c->font_data = data;
     c->font = font;
     c->render.font = &c->font;
+    for (int i = 0; i < 2; i++) {
+        c->bars[i].render.font = &c->font;  /* layout() saw the caller's copy */
+    }
     /* The cells may not reach the screen's right and bottom edges: blank
      * what they leave. */
-    for (unsigned y = 0; y < s->height; y++) {
-        unsigned *row = (unsigned *)((char *)s->pixels + (size_t)y * s->pitch);
-        for (unsigned x = 0; x < s->width; x++) {
-            row[x] = TERM_DEFAULT_BG;
-        }
-    }
-    c->render.cursor_drawn = false;
-    term_render_all(&c->render);
-    c->cursor_col = c->term.col;
-    screen_damage(s, 0, 0, (int)s->width, (int)s->height);
+    repaint(c);
     return 0;
 }
 
@@ -193,6 +319,25 @@ static void drop_waiting(console_t *c, int i) {
 
 static void break_read(console_t *c);
 
+/* CON_EVENTS: a key press for the readers (a modifier alone is none). The
+ * oldest is dropped when the queue is full. */
+static void queue_event(console_t *c, const struct input_event *event) {
+    if (event->type != INPUT_EVENT_KEY_DOWN ||
+        (event->keycode >= KEY_LEFT_CTRL && event->keycode <= KEY_RIGHT_GUI)) {
+        return;
+    }
+    if (c->term.view_offset != 0) {
+        term_scroll_view(&c->term, -(int)c->term.view_offset);  /* back to the live screen */
+    }
+    if (c->event_count == CONSOLE_EVENTS) {
+        c->event_head = (c->event_head + 1) % CONSOLE_EVENTS;
+        c->event_count--;
+    }
+    c->event_queue[(c->event_head + c->event_count) % CONSOLE_EVENTS] = (struct con_key_event){
+        event->codepoint, event->keycode, event->modifiers};
+    c->event_count++;
+}
+
 static void keys(console_t *c) {
     struct input_event event;
     while (screen_event(c->screen, &event)) {
@@ -205,6 +350,17 @@ static void keys(console_t *c) {
         con_key_bytes(event.type, event.modifiers, event.keycode, event.codepoint, &key);
         if (key.scroll != 0) {
             term_scroll_view(&c->term, key.scroll * (int)(c->term.rows / 2));
+            continue;
+        }
+        if (event.type == INPUT_EVENT_KEY_DOWN && event.keycode == KEY_ESCAPE &&
+            c->esc_break_pid > 0) {
+            if (sig_send(c->esc_break_pid, SIG_MASK(SIG_BREAK)) == 0) {
+                continue;  /* ESC is that program's break, not a key */
+            }
+            c->esc_break_pid = 0;  /* it has ended: ESC is a key again */
+        }
+        if (c->events && !(key.length == 1 && key.bytes[0] == 0x03)) {
+            queue_event(c, &event);
             continue;
         }
         if (key.length == 0) {
@@ -249,7 +405,28 @@ static void packets(console_t *c) {
             }
             break;
         case CON_MODE:
-            con_edit_mode(&c->edit, (int)packet->length);
+            if (packet->length == CON_EVENTS) {
+                c->events = true;
+                con_edit_mode(&c->edit, CON_RAW);  /* typed bytes are not echoed */
+            } else {
+                c->events = false;
+                c->event_head = c->event_count = 0;
+                con_edit_mode(&c->edit, (int)packet->length);
+            }
+            answer(packet, 0);
+            break;
+        case CON_BAR: {
+            const struct con_bar *bar = packet->buf;
+            answer(packet, packet->length == sizeof *bar
+                               ? set_bar(c, bar->which, bar->text, bar->length) : -1);
+            break;
+        }
+        case CON_ESC_BREAK:
+            if (packet->length != 0) {
+                c->esc_break_pid = got.sender;
+            } else if (c->esc_break_pid == got.sender) {
+                c->esc_break_pid = 0;
+            }
             answer(packet, 0);
             break;
         case CON_FONT:
@@ -290,8 +467,35 @@ static void answer_oldest(console_t *c, long result) {
     }
 }
 
+/* CON_EVENTS: the oldest reads get the events queued, as many as fit each. */
+static void event_reads(console_t *c) {
+    while (c->waiting_count > 0) {
+        struct con_packet *packet = c->waiting[0].packet;
+        size_t room = packet->length / sizeof(struct con_key_event);
+        if (room == 0) {
+            answer_oldest(c, -1);  /* no room for one */
+            continue;
+        }
+        if (c->event_count == 0) {
+            return;
+        }
+        struct con_key_event *out = packet->buf;
+        size_t n = 0;
+        while (n < room && c->event_count > 0) {
+            out[n++] = c->event_queue[c->event_head];
+            c->event_head = (c->event_head + 1) % CONSOLE_EVENTS;
+            c->event_count--;
+        }
+        answer_oldest(c, (long)(n * sizeof *out));
+    }
+}
+
 /* Answer the oldest reads while there is input for them. */
 static void reads(console_t *c) {
+    if (c->events) {
+        event_reads(c);
+        return;
+    }
     while (c->waiting_count > 0) {
         struct con_packet *packet = c->waiting[0].packet;
         bool end;
@@ -391,6 +595,13 @@ void console_close(console_t *c) {
     sig_free(c->end_bit);
     free(c->term.main_buf.cells);
     free(c->term.alt_buf.cells);
+    for (int i = 0; i < 2; i++) {
+        if (c->bars[i].shown) {
+            free(c->bars[i].term.main_buf.cells);
+            free(c->bars[i].term.alt_buf.cells);
+        }
+        free(c->bars[i].text);
+    }
     free(c->font_data);
     free(c);
 }

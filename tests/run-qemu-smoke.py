@@ -1559,6 +1559,46 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         q.expect(PROMPT)
     yield "a program catches Ctrl+C, and a second pending break ends it", break_caught
 
+    def console_events():
+        # A console's new parts (KoraCLI 1a), in a console of keyprobe's own:
+        # bars that take a row each from the grid, the key-event mode, and ESC
+        # as a break for the program that asks.
+        q.send("newcon keyprobe\r")
+        # Its size questions (CSI 18 t) come first on the serial copy's lines.
+        m = q.expect(rb"keyprobe: size (\d+)x(\d+)\r?\n", timeout=30)
+        cols, rows = int(m.group(1)), int(m.group(2))
+        q.expect(rb"keyprobe: bars, size %dx%d\r?\n" % (cols, rows - 2))
+        q.expect(rb"^keyprobe: events")
+        time.sleep(0.3)
+        width, height, rgb = q.screendump("keyprobe-bars")
+        top = rgb[:width * 3]  # the first row of pixels: the top bar, in reverse video
+        lit = sum(1 for i in range(0, len(top), 3 * 4) if top[i:i + 3] != b"\x00\x00\x00")
+        if lit < width // 8:
+            raise Failure("the top bar is not drawn (%d of %d pixels sampled lit)" % (lit, width // 4))
+        for name, line in (("f1", rb"key 3a mods 0000 char 0"),
+                           ("ctrl-f5", rb"key 3e mods 0001 char 0"),
+                           ("shift-a", rb"key 04 mods 0002 char 65"),
+                           ("esc", rb"key 29 mods 0000 char 0")):
+            q.key(name)
+            q.expect(rb"^keyprobe: " + line)
+        q.key("shift-pgup")  # the console's: scrolls, no event
+        q.key("f12")
+        q.expect(rb"^keyprobe: key 45 mods 0000 char 0")
+        q.key("f10")
+        q.expect(rb"^keyprobe: ESC is a break")
+        time.sleep(0.2)
+        q.key("esc")
+        q.expect(rb"^keyprobe: break")
+        q.expect(rb"^keyprobe: ESC is a key")
+        time.sleep(0.2)
+        q.key("esc")
+        q.expect(rb"^keyprobe: ESC as a key")
+        q.expect(rb"keyprobe: done %dx%d\r?\n" % (cols, rows))
+        q.expect(rb"newcon: keyprobe exited with 0")
+        q.expect(rb"\] exited with 0")
+        q.expect(PROMPT)
+    yield "console: bars, the key-event mode and ESC as a break (keyprobe)", console_events
+
     def micropython():
         # MicroPython's REPL on the shell's console, with its own line editor
         # (the console in raw mode); Ctrl+D on an empty line ends it, and the

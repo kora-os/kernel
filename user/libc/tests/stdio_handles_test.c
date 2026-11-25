@@ -40,6 +40,14 @@ static const void *font_buf;
 static unsigned long font_length;
 static char shown_before_font[64];
 static int handler_gone, return_unhandled;
+// CON_BAR and CON_ESC_BREAK packets, and the key events a read hands out
+// (CON_EVENTS) when there are any.
+static unsigned bars, esc_breaks;
+static struct con_bar last_bar;
+static unsigned long last_esc;
+static struct con_key_event ready_events[3];
+static unsigned events_ready;
+static unsigned long events_read_length;
 static struct {
     void *msg;
     int reply;
@@ -80,6 +88,16 @@ static long kernel(long number, long a0, long a1, long a2, long a3) {
                 shown_len += p->length;
                 shown[shown_len] = '\0';
                 p->result = (long)p->length;
+            } else if (p->op == CON_READ && events_ready > 0) {
+                reads++;
+                events_read_length = p->length;
+                unsigned n = 0;
+                while (n < events_ready && (n + 1) * sizeof(struct con_key_event) <= p->length) {
+                    ((struct con_key_event *)p->buf)[n] = ready_events[n];
+                    n++;
+                }
+                events_ready = 0;
+                p->result = (long)(n * sizeof(struct con_key_event));
             } else if (p->op == CON_READ) {
                 reads++;
                 size_t n = 0;
@@ -93,6 +111,17 @@ static long kernel(long number, long a0, long a1, long a2, long a3) {
                 modes++;
                 CHECK(p->buf == NULL, "a mode packet carries no buffer");
                 last_mode = (long)p->length;
+                p->result = mode_result;
+            } else if (p->op == CON_BAR) {
+                bars++;
+                CHECK(p->length == sizeof(struct con_bar), "a bar packet carries a struct con_bar");
+                last_bar = *(const struct con_bar *)p->buf;
+                memcpy(shown_before_font, shown, shown_len + 1);
+                p->result = mode_result;
+            } else if (p->op == CON_ESC_BREAK) {
+                esc_breaks++;
+                CHECK(p->buf == NULL, "an ESC packet carries no buffer");
+                last_esc = p->length;
                 p->result = mode_result;
             } else if (p->op == CON_FONT) {
                 fonts++;
@@ -316,6 +345,44 @@ static void test_modes(void) {
     CHECK(__con_mode(CON_RAW) == -1, "a handler that is gone");
 }
 
+// Bars go to stdout's handler; ESC as a break and the key events to stdin's.
+static void test_bars_and_events(void) {
+    reset();
+    CHECK(__con_bar(CON_BAR_TOP, "x", 1) == -1 && __con_esc_break(1) == -1 &&
+              __con_events(ready_events, 3) == -1 && packets == 0,
+          "the kernel console has no bars, no ESC setting and no events");
+    reset();
+    have_handles = 1;
+    set(0, STD_PORT, HANDLER_PORT);
+    set(1, STD_PORT, HANDLER_PORT);
+    set(2, STD_CONSOLE, 0);
+    bars = esc_breaks = 0;
+    printf("first");
+    static const char text[] = "PY | F1 Help";
+    CHECK(__con_bar(CON_BAR_BOTTOM, text, strlen(text)) == 0 && bars == 1 &&
+              last_bar.which == CON_BAR_BOTTOM && last_bar.text == text &&
+              last_bar.length == strlen(text),
+          "a CON_BAR packet with the bar, its text in place");
+    CHECK(strcmp(shown_before_font, "first") == 0, "what was written before is shown first");
+    CHECK(__con_bar(CON_BAR_TOP, NULL, 0) == 0 && bars == 2 && last_bar.text == NULL,
+          "NULL takes a bar away");
+    CHECK(__con_esc_break(1) == 0 && esc_breaks == 1 && last_esc == 1, "ESC as a break, on");
+    CHECK(__con_esc_break(0) == 0 && esc_breaks == 2 && last_esc == 0, "and off");
+    ready_events[0] = (struct con_key_event){0, 0x3E, 0};
+    ready_events[1] = (struct con_key_event){'x', 0x1B, 0x02};
+    ready_events[2] = (struct con_key_event){0, 0x29, 0};
+    events_ready = 3;
+    struct con_key_event got[2];
+    CHECK(__con_events(got, 2) == 2 && events_read_length == sizeof got &&
+              got[0].keycode == 0x3E && got[1].codepoint == 'x' && got[1].modifiers == 0x02,
+          "a read of events, as many as there is room for");
+    CHECK(__con_events(got, 0) == -1, "room for none is refused here");
+    mode_result = -1;
+    CHECK(__con_bar(CON_BAR_TOP, "x", 1) == -1 && __con_esc_break(1) == -1,
+          "a handler that refuses them");
+    mode_result = 0;
+}
+
 static void test_fonts(void) {
     static const char psf[] = "a font";
     reset();
@@ -345,4 +412,4 @@ static void test_fonts(void) {
 }
 
 TEST_MAIN(test_console, test_files, test_console_handler, test_modes, test_fonts,
-          test_freopen)  // last: it closes stdout
+          test_bars_and_events, test_freopen)  // last: it closes stdout
