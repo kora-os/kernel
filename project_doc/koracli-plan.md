@@ -194,7 +194,7 @@ From the spec's §17, with the PRs of phases 0 and 1:
   open bracket or triple-quoted string until it closes; a prefixed first
   line runs at Enter. Blocks compile in `single` mode (values printed),
   falling back to `exec` for several statements.
-- [x] **1c. OS commands from Python.** `kora.run` and `kora.capture` (the
+- [x] **1c. OS commands from Python.** (#125) `kora.run` and `kora.capture` (the
   interpreter serves the child's stdout and stderr on a port of its own,
   waiting on it and on the child's end together); the captured `str`
   subclass (`.status`, `.lines`, `.stderr`); `kora.status`; resolution
