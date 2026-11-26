@@ -319,8 +319,9 @@ categories:
         completed: 2026-11-26
       - id: bbc-basic
         name: BBC BASIC
-        status: planned
+        status: in_progress
         description: A second dialect modelled on BBC BASIC V, with PROC, FN, multi-line IF and star commands.
+        prs: [131]
       - id: koracli-shared-variables
         name: Shared variables
         status: completed

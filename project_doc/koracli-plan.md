@@ -97,7 +97,7 @@ From the spec's §17, with the PRs of phases 0 and 1:
 | 1 | The console's new parts; KoraCLI with Python mode | 1a, 1b |
 | 1b | OS commands and OS mode; the shell replaced | 1c, 1d |
 | 2 | Classic BASIC | 2a, 2b, 2c |
-| 3 | BBC BASIC | later |
+| 3 | BBC BASIC | 3a to 3e |
 | 4 | Machine access: PEEK/POKE, indirection, `SYS`, GPIO | later |
 | 5 | Graphics and sound on a canvas screen | later |
 | 6 | Full-screen editor, help, F-key configuration, startup file | later |
@@ -329,10 +329,60 @@ Phase 2, Classic BASIC. Decided 2026-11-26:
   Tests: `koracli_files.py` on the unix port; the smoke step presses F8,
   renumbers, and saves, clears and loads where a volume is writable.
 
+Phase 3, BBC BASIC. Decided 2026-11-26 (spec §6.2, §6.3):
+
+- **BBC-inspired, modelled on BBC BASIC V:** what a BBC BASIC manual says
+  applies; old programs are not promised to run unchanged.
+- **Keywords are capitals only**, so a word in small letters is always a
+  name; a word in capitals is a keyword only where nothing but a keyword can
+  stand, Classic BASIC's rule. **Abbreviations** (`P.`, `GOS.`) are taken
+  when typed and stored in full.
+- **Switching dialect:** F4 in BASIC mode switches with no program in
+  memory, and otherwise says to `NEW` or `SAVE` first; `LOAD` of a file in
+  the other dialect asks, and on yes clears, switches and loads.
+- **Star commands are OS commands,** as `!`; `OSCLI` for one built as a
+  string; `*CAT` and `*DIR` mapped to KoraOS's.
+- **Reals are doubles,** `%` integers 32 bits, wrapping. **`ERR` numbers
+  are BBC BASIC V's.**
+- Merged on green CI (the user's choice, 2026-11-26).
+
+- [ ] **3a. The runtime the dialects share.** No change in behaviour:
+  `basic.Runtime` takes from `classic.py` what any BASIC with line numbers
+  needs, and Classic BASIC's interpreter becomes a dialect over it.
+  *Built:* the run of the compiled lines, GOTO, the FOR, GOSUB and WHILE
+  stack, DATA, CONT, the variables shared with Python (with the closures a
+  compiled line reads and writes them through, `Runtime.scalar`), SYS, and
+  RUN, LIST, NEW, SAVE, LOAD, RENUM, AUTO. A dialect gives it the compiler
+  of a line, its DATA items, its error and break messages, RENUM's
+  references, what SAVE and LOAD say, and its name for the file header.
+  Errors are raised by their Classic names and each dialect words them.
+  Input, DEF FN, the clock and RND stay Classic's.
+  Tests: the Classic suites unchanged; `koracli_runtime.py` runs a toy
+  dialect over the runtime, so what a dialect must give is pinned down.
+- [ ] **3b. BBC BASIC runs, a line at a time.** `sys:koracli/bbc.py`, the
+  `>` prompt, `BBC` in the bar, F4 switching with no program in memory.
+  LET, PRINT (fields of ten, `'`, `~`, `@%`), INPUT, single-line IF THEN
+  ELSE, GOTO, GOSUB, RETURN, FOR, NEXT, DIM, READ, DATA, RESTORE, END,
+  STOP, REM; the usual functions with TRUE, FALSE, PI, TIME, GET, GET$ and
+  INKEY; `&` hex, DIV, MOD, EOR, `<<`, `>>`; BBC's error messages; names
+  shared with Python one to one.
+- [ ] **3c. Constructs over several lines.** Multi-line IF THEN, ELSE,
+  ENDIF; CASE OF, WHEN, OTHERWISE, ENDCASE; REPEAT, UNTIL; WHILE,
+  ENDWHILE: matched over the program when it runs (lines are stored
+  unchecked, spec §4).
+- [ ] **3d. Procedures, functions and errors.** DEF PROC, ENDPROC, DEF FN,
+  `=`, parameters, LOCAL, BASIC V's RETURN parameters, recursion; a PROC or
+  FN the program does not define calls Python's function of that name
+  (spec §9.1). ON ERROR, LOCAL ERROR, ERR, ERL, REPORT.
+- [ ] **3e. Star commands, files and switching on LOAD.** `*` commands and
+  OSCLI; SAVE, LOAD and CHAIN with the BBC header; RENUMBER, AUTO, LISTO;
+  F5 to F8 in BBC BASIC; LOAD of a file in the other dialect asking first.
+
+Indirection (`?`, `!`, `$`) and `SYS` in BBC BASIC come with phase 4, and
+MODE, PLOT and CLG with phase 5.
+
 Later phases, in a line each, to be split into PRs when they come up:
 
-- **3. BBC BASIC.** The second dialect, multi-line constructs, `PROC` and
-  `FN` falling back to Python, star commands, switching dialect.
 - **4. Machine access.** `PEEK`, `POKE`, indirection, `SYS`, `peek`/`poke` in
   Python, the GPIO layer for Pi 3 and Pi 4.
 - **5. Graphics and sound.** The native drawing module, the canvas screen,

@@ -1,0 +1,49 @@
+== running
+> RUN
+one
+sub
+loop
+loop
+loop
+while
+after
+> RUN
+== errors and breaks
+> RUN
+a
+toy: break at 10
+> CONT
+b
+toy: break at 20
+> CONT
+toy: break at 20
+> RUN
+toy: undef'd statement at 10
+> NOSUCH
+toy: syntax
+> BREAK
+toy: break
+> CONT
+toy: can't continue
+> SHOW X
+X = 7.0
+> SET X 2; SHOW X
+X = 2.0
+> SHOW X
+toy: type mismatch
+== files and RENUM
+> SAVE PROG
+> RENUM
+toy: no line 77 (in 120)
+> LIST
+100 SAY hi; GO 110
+110 SUB 120; END
+120 SAY sub; BACK; GO 77
+> LOAD CLASSIC
+toy: unknown dialect
+> LOAD PROG
+> LIST
+10 SAY hi; GO 30
+30 SUB 50; END
+50 SAY sub; BACK; GO 77
+koracli runtime: all passed
