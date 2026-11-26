@@ -58,7 +58,7 @@ Guiding principles:
 │ >>> _                                                       │
 │                                                             │
 ├─────────────────────────────────────────────────────────────┤
-│ PY | F1 Help  F2 Mode  F3 List  F5 Run  F6 Save  F7 Load    │  ← bottom bar
+│ PY | F1 Help  F2 OS  F3 PY  F4 BAS  F5 Run  F6 Save  F7 Load│  ← bottom bar
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -75,16 +75,20 @@ Guiding principles:
 - **Left:** mode indicator, VIM-style: `PY`, `BAS` or `BBC` (BASIC mode, showing the active dialect), `OS`.
 - **Rest:** function-key labels. Labels change with the current mode.
 
-### 3.4 Function keys (proposed initial map)
+### 3.4 Function keys
 
 | Key | Python mode | BASIC mode | OS mode |
 |---|---|---|---|
 | F1 | Help (later: context help on keyword under cursor) | same | same |
-| F2 | Next mode (PY → BASIC → OS → PY) | same | same |
-| F3 | LIST | LIST | |
+| F2 | OS mode | OS mode | Back to the language mode it came from |
+| F3 | Python mode (nothing if already there) | same | same |
+| F4 | BASIC mode (nothing if already there) | same | same |
 | F5 | RUN (the BASIC program) | RUN | |
 | F6 | SAVE | SAVE | |
 | F7 | LOAD | LOAD | |
+| F8 | LIST | LIST | |
+
+*Decided (2026-11-26):* a language is chosen and kept, OS mode is visited. One key cycling through the three modes passed through OS mode on every way between Python and BASIC; now each language has its key and F2 goes to OS mode and back. With BBC BASIC (phase 3), F4 pressed in BASIC mode may also switch dialect, only while no program is in memory: a program's dialect is its line 0's, so the key must not change it under a program.
 
 F-key assignments should be configurable (see §14). Labels for keys unused in the current mode are hidden.
 
@@ -127,7 +131,7 @@ In **Python mode** and **BASIC mode**, each line typed at the prompt is routed b
 | `%` | The *other* language (Python ↔ BASIC), for this line only | `%RUN` (in Python mode), `%print(x)` (in BASIC mode) |
 | Anything else | The current mode's language | `print("hi")` / `PRINT "HI"` |
 
-In **OS mode** there are **no prefixes**: every line is an OS command (see §5.4). To use Python or BASIC, the user switches mode (F2).
+In **OS mode** there are **no prefixes**: every line is an OS command (see §5.4). To use Python or BASIC, the user switches mode (F2 back to the last language, F3 Python, F4 BASIC).
 
 Rules for Python and BASIC modes:
 

@@ -10,7 +10,7 @@ import os
 
 import kora
 
-HELP = """KoraCLI OS mode (F2 for Python):
+HELP = """KoraCLI OS mode (F2 back, F3 Python, F4 BASIC):
   help            show this text
   exit            leave KoraCLI (Ctrl+D too)
   cd [path]       change directory, or print cwd

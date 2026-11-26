@@ -4,7 +4,7 @@
 machine, drive the shell on its screen from the serial line (the debug
 console's type, key and conlog), and check the output and the framebuffer.
 Without a display there is no shell: only the kernel checks run. The shell
-is KoraCLI, whose OS mode the steps drive (F2 twice after each start).
+is KoraCLI, whose OS mode the steps drive (F4, then F2 after each start).
 
 Waits for expected output (with timeouts) rather than sleeping, so it is not
 sensitive to how fast the machine runs QEMU. Standard library only.
@@ -216,12 +216,12 @@ SHELL_TASK = "micropython"
 
 def koracli_os_mode(q, timeout=60):
     """KoraCLI has started (in Python mode): to its OS mode, where the steps
-    type their commands, and its prompt. F2 goes through BASIC mode on the
-    way, which says READY."""
+    type their commands, and its prompt. F4 goes through BASIC mode on the
+    way, which says READY., and F2 from there to OS mode."""
     q.expect(rb"KoraCLI on MicroPython [0-9.]+\. F1 for help\.", timeout=timeout)
     q.expect(rb">>> ")
     time.sleep(0.3)
-    q.key("f2")
+    q.key("f4")
     q.expect(rb"READY\.\r?\n")
     q.key("f2")
     q.expect(rb"\x1b\[J\$ ")  # the prompt redrawn in place (a new one starts a line)
@@ -1618,8 +1618,8 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
 
     def koracli():
         # KoraCLI (step 1b): its own screen, the Python editor on key events,
-        # a block that ends at the second blank line, ESC stopping code, F2
-        # through BASIC and OS mode, and Ctrl+D to end.
+        # a block that ends at the second blank line, ESC stopping code, the mode
+        # keys through BASIC and OS mode, and Ctrl+D to end.
         q.send("koracli\r")
         q.expect(rb"KoraCLI on MicroPython 1\.29\.0\. F1 for help\.", timeout=30)
         q.expect(rb">>> ")
@@ -1707,7 +1707,7 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         # sees BASIC's variables (step 2b).
         q.send("%PRINT 6*7\r")
         q.expect(rb"^ 42 \r?$")
-        q.key("f2")
+        q.key("f4")
         q.expect(rb"READY\.\r?\n")
         q.send("LIST\r")
         q.expect(rb"^10 PRINT msg\$\r?$")
@@ -1734,17 +1734,22 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         q.expect(rb"^READY\.\r?$")
         q.send("NEW\r")
         q.expect(rb"^READY\.\r?$")
-        # OS mode runs every line as a command, with no {expr}.
+        # OS mode runs every line as a command, with no {expr}; F2 goes
+        # back to BASIC (READY.), F3 to Python.
         q.key("f2")
         time.sleep(0.2)
         q.send("echo os mode {x}\r")
         q.expect(rb"^os mode \{x\}\r?$")
+        q.expect(rb"exited with \d+\r?\n\$ ")  # keys go to echo until it ends
+        time.sleep(0.3)
         q.key("f2")
-        time.sleep(0.2)
+        q.expect(rb"READY\.\r?\n")
+        q.key("f3")
+        q.expect(rb"\x1b\[J>>> ")
         q.key("ctrl-d")
         q.expect(rb"\] exited with 0")
         q.expect(PROMPT)
-    yield "koracli: Python at its prompt, blocks, ESC, OS commands, BASIC, F2 and Ctrl+D", koracli
+    yield "koracli: Python at its prompt, blocks, ESC, OS commands, BASIC, the mode keys and Ctrl+D", koracli
 
     def micropython():
         # MicroPython's REPL on the shell's console, with its own line editor

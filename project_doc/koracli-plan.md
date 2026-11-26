@@ -275,7 +275,7 @@ Phase 2, Classic BASIC. Decided 2026-11-26:
 
 - [x] **2a. Classic BASIC runs.** (#127) `sys:koracli/classic.py` over `basic.py`
   (what the dialects will share: the program store, errors, the output's
-  column, random numbers). BASIC mode in F2's cycle (Python, BASIC, OS) with
+  column, random numbers). BASIC mode in F2's cycle (Python, BASIC, OS; 2b2 gives each mode a key) with
   `READY.` after each command, `%` between the languages, `!` in both.
   RUN, LIST, NEW, CONT, CLR; the statements and functions above; errors in
   the C64's words, by line; ESC and Ctrl+C as `BREAK IN n`, CONT going on
@@ -283,7 +283,7 @@ Phase 2, Classic BASIC. Decided 2026-11-26:
   do not wait. BASIC's variables are its own until 2b.
   Tests: type-in listings on the unix port (`koracli_basic.py`, its output
   what a C64 prints); a smoke step in BASIC mode.
-- [ ] **2b. Shared variables.** Python and BASIC see one namespace, with
+- [x] **2b. Shared variables.** (#128) Python and BASIC see one namespace, with
   spec §7's rules: names keep the case first written, type suffixes map to
   Python types, numbers convert, collisions stay separate inside BASIC,
   Python's changes are seen at BASIC's next read; RUN and NEW clear only
@@ -302,9 +302,15 @@ Phase 2, Classic BASIC. Decided 2026-11-26:
   NAME ERROR`. PRINT shows the items before an error, as a C64 does.
   Tests: `koracli_shared.py` on the unix port, rule by rule; the smoke
   step runs the spec's `msg$` example and reads BASIC's `N` from Python.
+- [ ] **2b2. Mode keys.** F3 Python, F4 BASIC, F2 to OS mode and back to
+  the language it came from (the user's proposal, 2026-11-26; spec §3.4),
+  instead of F2 cycling through the three modes: a language is chosen and
+  kept, OS mode visited. LIST moves to F8. `dispatch.switch` decides,
+  tested on the unix port (`koracli_editor.py`); the smoke test goes
+  F4, F2 (OS), F2 (back to BASIC), F3.
 - [ ] **2c. Files and line tools.** `SAVE` and `LOAD` (`.BAS`, line 0's
   dialect header), `RENUM` (line 0 stays), `AUTO`, and the function keys
-  in the bar (F3 List, F5 Run, F6 Save, F7 Load).
+  in the bar (F5 Run, F6 Save, F7 Load, F8 List).
 
 Later phases, in a line each, to be split into PRs when they come up:
 

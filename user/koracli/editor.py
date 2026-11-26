@@ -18,10 +18,11 @@
 #   Ctrl+D         on an empty block, the end; otherwise Delete
 #
 # feed() returns None, or what the shell is to do: ("run", text),
-# ("eof",), ("key", name) for F1 and F2.
+# ("eof",), ("key", name) for F1 to F4.
 
 import keys
 
+FUNCTION_KEYS = {keys.F1: "F1", keys.F2: "F2", keys.F3: "F3", keys.F4: "F4"}
 INDENT = 4
 HISTORY_SIZE = 100
 
@@ -296,10 +297,8 @@ class Editor:
             if ctrl:
                 return self._finish()
             return self._enter()
-        if key == keys.F1:
-            return ("key", "F1")
-        if key == keys.F2:
-            return ("key", "F2")
+        if key in FUNCTION_KEYS:
+            return ("key", FUNCTION_KEYS[key])
         if ctrl and ch:
             c = ch.lower()
             if c == "d":
