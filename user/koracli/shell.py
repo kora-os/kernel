@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# KoraCLI's shell loop (KoraCLI step 1b): the bars, the editor on key
-# events, F2 between Python and OS mode, and the blocks run. Python runs in
-# a namespace of its own with ESC as a break (KeyboardInterrupt); the console
-# stays in key-event mode, and input() reads the keys as bytes.
+# KoraCLI's shell loop: the bars, the editor on key events, F2 between
+# Python, BASIC and OS mode, and the blocks run. Python runs in a namespace
+# of its own and BASIC in its interpreter (classic.py, loaded when first
+# used), both with ESC as a break (KeyboardInterrupt); the console stays in
+# key-event mode, and input() reads the keys as bytes.
 
 import sys
 
@@ -15,8 +16,10 @@ import dispatch
 import editor
 import keys
 
-MODES = ("PY", "OS")
-PROMPTS = {"PY": (">>> ", "... "), "OS": ("$ ", "$ ")}
+MODES = ("PY", "BAS", "OS")
+# Classic BASIC's prompt is READY., printed after each command: the line
+# typed has none.
+PROMPTS = {"PY": (">>> ", "... "), "BAS": ("", ""), "OS": ("$ ", "$ ")}
 
 HELP = """KoraCLI: Python at the prompt.
   Enter runs a line; a block (def, for, if...) runs at the second blank line,
@@ -27,9 +30,11 @@ HELP = """KoraCLI: Python at the prompt.
   .status, .lines, .stderr); {expr} puts a Python value in; < > >> redirect;
   & runs it in the background, @N on core N. kora.run() and kora.capture()
   do the same in code.
-  F2 switches between Python (PY) and OS commands (OS).
-  A line starting with a number is a BASIC program line (kept for later);
-  % runs a line of BASIC, which comes in a later step."""
+  F2 switches between Python (PY), BASIC (BAS) and OS commands (OS).
+  A line starting with a number is a BASIC program line, in every mode but
+  OS; RUN runs the program, LIST lists it, NEW clears it, ESC stops it and
+  CONT goes on. % runs a line of the other language: %RUN in Python mode,
+  %print(x) in BASIC mode."""
 
 
 def write(s):
@@ -43,7 +48,8 @@ def bars(mode):
 
 def prompts(ed, mode, start=True):
     prompt, more = PROMPTS[mode]
-    routed = (lambda line: True) if mode == "OS" else dispatch.routed
+    # Only Python has blocks: in BASIC and OS mode every line runs at Enter.
+    routed = dispatch.routed if mode == "PY" else (lambda line: True)
     if start:
         ed.start(prompt, more, routed)
     else:
@@ -85,24 +91,64 @@ def run_os(text):
                background=c["background"], core=c["core"], report=True)
 
 
-def run(text, mode, ns, program):
+def basic(state):
+    """Classic BASIC's interpreter, made when BASIC is first used."""
+    b = state.get("basic")
+    if b is None:
+        import classic
+
+        def readline():
+            try:
+                return input()
+            except EOFError:
+                return ""
+
+        def getkey():
+            k = kora.key(False)
+            return "" if k is None else classic.key_char(k[0], k[1])
+
+        b = classic.Interpreter(write, readline, getkey, state["width"])
+        state["basic"] = b
+    return b
+
+
+def run_basic(text, state):
+    b = basic(state)
+    kora.esc_break(True)
+    try:
+        b.execute(text)
+    except KeyboardInterrupt:
+        print("BREAK")
+    except Exception as e:  # a mistake in the interpreter, not the program
+        sys.print_exception(e)
+    finally:
+        kora.esc_break(False)
+
+
+def run(text, mode, ns, state):
     kind, rest = dispatch.classify(text, mode)
     if kind == dispatch.PROGRAM_LINE:
-        program.enter(rest)
-    elif kind == dispatch.OTHER_LANGUAGE:
-        print("koracli: BASIC comes with KoraCLI phase 2")
+        basic(state).enter(rest)
     elif mode == "OS":
         if text.strip():
             kora.esc_break(False)
             run_os(text)
+    elif kind == dispatch.BASIC:
+        if rest.strip():
+            run_basic(rest, state)
+        if mode == "BAS" and text.strip():
+            print("READY.")
     elif text.strip():
-        # Python, its ! lines made calls of kora's (bang.py).
+        # Python (a ! line too), its ! lines made calls of kora's (bang.py).
+        code = text if kind == dispatch.OS_COMMAND or mode == "PY" else rest
         try:
-            code = bang.translate(text)
+            code = bang.translate(code)
         except bang.CommandError as e:
             print("koracli: %s" % e)
             return
         run_python(code, ns)
+        if mode == "BAS":
+            print("READY.")
 
 
 def report_jobs():
@@ -124,7 +170,12 @@ def read_action(ed, state):
             mode = MODES[(MODES.index(state["mode"]) + 1) % len(MODES)]
             state["mode"] = mode
             bars(mode)
-            prompts(ed, mode, start=False)
+            if mode == "BAS" and not ed.text():
+                # On an empty line, BASIC says it is ready, as a C64 does.
+                write("\r\x1b[KREADY.\n")
+                prompts(ed, mode)
+            else:
+                prompts(ed, mode, start=False)
             continue
         if action[0] == "key":  # F1
             ed.cancel(mark=False)
@@ -148,7 +199,6 @@ def main():
     size = kora.size()
     width = size[0] if size else 80
     ns = {"__name__": "__main__", "kora": kora}
-    program = dispatch.Program()
     ed = editor.Editor(write, width)
     commands.register()
     bars("PY")
@@ -158,7 +208,7 @@ def main():
         version = ""
     print("KoraCLI on MicroPython%s. F1 for help." % version)
     kora.mode(kora.EVENTS)
-    state = {"mode": "PY"}
+    state = {"mode": "PY", "width": width}
     try:
         while True:
             # A Ctrl+C may come at any moment, also while the editor works on
@@ -174,7 +224,7 @@ def main():
                 return
             if action[0] == "run":
                 try:
-                    run(action[1], state["mode"], ns, program)
+                    run(action[1], state["mode"], ns, state)
                 except KeyboardInterrupt:  # a break that came late
                     try:
                         print("KeyboardInterrupt")

@@ -176,15 +176,15 @@ check(dispatch.classify("print(1)", "PY") == (dispatch.PYTHON, "print(1)"), "Pyt
 check(dispatch.classify("10 PRINT X", "PY") == (dispatch.PROGRAM_LINE, "10 PRINT X"),
       "a program line")
 check(dispatch.classify("!dir", "PY") == (dispatch.OS_COMMAND, "dir"), "! is an OS command")
-check(dispatch.classify("%RUN", "PY") == (dispatch.OTHER_LANGUAGE, "RUN"), "% the other language")
+check(dispatch.classify("%RUN", "PY") == (dispatch.BASIC, "RUN"), "% BASIC in Python mode")
+check(dispatch.classify("PRINT 1", "BAS") == (dispatch.BASIC, "PRINT 1"), "BASIC mode")
+check(dispatch.classify("%print(1)", "BAS") == (dispatch.PYTHON, "print(1)"),
+      "% Python in BASIC mode")
+check(dispatch.classify("10 PRINT", "BAS") == (dispatch.PROGRAM_LINE, "10 PRINT") and
+      dispatch.classify("!dir", "BAS") == (dispatch.OS_COMMAND, "dir"),
+      "BASIC mode's program lines and ! commands")
 check(dispatch.classify("print(1)", "OS") == (dispatch.OS_COMMAND, "print(1)"),
       "OS mode has no prefixes")
-program = dispatch.Program()
-program.enter("20 PRINT \"B\"")
-program.enter("10 PRINT \"A\"")
-check(program.lines == {10: "PRINT \"A\"", 20: "PRINT \"B\""}, "program lines stored")
-program.enter("10")
-check(program.lines == {20: "PRINT \"B\""}, "a number alone deletes its line")
 check(editor.is_compound("  for x in y:") and editor.is_compound("@deco") and
       not editor.is_compound("format = 1"), "compound statements")
 

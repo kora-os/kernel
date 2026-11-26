@@ -21,8 +21,10 @@ void mp_hal_stdio_mode_orig(void);
 int kora_console_mode(int mode);
 int kora_console_get_mode(void);
 
+#include <stdbool.h>
+
 struct con_key_event;
-// CON_EVENTS mode: the next key press, waiting for it: 1, 0 at the end of
-// input, -1 for a break (Ctrl+C, or ESC as a break), -2 when stdin is not a
-// console handler in that mode.
-int kora_read_key(struct con_key_event *event);
+// CON_EVENTS mode: the next key press, waiting for it if `wait`: 1, 0 at the
+// end of input, -1 for a break (Ctrl+C, or ESC as a break), -2 when stdin is
+// not a console handler in that mode, -3 when none has come (without `wait`).
+int kora_read_key(struct con_key_event *event, bool wait);

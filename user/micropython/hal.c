@@ -96,8 +96,9 @@ static int take_answer(void) {
 
 // Wait for input from stdin's console handler: 1 with something in
 // `in.buf` from `in.pos`, 0 at the end of input (or the handler gone), -1 for
-// a break. Only for a console handler (in.port).
-static int input_wait(void) {
+// a break. Only for a console handler (in.port). Without `wait`, -3 when
+// nothing has come yet: the read stays with the console for the next call.
+static int input_wait(bool wait) {
     if (in.pos < in.len) {
         return 1;
     }
@@ -114,6 +115,9 @@ static int input_wait(void) {
         int answer = take_answer();
         if (answer >= 0) {
             return answer;
+        }
+        if (!wait) {
+            return break_due() ? -1 : -3;
         }
         unsigned got = sig_wait(SIG_MASK(in.reply_bit) | SIG_MASK(SIG_BREAK));
         if (got & SIG_MASK(SIG_BREAK)) {
@@ -139,7 +143,7 @@ static unsigned translated_pos;
 static int event_byte(void) {
     while (translated_pos >= translated.length) {
         struct con_key_event event;
-        int got = kora_read_key(&event);
+        int got = kora_read_key(&event, true);
         if (got <= 0) {
             return got == 0 ? CHAR_CTRL_D : CHAR_CTRL_C;
         }
@@ -159,7 +163,7 @@ int mp_hal_stdin_rx_chr(void) {
     if (in.mode == CON_EVENTS) {
         return event_byte();
     }
-    int got = input_wait();
+    int got = input_wait(true);
     return got > 0 ? (unsigned char)in.buf[in.pos++] : got == 0 ? CHAR_CTRL_D : CHAR_CTRL_C;
 }
 
@@ -195,7 +199,7 @@ int kora_console_get_mode(void) {
     return in.mode;
 }
 
-int kora_read_key(struct con_key_event *event) {
+int kora_read_key(struct con_key_event *event, bool wait) {
     input_ready();
     if (in.port == 0 || in.mode != CON_EVENTS) {
         return -2;
@@ -205,9 +209,9 @@ int kora_read_key(struct con_key_event *event) {
         return 1;
     }
     for (;;) {
-        int got = input_wait();
+        int got = input_wait(wait);
         if (got <= 0) {
-            return got;
+            return got;  // -3 too: nothing yet
         }
         if (in.len - in.pos >= sizeof *event) {
             memcpy(event, in.buf + in.pos, sizeof *event);

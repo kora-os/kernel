@@ -96,7 +96,7 @@ From the spec's §17, with the PRs of phases 0 and 1:
 | 0 | MicroPython on KoraOS | 0a, 0b |
 | 1 | The console's new parts; KoraCLI with Python mode | 1a, 1b |
 | 1b | OS commands and OS mode; the shell replaced | 1c, 1d |
-| 2 | Classic BASIC | later |
+| 2 | Classic BASIC | 2a, 2b, 2c |
 | 3 | BBC BASIC | later |
 | 4 | Machine access: PEEK/POKE, indirection, `SYS`, GPIO | later |
 | 5 | Graphics and sound on a canvas screen | later |
@@ -244,13 +244,56 @@ From the spec's §17, with the PRs of phases 0 and 1:
   `koracli:` messages, the bars' two rows and `micropython` as the task
   that waits for input. Merged on green CI (the user's choice, 2026-11-25).
 
+Phase 2, Classic BASIC. Decided 2026-11-26:
+
+- **Our own interpreter**, not PyBasic's (the user's choice). PyBasic is
+  GPL-3.0-or-later, so its code could be used, but it is a simplified
+  dialect of its own: every name in capitals, arrays under names of their
+  own, its own errors, tokens parsed again each time a line runs. Fitting it
+  to the C64 and to §7's variables would rewrite most of it. It was studied,
+  and no code is taken from it.
+- **The C64's look, with GW-BASIC's additions** (the user's choice): BASIC
+  V2's statements, `READY.`, its messages (`?SYNTAX ERROR IN 10`, `BREAK IN
+  20`), numbers to 9 digits with a sign space, `?` for PRINT, GET and
+  TI/TI$; plus ELSE, WHILE/WEND, `'` remarks, INKEY$, `&H`, STRING$,
+  SPACE$, HEX$, INSTR, SWAP, MOD, `\` (integer division), XOR, CLS and RANDOMIZE.
+- **Keywords need no spaces where only a keyword can stand:** at a
+  statement's start unless the word is assigned to (`FORI=1TO10`,
+  `PRINTI`), and after a value (`1TO10`). Elsewhere a word is a name, so
+  names may contain or start with keywords (`TOTAL`, `FORMAT`); names
+  starting with FN are function calls, and REM and DATA at a statement's
+  start begin a remark or data. (A C64 finds keywords anywhere, so `SCORE`
+  there holds `OR`; that would break the whole names §6.2 promises.)
+- **Integers are 32 bits** (`%` variables, AND, OR, NOT), not the C64's 16,
+  and CHR$ takes any Unicode code point: a modern machine's extensions.
+- **A line is parsed when it first runs**, into Python closures, and kept
+  until it changes: a C64 reports a line's mistakes when it runs it too, and
+  the program runs at closure speed rather than the tokens'. That is a step
+  towards the transpiler of phase 8.
+- **BASIC loads when first used** (a program line, `%`, BASIC mode), so
+  KoraCLI starts no slower.
+
+- [ ] **2a. Classic BASIC runs.** `sys:koracli/classic.py` over `basic.py`
+  (what the dialects will share: the program store, errors, the output's
+  column, random numbers). BASIC mode in F2's cycle (Python, BASIC, OS) with
+  `READY.` after each command, `%` between the languages, `!` in both.
+  RUN, LIST, NEW, CONT, CLR; the statements and functions above; errors in
+  the C64's words, by line; ESC and Ctrl+C as `BREAK IN n`, CONT going on
+  unless the program changed. `_kora.key(False)` for GET and INKEY$, which
+  do not wait. BASIC's variables are its own until 2b.
+  Tests: type-in listings on the unix port (`koracli_basic.py`, its output
+  what a C64 prints); a smoke step in BASIC mode.
+- [ ] **2b. Shared variables.** Python and BASIC see one namespace, with
+  spec §7's rules: names keep the case first written, type suffixes map to
+  Python types, numbers convert, collisions stay separate inside BASIC,
+  Python's changes are seen at BASIC's next read; RUN and NEW clear only
+  what BASIC defined. `SYS "name", args` calls Python.
+- [ ] **2c. Files and line tools.** `SAVE` and `LOAD` (`.BAS`, line 0's
+  dialect header), `RENUM` (line 0 stays), `AUTO`, and the function keys
+  in the bar (F3 List, F5 Run, F6 Save, F7 Load).
+
 Later phases, in a line each, to be split into PRs when they come up:
 
-- **2. Classic BASIC.** The interpreter in Python (study PyBasic, and check its
-  license before reusing code), the program store, the immediate commands,
-  shared variables with the collision rules of spec §7, `SAVE` and `LOAD`
-  with line 0, the dialect's errors, `READY.`. Tested on the unix port with
-  type-in listings.
 - **3. BBC BASIC.** The second dialect, multi-line constructs, `PROC` and
   `FN` falling back to Python, star commands, switching dialect.
 - **4. Machine access.** `PEEK`, `POKE`, indirection, `SYS`, `peek`/`poke` in

@@ -86,10 +86,14 @@ static void check(int result) {
     }
 }
 
-// key(): the next key press, waiting for it.
-static mp_obj_t kora_key(void) {
+// key(wait=True): the next key press, waiting for it; key(False) gives None
+// when no key has come.
+static mp_obj_t kora_key(size_t n_args, const mp_obj_t *args) {
     struct con_key_event event;
-    int got = kora_read_key(&event);
+    int got = kora_read_key(&event, n_args == 0 || mp_obj_is_true(args[0]));
+    if (got == -3) {
+        return mp_const_none;
+    }
     if (got == -1) {
         mp_raise_type(&mp_type_KeyboardInterrupt);
     }
@@ -127,7 +131,7 @@ static mp_obj_t kora_key(void) {
                          MP_OBJ_NEW_SMALL_INT(event.modifiers)};
     return mp_obj_new_tuple(3, items);
 }
-static MP_DEFINE_CONST_FUN_OBJ_0(kora_key_obj, kora_key);
+static MP_DEFINE_CONST_FUN_OBJ_VAR_BETWEEN(kora_key_obj, 0, 1, kora_key);
 
 static mp_obj_t kora_mode(size_t n_args, const mp_obj_t *args) {
     if (n_args == 0) {

@@ -3,10 +3,11 @@
 KoraCLI is the shell KoraOS starts in: a fullscreen prompt where you can type
 Python, a line of BASIC or an OS command, and see what happens.
 
-> **Status: KoraCLI is the shell (phase 1 done).** KoraOS starts in it,
-> with Python mode and OS mode, OS commands from Python, and its own editor
-> (`koracli` starts another one). BASIC and the later phases are still to
-> come. This reference is written ahead of the implementation and grows
+> **Status: KoraCLI is the shell (phase 1 done), and Classic BASIC runs
+> (step 2a).** KoraOS starts in it, with Python, BASIC and OS modes, OS
+> commands from Python, and its own editor (`koracli` starts another one).
+> BASIC's variables are still its own (shared with Python in step 2b), and
+> SAVE, LOAD, RENUM and AUTO come in step 2c. This reference is written ahead of the implementation and grows
 > with it: each section says whether what it describes works today or which
 > step brings it. The
 > design behind it is `project_doc/koracli-spec.md`, and the steps are in
@@ -19,9 +20,9 @@ so in a **Differences** note.
 
 ## The screen
 
-*Works (steps 1b and 1d),* on a screen of KoraCLI's own, the one KoraOS
-starts in: the top bar says `KoraCLI`, the bottom bar the mode (`PY` or
-`OS`) and the function keys there are so far (F1 Help, F2 Mode). Meta+M
+*Works (steps 1b, 1d and 2a),* on a screen of KoraCLI's own, the one KoraOS
+starts in: the top bar says `KoraCLI`, the bottom bar the mode (`PY`, `BAS`
+or `OS`) and the function keys there are so far (F1 Help, F2 Mode). Meta+M
 switches between it and other programs' screens.
 
 ```
@@ -51,7 +52,8 @@ its own screen ends, you are back in KoraCLI.
 
 ## Modes
 
-*Planned: Python and OS modes in phase 1, BASIC mode in phase 2.*
+*Works: Python and OS modes (phase 1), BASIC mode in the Classic dialect
+(step 2a); the BBC dialect comes in phase 3.*
 
 F2 switches mode: Python, then BASIC, then OS, then Python again.
 
@@ -99,8 +101,7 @@ Things to know:
 
 ## Python mode
 
-*Works (step 1b),* with the editing below. Program lines are stored (BASIC
-comes in phase 2), and `!` says OS commands come in step 1c.
+*Works (steps 1b and 1c),* with the editing below.
 
 KoraCLI's Python is MicroPython. Your code runs in a namespace of its own,
 with `kora` there already; the expressions you type have their value
@@ -273,7 +274,8 @@ for scripting: use Python mode for that.
 
 ## BASIC
 
-*Planned: Classic BASIC in phase 2, BBC BASIC in phase 3.*
+*Works: Classic BASIC (step 2a), without SAVE, LOAD, RENUM and AUTO (step
+2c) and with variables of its own until step 2b. BBC BASIC comes in phase 3.*
 
 BASIC mode uses one of two dialects at a time, chosen in the configuration.
 Switching dialect with a program in memory asks first, then clears the
@@ -281,7 +283,7 @@ program.
 
 | | Classic BASIC | BBC BASIC |
 |---|---|---|
-| Modelled on | Commodore 64, MSX, GW-BASIC | BBC BASIC V (Acorn Archimedes) |
+| Modelled on | Commodore 64, with GW-BASIC's and MSX's additions | BBC BASIC V (Acorn Archimedes) |
 | Prompt | `READY.`, after each command | `>`, before the input line |
 | Keywords and variable names | Not case-sensitive | Case-sensitive |
 | Variable names | The whole name counts | The whole name counts |
@@ -296,23 +298,83 @@ variable); in KoraCLI the whole name counts.
 
 ### Commands
 
-| Command | What it does |
-|---|---|
-| `RUN` | Clears the variables BASIC defined (Python's stay) and runs the program |
-| `LIST [range]` | Lists the program, e.g. `LIST 10-50` |
-| `NEW` | Clears the program and BASIC's variables |
-| `CONT` | Continues after ESC or `STOP` |
-| `SAVE "name"`, `LOAD "name"` | Saves and loads `.BAS` files |
-| `RENUM [start[,step]]` | Renumbers the program |
-| `AUTO [start[,step]]` | Numbers lines for you as you type |
-| `HELP [keyword]` | Help on a keyword |
+| Command | What it does | Status |
+|---|---|---|
+| `RUN [line]` | Clears BASIC's variables and runs the program (from `line`) | Works |
+| `LIST [range]` | Lists the program: `LIST 10-50`, `LIST -50`, `LIST 10-`, `LIST 10` | Works |
+| `NEW` | Clears the program and BASIC's variables | Works |
+| `CONT` | Continues after ESC or `STOP`, unless the program was changed | Works |
+| `CLR` | Clears the variables, keeping the program | Works |
+| `SAVE "name"`, `LOAD "name"` | Saves and loads `.BAS` files | Step 2c |
+| `RENUM [start[,step]]` | Renumbers the program | Step 2c |
+| `AUTO [start[,step]]` | Numbers lines for you as you type | Step 2c |
+| `HELP [keyword]` | Help on a keyword | Phase 6 |
 
 Any other statement typed without a line number runs at once:
-`PRINT 2+2`.
+`PRINT 2+2`. A `GOTO` typed that way runs the program from that line,
+keeping its variables.
 
-ESC stops a running program; `CONT` carries on from there.
+ESC stops a running program with `BREAK IN 20`; `CONT` carries on from
+there. Ctrl+C does the same.
+
+In Python mode, `%` runs a line of BASIC (`%RUN`, `%LIST`), without the
+`READY.`; in BASIC mode, `%` runs a line of Python (`%print(x)`), and `!`
+an OS command, as in Python mode.
+
+### Classic BASIC
+
+Statements:
+
+| | |
+|---|---|
+| Output and input | `PRINT` (or `?`) with `;`, `,` (zones of 10 columns), `TAB(n)` and `SPC(n)`; `INPUT ["prompt";] a, b$`; `GET a$` (a key, or `""` when none is waiting); `CLS` |
+| Variables | `LET` (optional), `DIM a(10, 5)`, `SWAP a, b`, `CLR`; `DEF FNname(x) = expression` |
+| Flow | `GOTO`, `GOSUB` and `RETURN`, `ON n GOTO` / `ON n GOSUB`, `IF ... THEN ... ELSE ...` (THEN or ELSE may be a line number), `FOR ... TO ... STEP` and `NEXT [i, j]`, `WHILE` and `WEND`, `END`, `STOP` |
+| Data | `DATA`, `READ`, `RESTORE [line]` |
+| Others | `REM` or `'`, `RANDOMIZE [n]` |
+
+Functions: `ABS`, `ATN`, `COS`, `EXP`, `INT`, `LOG`, `RND`, `SGN`, `SIN`,
+`SQR`, `TAN`; `ASC`, `CHR$`, `HEX$`, `INSTR([start,] s$, t$)`, `LEFT$`,
+`LEN`, `MID$`, `RIGHT$`, `SPACE$`, `STR$`, `STRING$(n, c)`, `VAL`; `FRE`,
+`POS`, `INKEY$`; and the clock `TI` (sixtieths of a second) and `TI$`
+(`"HHMMSS"`, which can be set).
+
+Operators, from the tightest: `^`; unary `-`; `*` and `/`; `\` (integer
+division); `MOD`; `+` and `-` (`+` joins strings); `=`, `<>`, `<`, `>`,
+`<=`, `>=`; `NOT`; `AND`; `OR` and `XOR`. A comparison is -1 when true and
+0 when false, and `AND`, `OR` and `NOT` work on the bits of whole numbers.
+
+Variables: `name` holds a number, `name%` a whole number, `name$` a string,
+and they are different variables (`A`, `A%`, `A$`); a variable not yet set
+is 0 or `""`. An array used without `DIM` has indices 0 to 10.
+
+Keywords need no spaces where only a keyword can stand: `FORI=1TO10:PRINTI`
+works. Elsewhere a word is a name, so a name may contain or start with a
+keyword (`TOTAL`, `FORMAT`, `NOTE`), except that a name cannot start with
+`FN` (a function call), nor with `REM` or `DATA` at a statement's start.
+
+Numbers print as a C64 prints them: a space or a minus sign before, a space
+after, up to 9 digits, no 0 before the point (`.5`), and E notation below
+.01 and from 1E9 (`1E-03`, `1.23456789E+09`). A program's mistakes show
+when the line runs: `?SYNTAX ERROR IN 10`.
+
+**Differences from the C64:**
+- The whole name counts, and keywords inside names are left alone (above).
+- From GW-BASIC and MSX: `ELSE`, `WHILE`/`WEND`, `'` remarks, `INKEY$`,
+  `&H` hex numbers, `HEX$`, `INSTR`, `SPACE$`, `STRING$`, `SWAP`, `MOD`,
+  `\`, `XOR`, `CLS` and `RANDOMIZE`.
+- Numbers are 64-bit floating point (16 digits inside, 9 printed), and
+  whole numbers (`%`, `AND`, `OR`, `NOT`) 32 bits, not 16. Strings have no
+  length limit, and `CHR$` takes any Unicode character.
+- `GET` gives the C64's codes for Return (13), Delete (20), Home (19) and
+  the cursor keys (17 down, 145 up, 29 right, 157 left); other keys give
+  their character.
+- Not there: `PEEK`, `POKE`, `SYS` and `WAIT` (phase 4), the C64's screen
+  codes in strings (colours, cursor moves), and `ST`.
 
 ### Files
+
+*Planned (step 2c).*
 
 Programs are saved as plain text with the `.BAS` extension. `SAVE` writes
 line 0 to record the dialect (`0 REM !KoraBasic:Classic` or
@@ -322,7 +384,8 @@ current dialect.
 
 ## Variables shared by Python and BASIC
 
-*Planned (phase 2).*
+*Planned (step 2b).* Until then BASIC's variables are its own: Python's `x`
+and BASIC's `X` are different.
 
 Python and BASIC see the same variables. BASIC's type suffix is dropped in
 Python:
