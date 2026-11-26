@@ -78,9 +78,9 @@ Log range
 >GOTO 999
 No such line
 >RETURN
-No GOSUB
+Not in a subroutine
 >NEXT
-No FOR
+Not in a FOR loop
 >FOR I=1 3
 No TO
 >PRINT (1
@@ -127,6 +127,46 @@ hello31.5
 >i% = 7
 >PRINT MSG$
 No such variable
+== IF over several lines
+not two after
+two (nested) after
+not two after
+one line
+== CASE
+         0 other
+         1 small
+         2 small
+3, inner x
+         4 other
+no clause: after ENDCASE
+== REPEAT and WHILE
+         1         2         3
+I% 0, J% 2
+         3         2         1
+WHILE FALSE skips its body
+== the constructs' mistakes
+>RUN
+Missing ENDIF at line 10
+>RUN
+Missing ENDCASE at line 10
+>RUN
+Missing OF at line 10
+>RUN
+Type mismatch at line 10
+>UNTIL TRUE
+Not in a REPEAT loop
+>ENDWHILE
+Not in a WHILE loop
+>CASE 1 OF WHEN 1: PRINT
+Syntax error
+>RUN
+Missing ENDWHILE at line 10
+>RUN
+Syntax error at line 20
+>REPEAT X%+=1: UNTIL X%>4: PRINT X%
+         5
+>X%=0: REPEAT UNTIL TRUE: PRINT "REPEAT UNTIL, no colon"
+REPEAT UNTIL, no colon
 == LIST
 >LIST
    10 REM one
