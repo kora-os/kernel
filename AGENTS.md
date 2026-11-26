@@ -68,7 +68,9 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
   `kora.capture` and `kora.cmd` are Python; `!` lines are translated by
   `user/koracli/bang.py`. The editor is pure Python over key events and tested on
   the unix port (`tests/micropython/koracli_editor.py`). Classic BASIC is
-  `user/koracli/classic.py` over `basic.py` (what the dialects share),
+  `user/koracli/classic.py`, a dialect over `basic.Runtime` (what the
+  dialects share: the run, the stack, DATA, CONT, Python's variables, the
+  program commands; tested under a toy dialect in `koracli_runtime.py`),
   loaded when BASIC is first used and tested with type-in listings on the
   unix port (`tests/micropython/koracli_basic.py`). Its variables are
   KoraCLI's Python namespace (spec §7, `koracli_shared.py`); SAVE, LOAD,

@@ -88,7 +88,7 @@ Guiding principles:
 | F7 | LOAD | LOAD | |
 | F8 | LIST | LIST | |
 
-*Decided (2026-11-26):* a language is chosen and kept, OS mode is visited. One key cycling through the three modes passed through OS mode on every way between Python and BASIC; now each language has its key and F2 goes to OS mode and back. With BBC BASIC (phase 3), F4 pressed in BASIC mode may also switch dialect, only while no program is in memory: a program's dialect is its line 0's, so the key must not change it under a program.
+*Decided (2026-11-26):* a language is chosen and kept, OS mode is visited. One key cycling through the three modes passed through OS mode on every way between Python and BASIC; now each language has its key and F2 goes to OS mode and back. With BBC BASIC (phase 3), F4 pressed in BASIC mode also switches dialect, only while no program is in memory: a program's dialect is its line 0's, so the key must not change it under a program (§6.3).
 
 F-key assignments should be configurable (see §14). Labels for keys unused in the current mode are hidden.
 
@@ -265,13 +265,21 @@ The dialects follow the syntax and core instruction set of their models, but are
 - **Classic BASIC is the C64's, with GW-BASIC's additions** *(decided 2026-11-26)*: BASIC V2's statements, look and messages, plus `ELSE`, `WHILE`/`WEND`, `'` remarks, `INKEY$`, `&H`, `STRING$`, `SWAP` and the like. Whole numbers are 32 bits.
 - **Keywords need no spaces where only a keyword can stand** *(decided 2026-11-26)*: at a statement's start unless the word is assigned to (`FORI=1TO10`), and after a value (`1TO10`). Elsewhere a word is a name, so names may contain or start with keywords (`TOTAL`). A C64 finds keywords anywhere, which would break whole names (`SCORE` holds `OR`).
 
+**BBC BASIC is BBC-inspired** *(decided 2026-11-26, for phase 3)*: what a BBC BASIC manual says applies, but old programs are not promised to run unchanged.
+
+- **Keywords are capitals only**, as on a BBC, so a word in small letters is always a name. A word in capitals is a keyword only where nothing but a keyword can stand, Classic BASIC's rule (a BBC reads `PRINTER` as `PRINT ER`).
+- **Abbreviations** (`P.` for PRINT, `GOS.` for GOSUB) are accepted when typed and stored in full, so `LIST` shows `PRINT`, as a BBC's does.
+- **Reals are doubles**, not a BBC's 5-byte floats, so results may differ in the last digits; `%` integers are 32 bits and wrap.
+- **Star commands are OS commands:** a `*` line runs the rest as `!` does, and `OSCLI` runs one built as a string. A few BBC names map to KoraOS's (`*CAT` lists files, `*DIR` changes directory); anything else is run as a command.
+- **Errors carry BBC BASIC V's numbers** in `ERR` (`No such variable` is 26), so error handlers that test them work.
+
 The name "Microsoft BASIC" is not used.
 
 Line-number-optional BASICs (QBasic, AmigaBASIC, Turbo Basic, etc.) are **out of scope** for the shell. They may be added later as separate applications.
 
 ### 6.3 Switching dialect (decided)
-- If a program is in memory, the shell **warns and asks for confirmation**.
-- On confirmation, the program is cleared (implicit `NEW`) and the new dialect becomes active.
+- **F4 in BASIC mode** switches dialect while no program is in memory. With a program in memory it does not switch, and says to `NEW` or `SAVE` first. *(Decided 2026-11-26: a key pressed in passing should not clear a program.)*
+- **`LOAD` of a file in the other dialect** (§12.1) asks `Switch to BBC BASIC? (y/N)` (or Classic). On yes, the program in memory is cleared (implicit `NEW`), the file's dialect becomes active and the file is loaded; on no, nothing changes.
 
 ### 6.4 Immediate commands
 Available in BASIC mode, or from Python mode with the `%` prefix:
@@ -461,7 +469,7 @@ Each language reports errors in its own style:
 
 | Language | Example |
 |---|---|
-| BBC BASIC | `Mistake at line 10` |
+| BBC BASIC | `Mistake at line 10` (with BBC BASIC V's numbers in `ERR`) |
 | Classic BASIC | `?SYNTAX ERROR IN 10` |
 | Python | Standard MicroPython traceback |
 

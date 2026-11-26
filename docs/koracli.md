@@ -279,22 +279,28 @@ for scripting: use Python mode for that.
 
 *Works: Classic BASIC (steps 2a to 2c). BBC BASIC comes in phase 3.*
 
-BASIC mode uses one of two dialects at a time, chosen in the configuration.
-Switching dialect with a program in memory asks first, then clears the
-program.
+BASIC mode uses one of two dialects at a time. *Planned (phase 3):* F4
+pressed in BASIC mode switches dialect while no program is in memory; with
+one, it stays and says to `NEW` or `SAVE` first. `LOAD` of a file saved in
+the other dialect asks `Switch to BBC BASIC? (y/N)` (or Classic), and on yes
+switches and loads it.
 
 | | Classic BASIC | BBC BASIC |
 |---|---|---|
 | Modelled on | Commodore 64, with GW-BASIC's and MSX's additions | BBC BASIC V (Acorn Archimedes) |
 | Prompt | `READY.`, after each command | `>`, before the input line |
-| Keywords and variable names | Not case-sensitive | Case-sensitive |
+| Keywords | Any case | Capitals only, so a word in small letters is always a name; abbreviations such as `P.` (PRINT) are stored in full |
+| Variable names | Not case-sensitive | Case-sensitive |
 | Variable names | The whole name counts | The whole name counts |
 | Hex numbers | `&HFF` | `&FF` |
 | Calling Python | `SYS "name", args` | `SYS "name", args`, or `PROCname` / `FNname` when the program does not define them |
-| Errors | `?SYNTAX ERROR IN 10` | `Mistake at line 10` |
+| Errors | `?SYNTAX ERROR IN 10` | `Mistake at line 10`, with BBC BASIC V's `ERR` numbers |
+| OS commands | `!` | `!`, or `*` as a star command (`*CAT`, `*DIR`), and `OSCLI` for one built as a string |
+| Numbers | 9 digits | Reals are doubles (a BBC's have 5 bytes), so the last digits may differ; `%` integers are 32 bits |
 
 **Differences from the originals:** both dialects follow their models'
-syntax and keywords but are not exact copies. On a C64 only the first two
+syntax and keywords but are not exact copies. What a BBC BASIC manual says
+applies, though old programs are not promised to run unchanged. On a C64 only the first two
 characters of a variable name count (`SCORE` and `SC` are the same
 variable); in KoraCLI the whole name counts.
 
