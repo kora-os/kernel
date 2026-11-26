@@ -315,6 +315,7 @@ categories:
         name: Classic BASIC
         status: in_progress
         description: A line-numbered BASIC in the tradition of the Commodore 64, MSX and GW-BASIC.
+        prs: [127]
       - id: bbc-basic
         name: BBC BASIC
         status: planned
