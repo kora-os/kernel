@@ -279,7 +279,7 @@ categories:
         name: KoraCLI shell
         status: completed
         description: The fullscreen shell on its own screen, with a top bar, a mode indicator and function-key labels; it replaces the shell.
-        prs: [124, 126]
+        prs: [124, 126, 129]
         completed: 2026-11-25
       - id: python
         name: MicroPython
