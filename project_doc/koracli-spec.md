@@ -242,9 +242,9 @@ Optional REPL-only sugar so that `f 1 2` calls `f(1, 2)`. Only at the prompt, ne
 ### 6.1 Architecture (decided)
 - The BASIC interpreter is **written in Python** and runs on MicroPython.
 - It is a **Python module loaded at startup**, so it can be read, extended and replaced by users.
-- Phase 1: a straightforward **interpreter** (tokenise lines, execute).
-- Phase 2: **transpile** the program to Python the first time it is run and cache the result (similar to `.py` → `.pyc`), to improve speed. Invalidated whenever the program changes.
-- Reference implementation worth studying: [PyBasic](https://github.com/richpl/PyBasic), which does not depend on `ast`. Check its license before reusing code.
+- First, an **interpreter**: a line is stored as typed and parsed the first time it runs, into Python closures kept until the line changes. *(Decided 2026-11-26.)*
+- Later: **transpile** the program to Python the first time it is run and cache the result (similar to `.py` → `.pyc`), to improve speed. Invalidated whenever the program changes.
+- [PyBasic](https://github.com/richpl/PyBasic) (GPL-3.0-or-later) was studied and is not used: its own simplified dialect would be mostly rewritten to fit §6.2 and §7. KoraCLI's interpreter is its own. *(Decided 2026-11-26.)*
 
 ### 6.2 Dialects (decided)
 Two dialects, one active at a time, selectable from configuration:
@@ -258,6 +258,8 @@ The dialects follow the syntax and core instruction set of their models, but are
 
 - In Classic BASIC the **whole variable name is significant**, as in GW-BASIC. (The C64 reads only the first two characters, so there `SCORE` and `SC` are the same variable.)
 - Classic BASIC's prompt is a **status line** printed after each command (`READY.`), and input lines have no prefix. BBC BASIC's `>` and Python's `>>>` prefix the input line.
+- **Classic BASIC is the C64's, with GW-BASIC's additions** *(decided 2026-11-26)*: BASIC V2's statements, look and messages, plus `ELSE`, `WHILE`/`WEND`, `'` remarks, `INKEY$`, `&H`, `STRING$`, `SWAP` and the like. Whole numbers are 32 bits.
+- **Keywords need no spaces where only a keyword can stand** *(decided 2026-11-26)*: at a statement's start unless the word is assigned to (`FORI=1TO10`), and after a value (`1TO10`). Elsewhere a word is a name, so names may contain or start with keywords (`TOTAL`). A C64 finds keywords anywhere, which would break whole names (`SCORE` holds `OR`).
 
 The name "Microsoft BASIC" is not used.
 

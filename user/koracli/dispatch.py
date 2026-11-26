@@ -1,18 +1,18 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # KoraCLI's input dispatch (project_doc/koracli-spec.md §4): where a block
-# typed at the prompt goes. In Python mode the first character of the line
-# typed at ">>>" decides: a digit, a BASIC program line; "!", an OS command;
-# "%", the other language for this line; anything else, Python. In OS mode
-# every line is an OS command. Lines inside a block are Python.
+# typed at the prompt goes. In Python and BASIC modes the first character of
+# the line typed at the prompt decides: a digit, a BASIC program line; "!",
+# an OS command; "%", the other language for this line; anything else, the
+# mode's language. In OS mode every line is an OS command. Lines inside a
+# Python block are Python.
 #
-# A program line is stored (nothing lists or runs it yet), and BASIC says when
-# it comes. `!` lines are Python's: bang.py turns them into calls.
+# `!` lines are Python's in both modes: bang.py turns them into calls.
 
 PYTHON = "python"
+BASIC = "basic"
 PROGRAM_LINE = "program line"
 OS_COMMAND = "os"
-OTHER_LANGUAGE = "other"
 
 
 def routed(line):
@@ -22,7 +22,7 @@ def routed(line):
 
 
 def classify(text, mode):
-    """(kind, rest) for a block typed in `mode` ("PY" or "OS")."""
+    """(kind, rest) for a block typed in `mode` ("PY", "BAS" or "OS")."""
     if mode == "OS":
         return OS_COMMAND, text
     first = text[:1]
@@ -31,29 +31,8 @@ def classify(text, mode):
     if first == "!":
         return OS_COMMAND, text[1:]
     if first == "%":
-        return OTHER_LANGUAGE, text[1:]
-    return PYTHON, text
-
-
-class Program:
-    """The BASIC program's lines, by number: stored as typed, unchecked."""
-
-    def __init__(self):
-        self.lines = {}
-
-    def enter(self, text):
-        """A program line: "10 PRINT X" stores line 10, "10" alone deletes
-        it. The number and the line, or None for a line that is not one."""
-        i = 0
-        while i < len(text) and text[i].isdigit():
-            i += 1
-        number = int(text[:i])
-        rest = text[i:].strip()
-        if rest:
-            self.lines[number] = rest
-        elif number in self.lines:
-            del self.lines[number]
-        return number, rest
+        return (BASIC if mode == "PY" else PYTHON), text[1:]
+    return (PYTHON if mode == "PY" else BASIC), text
 
 
 def compile_block(text):

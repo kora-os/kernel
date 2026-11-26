@@ -1,0 +1,166 @@
+== loops, zones, TAB and SPC
+ 1  2  3 
+ 10        7         4         1        
+ 11  12  21  22 
+A    B   C
+X 1 Y
+ 1 -1 END
+-4  .5  64  1 -1  3  1  7 -1 -1  0 
+== names: keywords inside them, and case
+ 55 ok 7  3  3 
+mixed
+== GOSUB, ON, IF and ELSE
+ONE
+TWO
+THREE
+K IS 4 
+FOUR
+NINETY
+== arrays
+ 6  2 
+ 5  0 
+ONE 0 
+?BAD SUBSCRIPT ERROR IN 40
+== DATA, READ and RESTORE
+HELLO, WORLD 42 plain words
+HELLO, WORLD
+ 7 
+ 0 -1 
+?OUT OF DATA ERROR IN 70
+== READ a word into a number
+?SYNTAX ERROR IN 20
+== functions
+ 144  27  5 
+ABCDEFF
+ 3  65 B 12 -5 5
+ 3  4 ***AA
+FFFFFFFFFF 255   | 3 -1 -3  2 
+ 4  1  0  0  1  0 
+-1 -1 
+== WHILE and WEND
+ 1 
+ 1  2 
+ 1  2  3 
+DONE
+== integers and SWAP
+ 1 -1  4  3 
+?ILLEGAL QUANTITY ERROR IN 20
+== a sieve of Eratosthenes
+ 2  3  5  7  11  13  17  19  23  29  31  37  41  43  47 
+== a bubble sort
+ 1  3  5  7  9 
+== a syntax error
+LINE 5
+?SYNTAX ERROR IN 10
+== a type mismatch
+LINE 5
+?TYPE MISMATCH ERROR IN 10
+== an undefined line
+LINE 5
+?UNDEF'D STATEMENT ERROR IN 10
+== NEXT without FOR
+LINE 5
+?NEXT WITHOUT FOR ERROR IN 10
+== RETURN without GOSUB
+LINE 5
+?RETURN WITHOUT GOSUB ERROR IN 10
+== division by zero
+LINE 5
+?DIVISION BY ZERO ERROR IN 10
+== an illegal quantity
+LINE 5
+?ILLEGAL QUANTITY ERROR IN 10
+== a function not defined
+LINE 5
+?UNDEF'D FUNCTION ERROR IN 10
+== WEND without WHILE
+LINE 5
+?WEND WITHOUT WHILE ERROR IN 10
+== WHILE without WEND
+LINE 5
+?WHILE WITHOUT WEND ERROR IN 10
+== an array dimensioned twice
+LINE 5
+?REDIM'D ARRAY ERROR IN 10
+== an overflow
+LINE 5
+?OVERFLOW ERROR IN 10
+== direct
+> PRINT 2+2: PRINT "A" + "B"
+ 4 
+AB
+> PRINT "A" + 1
+?TYPE MISMATCH ERROR
+> GOTO 99
+?UNDEF'D STATEMENT ERROR
+> CONT
+?CAN'T CONTINUE ERROR
+> FOR I = 1 TO 3: PRINT I;: NEXT: PRINT
+ 1  2  3 
+> RUN
+TEN
+TWENTY
+BREAK IN 20
+> PRINT "STOPPED, THEN": CONT
+STOPPED, THEN
+THIRTY
+> CONT
+?CAN'T CONTINUE ERROR
+> RUN 30
+THIRTY
+> GOTO 20
+TWENTY
+BREAK IN 20
+> LIST
+10 PRINT "TEN"
+20 PRINT "TWENTY": STOP
+30 PRINT "THIRTY"
+> LIST 20
+20 PRINT "TWENTY": STOP
+> LIST -20
+10 PRINT "TEN"
+20 PRINT "TWENTY": STOP
+> LIST 20-
+20 PRINT "TWENTY": STOP
+30 PRINT "THIRTY"
+> LIST
+10 PRINT "TEN"
+30 PRINT "THIRTY"
+> INPUT A
+?ILLEGAL DIRECT ERROR
+> PRINT 10 GOTO
+?SYNTAX ERROR
+== ESC and CONT
+BREAK IN 10
+> PRINT N
+ 3 
+> CONT
+KEY Q 4 
+BREAK IN 10
+> CONT
+?CAN'T CONTINUE ERROR
+== INPUT
+NAME? ADA
+AGE, CITY36
+?? LONDON
+ADA 36 LONDON
+? 1, 2, 3
+?EXTRA IGNORED
+ 3 
+? X
+?REDO FROM START
+? 4
+ 4 
+NAME? ADA
+AGE, CITYabc, PARIS
+?REDO FROM START
+AGE, CITY36, PARIS
+ADA 36 PARIS
+? 1
+?? 2
+ 3 
+? 
+ 0 
+== GET
+x 7  120 
+koracli basic: all passed
