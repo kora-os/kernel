@@ -1,0 +1,235 @@
+# SPDX-License-Identifier: GPL-3.0-or-later
+#
+# KoraCLI's BBC BASIC (user/koracli/bbc.py, step 3b) on the unix port: the
+# program store (abbreviations written in full, keywords in capitals only),
+# numbers as a BBC prints them (@%, integers and reals), type-in listings
+# whose output (koracli_bbc.py.exp) is what BBC BASIC V would print, BBC's
+# error messages and ERR, Escape and STOP, INPUT, GET and INKEY, and the
+# variables shared with Python, case-sensitive.
+
+import basic
+import bbc
+
+failures = 0
+
+
+def check(ok, what):
+    global failures
+    if not ok:
+        failures += 1
+        print("FAIL", what)
+
+
+class Host:
+    """What KoraCLI gives the interpreter: the output, typed lines, keys."""
+
+    def __init__(self):
+        self.lines = []
+        self.keys = []
+
+    def write(self, s):
+        print(s, end="")
+
+    def readline(self):
+        line = self.lines.pop(0) if self.lines else ""
+        print(line)  # as the line editor echoes it
+        return line
+
+    def getkey(self):
+        k = self.keys.pop(0) if self.keys else ""
+        if k is KeyboardInterrupt:
+            raise KeyboardInterrupt  # ESC, while the program waits for a key
+        return k
+
+
+host = Host()
+ns = {}
+b = bbc.Interpreter(host.write, host.readline, host.getkey, 40, ns)
+
+
+def program(*lines):
+    b.execute("NEW")
+    for line in lines:
+        b.enter(line)
+
+
+def run(title, *lines):
+    print("== " + title)
+    program(*lines)
+    b.execute("RUN")
+
+
+def direct(text):
+    print(">" + text)
+    b.execute(text)
+
+
+# The program store: abbreviations in full, the rest as typed.
+p = basic.Program(bbc.normalize)
+p.enter('10 P."HELLO";:G.20')
+check(p.lines[10] == 'PRINT"HELLO";:GOTO20', "P. and G.: %r" % p.lines[10])
+p.enter('20 GOS.100:PRI."P. stays in a string":REM P. here too')
+check(p.lines[20] == 'GOSUB100:PRINT"P. stays in a string":REM P. here too',
+      "GOS., PRI., strings and REM: %r" % p.lines[20])
+p.enter("30 F.I=1TO3:N.:x=1.5")
+check(p.lines[30] == "FORI=1TO3:NEXT:x=1.5", "F., N., a number's point: %r" % p.lines[30])
+p.enter("40 print = 1")
+check(p.lines[40] == "print = 1", "small letters are names: %r" % p.lines[40])
+
+# Numbers as PRINT shows them, in @%'s default (&90A) and others.
+for x, s in ((0, "0"), (3, "3"), (-7, "-7"), (2147483647, "2147483647"), (0.5, "0.5"),
+             (1 / 3, "0.333333333"), (0.1, "0.1"), (0.05, "5E-2"), (1e9, "1E9"),
+             (123456789.0, "123456789"), (1234567890.0, "1.23456789E9"),
+             (2.0, "2"), (-1.5e-10, "-1.5E-10"), (1e10, "1E10")):
+    check(bbc.num_format(x) == s, "%r prints as %r, not %r" % (x, s, bbc.num_format(x)))
+check(bbc.num_format(3.14159, 0x20209) == "3.14", "F format")
+check(bbc.num_format(1234.5, 0x10409) == "1.235E3", "E format: %r" % bbc.num_format(1234.5, 0x10409))
+check(bbc.num_str(1 / 3, 0x20209) == "0.333333333" and bbc.num_str(2.5, 0x1020209) == "2.50",
+      "STR$: nine digits unless bit 24 of @% is set")
+
+# Type-in listings.
+run("PRINT: fields, ; and ' and ~",
+    "10 PRINT 1",
+    "20 PRINT 1,2",
+    '30 PRINT "A",1',
+    '40 PRINT "X";1;"Y"',
+    "50 PRINT ;12;34",
+    "60 PRINT ~255, ~-1",
+    "70 PRINT \"one\"'\"two\"",
+    '80 PRINT "KEPT";',
+    '90 PRINT " LINE"',
+    '100 PRINT TAB(5);"T";SPC(3);"S"',
+    "110 @%=&20208: PRINT PI: @%=&90A")
+
+run("arithmetic: integers and reals",
+    "10 PRINT 7 DIV 2, 7 MOD 2, -7 DIV 2, -7 MOD 2",
+    "20 PRINT 7/2, 2^10, 10/5",
+    "30 PRINT 2147483647+1",
+    "40 PRINT 100000*100000",
+    "50 PRINT &FF, %1010, &FFFFFFFF",
+    "60 PRINT 1<<4, -16>>2, -16>>>28",
+    "70 PRINT 6 AND 3, 6 OR 3, 6 EOR 3, NOT 0",
+    "80 PRINT 1=1, 1=2, \"a\"<\"b\"",
+    "90 PRINT -2^2, NOT 1=1",
+    "100 A%=7.9: B%=-7.9: PRINT A%, B%",
+    "110 X=3: X+=4: X-=1: PRINT X",
+    '120 S$="ab": S$+="cd": PRINT S$')
+
+run("functions",
+    "10 PRINT SQR 16, ABS -3, SGN -2, INT -2.5, INT 2.5",
+    "20 PRINT LEN \"hello\", ASC \"A\", ASC \"\", CHR$65",
+    '30 PRINT LEFT$("hello",2), RIGHT$("hello",3), MID$("hello",2,3), MID$("hello",3)',
+    '40 PRINT LEFT$("hello"), RIGHT$("hello"), STRING$(3,"ab")',
+    '50 PRINT INSTR("hello","l"), INSTR("hello","l",4), INSTR("hello","z")',
+    '60 PRINT VAL "12.5abc", VAL "x", STR$ 42, STR$~255, STR$(1/3)',
+    "70 PRINT LN 1, LOG 100, EXP 0, DEG PI, RAD 180",
+    "80 PRINT SIN 0, COS 0, ATN 1*4",
+    '90 PRINT EVAL("6*7"), TRUE, FALSE')
+
+run("control: GOTO, GOSUB, ON, FOR, IF THEN ELSE",
+    "10 FOR I%=1 TO 3: PRINT I%;: NEXT: PRINT",
+    "20 FOR X=10 TO 1 STEP -4: PRINT X;: NEXT X: PRINT",
+    '30 FOR A=1 TO 2: FOR B=1 TO 2: PRINT A;B;" ";: NEXT B,A: PRINT',
+    "40 GOSUB 200",
+    "50 N=2: ON N GOTO 60, 70",
+    '60 PRINT "not here"',
+    '70 ON 5 GOSUB 200 ELSE PRINT "ON ELSE"',
+    '80 IF 1 THEN PRINT "then" ELSE PRINT "else"',
+    '90 IF 0 THEN PRINT "then" ELSE PRINT "else"',
+    '100 IF 2>1 PRINT "no THEN": IF 0 PRINT "skipped"',
+    "110 IF 1 THEN 130",
+    '120 PRINT "not here"',
+    '130 GOTO 100+40',
+    '140 PRINT "computed GOTO": END',
+    '200 PRINT "in a subroutine": RETURN')
+
+run("DATA, READ and RESTORE",
+    '10 READ A, B$, C',
+    '20 PRINT A; B$; C',
+    '30 RESTORE 90: READ D$: PRINT D$',
+    '80 DATA 1, "two, with a comma", 3',
+    "90 DATA last item: colons are data")
+
+run("arrays and SWAP",
+    "10 DIM A(3), M$(1,1)",
+    '20 A(2)=5: M$(1,0)="m": PRINT A(2); A(0); M$(1,0)',
+    "30 X=1: Y=2: SWAP X,Y: PRINT X;Y")
+
+# Variables: a variable never written is a mistake, A% to Z% always exist
+# (and stay through RUN and CLEAR), names are case-sensitive.
+print("== variables")
+direct("PRINT A%")
+direct("PRINT nope")
+direct("Z%=9: CLEAR: PRINT Z%")
+direct("count=1: Count=2: PRINT count; Count")
+direct("DIM q(2): PRINT q(2)")
+direct("PRINT r(1)")
+
+# Errors, in BBC's words, with ERR.
+print("== errors")
+program("10 X=1", "20 PRINT Y")
+direct("RUN")
+check(b.err == 26 and b.erl == 20, "No such variable is 26, at 20: %d %d" % (b.err, b.erl))
+direct("FRED")
+check(b.err == 4, "Mistake is 4: %d" % b.err)
+direct('PRINT "A"+1')
+direct("PRINT 1/0")
+direct("PRINT SQR -1")
+direct("PRINT LN 0")
+direct("GOTO 999")
+direct("RETURN")
+direct("NEXT")
+direct("FOR I=1 3")
+direct("PRINT (1")
+direct('PRINT "open')
+direct("A%=3E10")
+direct("DIM A(2): DIM A(3)")
+direct("PRINT A(5)")
+direct("ON 3 GOTO 10")
+direct("READ X: READ X: READ X")
+direct("CONT")
+
+# STOP and Escape, with CONT going on.
+print("== STOP and Escape")
+program('10 PRINT "before"', "20 STOP", '30 PRINT "after"', "40 K=GET", '50 PRINT "got"; K')
+direct("RUN")
+check(b.err == 0 and b.erl == 20, "STOP at 20")
+host.keys = [KeyboardInterrupt]
+direct("CONT")
+check(b.err == 17, "Escape is 17: %d" % b.err)
+host.keys = ["A"]
+direct("CONT")
+
+# INPUT and the keys.
+print("== INPUT and keys")
+program('10 INPUT "Name", N$', '20 INPUT "Age" A, B', "30 INPUT LINE L$",
+        '40 PRINT N$; " "; A; " "; B; " ["; L$; "]"')
+host.lines = ["  Ada", "36, 7", "  keep  spaces, and commas"]
+direct("RUN")
+program("10 INPUT X, Y", '20 PRINT X + Y')
+host.lines = ["1", "2"]
+direct("RUN")
+host.keys = ["", "z", "q"]
+direct("PRINT INKEY(0); INKEY$(0); GET$")
+
+# Python's variables, case-sensitive.
+print("== Python's variables")
+ns["Msg"] = "hello"
+ns["n"] = 3
+ns["msg"] = 1.5
+direct("PRINT Msg$; n%; msg")
+direct("total = n% * 2: name$ = Msg$ + \"!\"")
+check(ns["total"] == 6.0 and type(ns["total"]) is float, "a real is Python's float")
+check(ns["name"] == "hello!", "a string, under its own name")
+direct("i% = 7")
+check(ns["i"] == 7 and type(ns["i"]) is int, "a % variable is Python's int")
+direct("PRINT MSG$")
+
+# LIST: line numbers in five columns; LIST 20,30 a range.
+print("== LIST")
+program("10 REM one", "20 PRINT 2", "30 PRINT 3", "1000 END")
+direct("LIST")
+direct("LIST 20,30")
+direct("LIST ,20")
+
+print("koracli bbc: %s" % ("all passed" if failures == 0 else "%d FAILED" % failures))

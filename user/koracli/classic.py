@@ -1572,7 +1572,7 @@ class Interpreter(basic.Runtime):
         self.out.newline_if_needed()
         self.out.write("?%s ERROR%s\n" % (e.name, " IN %d" % line if line is not None else ""))
 
-    def report_break(self, line):
+    def report_break(self, line, how):
         self.out.write("BREAK IN %d\n" % line if line is not None else "BREAK\n")
 
     def announce(self, what, name):

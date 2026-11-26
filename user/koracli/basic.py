@@ -238,8 +238,12 @@ class Runtime:
     error and a break, in its words), `line_refs(text)` and
     `renumber_line(text, new)` (for RENUM), `warn_ref(target, line)`, and
     `num_text(x)` (a number as an OS command's argument); and DIALECT, its
-    name in a file's header. `announce(what, name)` says what SAVE and LOAD
-    do ("save", "search", "load"), if the dialect says it.
+    name in a file's header. `report_break` is told how the program
+    stopped: "STOP" or "BREAK" (ESC). `announce(what, name)` says what SAVE
+    and LOAD do ("save", "search", "load"), `unset(key)` is the value of a
+    variable never written (Classic's 0 or "", BBC's error), and
+    `undimmed(key, spelling, n)` the array used before a DIM: the dialect's
+    choice.
 
     A statement's closure returns None to go on, or True when it moved the
     program (a jump or an end), having set the place: `li`, the line's
@@ -283,6 +287,12 @@ class Runtime:
 
     def announce(self, what, name):
         pass
+
+    def unset(self, key):
+        return default(key)
+
+    def undimmed(self, key, spelling, n):
+        return self.dim(key, [10] * n, spelling)
 
     # The program.
 
@@ -427,7 +437,7 @@ class Runtime:
             si = self.si + 1 if how == "STOP" else self.si
             self.cont = (self.li, si, self.program.version)
         self.out.newline_if_needed()
-        self.report_break(line)  # None: a line typed without a number
+        self.report_break(line, how)  # line None: a line typed without a number
 
     def line(self):
         return self.order[self.li] if self.li >= 0 else None
@@ -586,20 +596,20 @@ class Runtime:
         ns = self.ns
         exports = self.exports
         names = self.names
-        default_ = default(key)
+        unset = self.unset
 
         def get():
             py = names.get(base)
             if py is None:
                 py = self.resolve(base, spelling)
-                if py is None:
-                    return variables.get(key, default_)
-            v = ns.get(py, MISSING)
-            if v is MISSING or v is exports.get(py, MISSING):
-                return variables.get(key, default_)
-            v = from_python(suffix, v)  # Python's, newer
-            variables[key] = v
-            return v
+            if py is not None:
+                v = ns.get(py, MISSING)
+                if v is not MISSING and v is not exports.get(py, MISSING):
+                    v = from_python(suffix, v)  # Python's, newer
+                    variables[key] = v
+                    return v
+            v = variables.get(key, MISSING)
+            return v if v is not MISSING else unset(key)
 
         def set_(v):
             if conv is not None:
@@ -657,7 +667,7 @@ class Runtime:
                 raise BasicError(TYPE)
         a = self.arrays.get(key)
         if a is None:
-            a = self.dim(key, [10] * n, spelling)
+            a = self.undimmed(key, spelling, n)
         return a
 
     def dim(self, key, dims, spelling=None):
@@ -682,7 +692,8 @@ class Runtime:
                 v = from_python(key[len(base):], v)
                 self.vars[key] = v
                 return v
-        return self.vars.get(key, default(key))
+        v = self.vars.get(key, MISSING)
+        return v if v is not MISSING else self.unset(key)
 
     def scalar_set(self, key, v):
         self.vars[key] = v

@@ -1759,6 +1759,26 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
             q.expect(rb"^READY\.\r?$")
         q.send("NEW\r")
         q.expect(rb"^READY\.\r?$")
+        # Step 3b: F4 in BASIC mode switches to BBC BASIC while no program
+        # is in memory. Its PRINT right-aligns numbers in fields of ten,
+        # abbreviations are stored in full, and with a program in memory F4
+        # stays; after NEW it goes back to Classic BASIC.
+        q.key("f4")
+        q.expect(rb"^BBC BASIC\r?$")
+        q.send('PRINT 6*7;"!"\r')
+        q.expect(rb"^        42!\r?$")
+        q.send("10 F.I%=1 TO 3: P. I%;: N.: P.\r")
+        q.send("LIST\r")
+        q.expect(rb"^   10 FORI%=1 TO 3: PRINT I%;: NEXT: PRINT\r?$")
+        q.send("RUN\r")
+        q.expect(rb"^         1         2         3\r?$")
+        q.key("f4")
+        q.expect(rb"^koracli: a program is in memory")
+        q.send("NEW\r")
+        time.sleep(0.3)
+        q.key("f4")
+        q.expect(rb"^Classic BASIC\r?$")
+        q.expect(rb"^READY\.\r?$")
         # OS mode runs every line as a command, with no {expr}; F2 goes
         # back to BASIC (READY.), F3 to Python.
         q.key("f2")

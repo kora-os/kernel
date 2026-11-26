@@ -11,7 +11,7 @@ after
 == errors and breaks
 > RUN
 a
-toy: break at 10
+toy: stop at 10
 > CONT
 b
 toy: break at 20

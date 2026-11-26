@@ -82,7 +82,7 @@ Guiding principles:
 | F1 | Help (later: context help on keyword under cursor) | same | same |
 | F2 | OS mode | OS mode | Back to the language mode it came from |
 | F3 | Python mode (nothing if already there) | same | same |
-| F4 | BASIC mode (nothing if already there) | same | same |
+| F4 | BASIC mode | The other dialect, while no program is in memory (§6.3) | BASIC mode |
 | F5 | RUN (the BASIC program) | RUN | |
 | F6 | SAVE | SAVE | |
 | F7 | LOAD | LOAD | |

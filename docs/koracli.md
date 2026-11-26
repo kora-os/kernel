@@ -54,10 +54,10 @@ its own screen ends, you are back in KoraCLI.
 ## Modes
 
 *Works: Python and OS modes (phase 1), BASIC mode in the Classic dialect
-(step 2a); the BBC dialect comes in phase 3.*
+(phase 2) and in the BBC dialect (from step 3b).*
 
-F3 switches to Python mode and F4 to BASIC mode; each does nothing in its
-own mode. F2 goes to OS mode, and from there back to the language mode you
+F3 switches to Python mode and F4 to BASIC mode. F3 does nothing in Python
+mode; F4 in BASIC mode switches dialect (see [BASIC](#basic)). F2 goes to OS mode, and from there back to the language mode you
 came from: you choose a language and keep it, and visit OS mode.
 
 | Mode | Indicator | Prompt | An unprefixed line is |
@@ -277,24 +277,28 @@ for scripting: use Python mode for that.
 
 ## BASIC
 
-*Works: Classic BASIC (steps 2a to 2c). BBC BASIC comes in phase 3.*
+*Works: Classic BASIC (steps 2a to 2c); BBC BASIC a line at a time (step
+3b), the rest of it coming in steps 3c to 3e.*
 
-BASIC mode uses one of two dialects at a time. *Planned (phase 3):* F4
-pressed in BASIC mode switches dialect while no program is in memory; with
-one, it stays and says to `NEW` or `SAVE` first. `LOAD` of a file saved in
-the other dialect asks `Switch to BBC BASIC? (y/N)` (or Classic), and on yes
-switches and loads it.
+BASIC mode uses one of two dialects at a time, Classic BASIC when KoraCLI
+starts. F4 pressed in BASIC mode switches dialect while no program is in
+memory, saying `BBC BASIC` or `Classic BASIC`; with a program in memory, it
+stays and says to `NEW` or `SAVE` first. *Planned (step 3e):* `LOAD` of a
+file saved in the other dialect asks `Switch to BBC BASIC? (y/N)` (or
+Classic), and on yes switches and loads it.
 
 | | Classic BASIC | BBC BASIC |
 |---|---|---|
 | Modelled on | Commodore 64, with GW-BASIC's and MSX's additions | BBC BASIC V (Acorn Archimedes) |
 | Prompt | `READY.`, after each command | `>`, before the input line |
 | Keywords | Any case | Capitals only, so a word in small letters is always a name; abbreviations such as `P.` (PRINT) are stored in full |
-| Variable names | Not case-sensitive | Case-sensitive |
+| Case of names | Not case-sensitive | Case-sensitive |
 | Variable names | The whole name counts | The whole name counts |
+| A variable not yet set | 0 or `""` | `No such variable`, except `A%` to `Z%` (always there, kept by `RUN` and `CLEAR`) |
 | Hex numbers | `&HFF` | `&FF` |
 | Calling Python | `SYS "name", args` | `SYS "name", args`, or `PROCname` / `FNname` when the program does not define them |
 | Errors | `?SYNTAX ERROR IN 10` | `Mistake at line 10`, with BBC BASIC V's `ERR` numbers |
+| Numbers printed | A sign or a space before, a space after | Right-aligned in fields of ten, until a `;` |
 | OS commands | `!` | `!`, or `*` as a star command (`*CAT`, `*DIR`), and `OSCLI` for one built as a string |
 | Numbers | 9 digits | Reals are doubles (a BBC's have 5 bytes), so the last digits may differ; `%` integers are 32 bits |
 
@@ -381,6 +385,68 @@ when the line runs: `?SYNTAX ERROR IN 10`.
 - `SYS "name"` calls Python; `SYS` with an address, `PEEK`, `POKE` and
   `WAIT` come in phase 4. Not there: the C64's screen codes in strings
   (colours, cursor moves), and `ST`.
+
+### BBC BASIC
+
+*Works (step 3b): a line at a time. Multi-line `IF`, `CASE`, `REPEAT` and
+`WHILE` come in step 3c, `PROC`, `FN` and `ON ERROR` in 3d, star commands,
+`SAVE`, `LOAD` and `RENUMBER` in 3e.*
+
+BBC-inspired, modelled on BBC BASIC V: what a BBC BASIC manual says
+applies, though old programs are not promised to run unchanged.
+
+Statements:
+
+| | |
+|---|---|
+| Output and input | `PRINT` with `;`, `,` (fields of `@%`'s width, 10), `'` (a new line), `~` (the next number in hex), `TAB(x)`, `TAB(x, y)` and `SPC(n)`; `INPUT ["prompt"[,]] a, b$`, `INPUT LINE a$`; `CLS` |
+| Variables | `LET` (optional), `+=` and `-=`, `DIM a(10, 5)`, `SWAP a, b`, `CLEAR`, `TIME = n` |
+| Flow | `GOTO` and `GOSUB` (to a line number or an expression), `RETURN`, `ON n GOTO` / `ON n GOSUB` with `ELSE`, `IF ... [THEN] ... ELSE ...` on one line (THEN or ELSE may be a line number), `FOR ... TO ... STEP` and `NEXT [i, j]`, `END`, `STOP` |
+| Data | `DATA` (to the line's end), `READ`, `RESTORE [line]` |
+| Others | `REM` |
+
+Commands: `RUN`, `LIST` (`LIST 20`, `LIST 20,50`, `LIST 20,`, `LIST ,50`),
+`NEW`, and `CONT`, which BBC BASIC does not have.
+
+Functions: `ABS`, `ACS`, `ASN`, `ATN`, `COS`, `DEG`, `EXP`, `INT`, `LN`,
+`LOG` (base 10), `RAD`, `SGN`, `SIN`, `SQR`, `TAN`, `PI`, `RND`, `RND(n)`;
+`ASC`, `CHR$`, `INSTR(s$, t$[, start])`, `LEFT$(s$[, n])`, `LEN`,
+`MID$(s$, start[, n])`, `RIGHT$(s$[, n])`, `STR$`, `STR$~`,
+`STRING$(n, s$)`, `VAL`, `EVAL`; `TRUE`, `FALSE`; `GET`, `GET$` (they wait
+for a key), `INKEY(t)` and `INKEY$(t)` (wait up to `t` hundredths of a
+second; -1 or `""` when none came), `POS`, `COUNT`, `TIME` (hundredths of a
+second). A function of one argument needs no brackets: `SIN X`, `LEN A$`.
+
+Operators, from the tightest: unary `-`, `+`, `NOT` and the functions;
+`^`; `*`, `/`, `DIV`, `MOD`; `+` and `-` (`+` joins strings); `=`, `<>`,
+`<`, `>`, `<=`, `>=`, `<<`, `>>`, `>>>`; `AND`; `OR`, `EOR`. So `NOT A = B`
+is `(NOT A) = B` and `-2^2` is 4, as on a BBC. A comparison is -1 when
+true and 0 when false.
+
+Numbers: `&FF` is hex and `%1010` binary. Whole numbers that fit in 32 bits
+are integers (`%` variables, `7 DIV 2`, `1 + 2`); `+` and `-` on integers
+wrap at 32 bits, `*` gives a real when the result does not fit, and `/` and
+`^` always give reals. Reals print in `@%`'s format, nine digits by
+default, with an exponent from 1E9 and below 0.1 (`1.23456789E9`, `5E-2`).
+
+Keywords are capitals only: `print` is a variable. Where only a keyword can
+stand they need no spaces (`FORI=1TO10:PRINTI`), as in Classic BASIC.
+Abbreviations are written in full when the line is stored: `P."HI":G.10`
+lists as `PRINT"HI":GOTO10`. Errors are BBC BASIC V's (`No such variable at
+line 20`), with its numbers; ESC stops a program with `Escape at line 20`,
+`STOP` with `STOP at line 20`, and `CONT` goes on.
+
+**Differences from BBC BASIC V:**
+- Reals are 64-bit doubles, not 5-byte floats, so the last digits may
+  differ; strings have no length limit; `CHR$` takes any Unicode character.
+- Keywords inside names are left alone where a name can stand (a BBC reads
+  `PRINTER` as `PRINT ER` everywhere).
+- `GET` gives a BBC's codes for Return (13), Delete (127) and the cursor
+  keys (136 left, 137 right, 138 down, 139 up). `INKEY` with a negative
+  number (a key scan) gives -1. `EVAL` takes numeric expressions only.
+- `CONT` is KoraCLI's. Not there yet: what steps 3c to 3e bring (above),
+  the indirection operators and `SYS` (phase 4), and `MODE`, `PLOT`, `VDU`
+  and the rest of the graphics and sound (phase 5).
 
 ### Files
 
@@ -525,8 +591,9 @@ beepbeepbeep
 | F2 | Python and BASIC modes | OS mode |
 | F2 | OS mode | Back to the language mode you came from |
 | F3 | All modes | Python mode |
-| F4 | All modes | BASIC mode |
-| F5, F6, F7, F8 | Python and BASIC modes | `RUN`, `SAVE`, `LOAD`, `LIST` |
+| F4 | Python and OS modes | BASIC mode |
+| F4 | BASIC mode | The other dialect, while no program is in memory |
+| F5, F6, F7, F8 | Python and BASIC modes | `RUN`, `SAVE`, `LOAD`, `LIST` (in BBC BASIC, F6 and F7 come with step 3e) |
 | ESC | While Python or BASIC runs | Interrupts it (`CONT` resumes BASIC) |
 | ESC | At the prompt | Nothing yet; may clear the line |
 | Ctrl+C | While a program runs | Stops the program in front. A program may catch it; a second Ctrl+C stops it anyway |
