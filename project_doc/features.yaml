@@ -313,9 +313,10 @@ categories:
         completed: 2026-11-25
       - id: basic
         name: Classic BASIC
-        status: in_progress
+        status: completed
         description: A line-numbered BASIC in the tradition of the Commodore 64, MSX and GW-BASIC.
-        prs: [127]
+        prs: [127, 130]
+        completed: 2026-11-26
       - id: bbc-basic
         name: BBC BASIC
         status: planned

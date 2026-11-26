@@ -36,7 +36,10 @@ HELP = """KoraCLI: Python at the prompt.
   OS; RUN runs the program, LIST lists it, NEW clears it, ESC stops it and
   CONT goes on. % runs a line of the other language: %RUN in Python mode,
   %print(x) in BASIC mode. Python and BASIC share variables: msg$ is
-  Python's msg, and SYS "name", args calls a Python function."""
+  Python's msg, and SYS "name", args calls a Python function.
+  SAVE "name" and LOAD "name" keep programs in name.BAS; RENUM renumbers,
+  AUTO types the line numbers (Enter on a number alone or Ctrl+C ends it).
+  F5 runs the program, F8 lists it; F6 and F7 type SAVE " and LOAD "."""
 
 
 def write(s):
@@ -45,16 +48,19 @@ def write(s):
 
 def bars(mode):
     kora.bar(kora.TOP, " KoraCLI")
-    kora.bar(kora.BOTTOM, " %s | F1 Help  F2 %s  F3 PY  F4 BAS" %
-             (mode, "Back" if mode == "OS" else "OS"))
+    if mode == "OS":
+        keys_ = "F1 Help  F2 Back  F3 PY  F4 BAS"
+    else:
+        keys_ = "F1 Help  F2 OS  F3 PY  F4 BAS  F5 Run  F6 Save  F7 Load  F8 List"
+    kora.bar(kora.BOTTOM, " %s | %s" % (mode, keys_))
 
 
-def prompts(ed, mode, start=True):
+def prompts(ed, mode, start=True, text=""):
     prompt, more = PROMPTS[mode]
     # Only Python has blocks: in BASIC and OS mode every line runs at Enter.
     routed = dispatch.routed if mode == "PY" else (lambda line: True)
     if start:
-        ed.start(prompt, more, routed)
+        ed.start(prompt, more, routed, text)
     else:
         ed.set_prompts(prompt, more, routed)
 
@@ -137,8 +143,16 @@ def run_basic(text, state):
         kora.esc_break(False)
 
 
+def stop_auto(state):
+    b = state.get("basic")
+    if b is not None:
+        b.auto = None
+
+
 def run(text, mode, ns, state):
     kind, rest = dispatch.classify(text, mode)
+    if kind != dispatch.PROGRAM_LINE:
+        stop_auto(state)  # AUTO numbers program lines: another line ends it
     if kind == dispatch.PROGRAM_LINE:
         basic(state).enter(rest)
     elif mode == "OS":
@@ -173,10 +187,30 @@ def read_action(ed, state):
     """One round at the prompt: the jobs that ended, a prompt, keys until
     there is something to do (the mode keys switch mode on the way)."""
     report_jobs()
-    prompts(ed, state["mode"])
+    b = state.get("basic")
+    auto = b.auto_text() if b is not None and state["mode"] != "OS" else None
+    prompts(ed, state["mode"], text=auto or "")
     while True:
         action = ed.feed(*kora.key())
         if action is None:
+            continue
+        if action[0] == "key" and action[1] in ("F5", "F6", "F7", "F8"):
+            if state["mode"] == "OS":
+                continue
+            # The program's keys type their command at the cursor (with % in
+            # Python mode), as GW-BASIC's do; F5 and F8 press Enter too.
+            text = "%" if state["mode"] == "PY" and ed.at_start() else ""
+            if action[1] == "F5":
+                ed.type_text(text + "RUN")
+                return ed.submit()
+            if action[1] == "F8":
+                ed.type_text(text + "LIST")
+                return ed.submit()
+            if action[1] == "F6":
+                name = b.file if b is not None else None
+                ed.type_text(text + ('SAVE "%s"' % name if name else 'SAVE "'))
+            else:
+                ed.type_text(text + 'LOAD "')
             continue
         if action[0] == "key" and action[1] != "F1":
             mode, state["language"] = dispatch.switch(state["mode"], state["language"],
@@ -233,6 +267,7 @@ def main():
                 action = read_action(ed, state)
             except KeyboardInterrupt:
                 drop_line(ed)
+                stop_auto(state)
                 continue
             if action[0] == "eof":
                 print("bye")
