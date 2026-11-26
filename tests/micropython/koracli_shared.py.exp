@@ -1,0 +1,64 @@
+> RUN
+hello world
+> A = 5: B$ = "X": C% = 7.9: Word$ = "a": WORD$ = "b"
+> TOTAL = 9: total = total + 1
+> PRINT COUNT; abc; ABC
+ 3  1  1 
+> PRINT ABC
+ 2 
+> PRINT Abc
+?AMBIGUOUS NAME ERROR
+> A = 5: A$ = "X": A% = 2: PRINT A; A$; A%
+ 5 X 2 
+> PRINT A; A%
+ 3  3 
+> PRINT A$
+now a string
+> PRINT A
+?TYPE MISMATCH ERROR
+> A = 1: PRINT A; A$
+ 1 now a string
+> PRINT N / 4; K%; FLAG: IF FLAG THEN PRINT "TRUE IS"; FLAG
+ .5 -1 -1 
+TRUE IS-1 
+> PRINT D
+?TYPE MISMATCH ERROR
+> PRINT BIG; BIG%
+ 3E+09 
+?ILLEGAL QUANTITY ERROR
+> DIM V(3): V(2) = 7
+> PRINT V(1); V(2)
+ 4  7 
+> PRINT L(2): L(0) = 9
+ 3 
+> PRINT L(3)
+?BAD SUBSCRIPT ERROR
+> DIM M(1, 2): M(1, 2) = 5
+> PRINT NAMES$(1); LEN(NAMES$(0))
+bob 3 
+> PRINT NAMES(0)
+?TYPE MISMATCH ERROR
+> PRINT GRID(1, 0); GRID(0)
+ 3 
+?BAD SUBSCRIPT ERROR
+> PRINT MSG(1)
+?TYPE MISMATCH ERROR
+> FOR I = 1 TO 3: NEXT
+> DEF FNTWICE(X) = X * 2: PRINT FNTWICE(3); X; FNTWICE(X)
+ 6  100  200 
+> RUN
+> CLR
+> PRINT OWN
+ 0 
+> SYS "greet", 1, "two", 2 + 1.5
+> SYS "echo", 5, "x"
+> SYS "nothing"
+?UNDEF'D FUNCTION ERROR
+> RUN
+ValueError: no luck
+?PYTHON ERROR IN 10
+> SYS "setter": PRINT MADE
+ 42 
+> SYS 49152
+?SYNTAX ERROR
+koracli shared: all passed

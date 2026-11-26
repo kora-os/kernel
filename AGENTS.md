@@ -70,7 +70,8 @@ Use this file when you drop into the workspace so you can ramp quickly and keep 
   the unix port (`tests/micropython/koracli_editor.py`). Classic BASIC is
   `user/koracli/classic.py` over `basic.py` (what the dialects share),
   loaded when BASIC is first used and tested with type-in listings on the
-  unix port (`tests/micropython/koracli_basic.py`). Every KoraCLI PR
+  unix port (`tests/micropython/koracli_basic.py`). Its variables are
+  KoraCLI's Python namespace (spec §7, `koracli_shared.py`). Every KoraCLI PR
   updates `docs/koracli.md` and the `koracli` category of `features.yaml`.
 - Message ports (`src/ipc/port.c`, syscalls 48 to 54) carry pointers to the
   sender's memory; the kernel never touches a message and keeps an ended

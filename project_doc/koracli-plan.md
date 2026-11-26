@@ -273,7 +273,7 @@ Phase 2, Classic BASIC. Decided 2026-11-26:
 - **BASIC loads when first used** (a program line, `%`, BASIC mode), so
   KoraCLI starts no slower.
 
-- [ ] **2a. Classic BASIC runs.** `sys:koracli/classic.py` over `basic.py`
+- [x] **2a. Classic BASIC runs.** (#127) `sys:koracli/classic.py` over `basic.py`
   (what the dialects will share: the program store, errors, the output's
   column, random numbers). BASIC mode in F2's cycle (Python, BASIC, OS) with
   `READY.` after each command, `%` between the languages, `!` in both.
@@ -288,6 +288,20 @@ Phase 2, Classic BASIC. Decided 2026-11-26:
   Python types, numbers convert, collisions stay separate inside BASIC,
   Python's changes are seen at BASIC's next read; RUN and NEW clear only
   what BASIC defined. `SYS "name", args` calls Python.
+  *Built:* every BASIC write also goes into KoraCLI's namespace, and BASIC
+  remembers the object it put there; a read takes Python's value when the
+  namespace holds another object (Python wrote since). Where §7 left it
+  open: BASIC writes to the Python name it would read (with Python's
+  `Total`, `TOTAL = 9` changes `Total`), names found by reading are looked
+  for again with each command, and RUN, NEW and CLR remove only the names
+  BASIC made (Python's own keep BASIC's last value). Arrays are the lists
+  themselves, nested for more dimensions. FN's parameters shadow Python's
+  names while the body runs. SYS calls a Python function, else an OS
+  command or wrapper (`kora.run`); a Python exception there is `?PYTHON
+  ERROR`, after its type and message, and an ambiguous name `?AMBIGUOUS
+  NAME ERROR`. PRINT shows the items before an error, as a C64 does.
+  Tests: `koracli_shared.py` on the unix port, rule by rule; the smoke
+  step runs the spec's `msg$` example and reads BASIC's `N` from Python.
 - [ ] **2c. Files and line tools.** `SAVE` and `LOAD` (`.BAS`, line 0's
   dialect header), `RENUM` (line 0 stays), `AUTO`, and the function keys
   in the bar (F3 List, F5 Run, F6 Save, F7 Load).

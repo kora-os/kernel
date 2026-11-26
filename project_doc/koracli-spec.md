@@ -308,6 +308,7 @@ hello world
 Case rules:
 - Names keep their case when exported to Python, in **both** dialects. In Classic BASIC, `A` defines Python `A` (uppercase). A Classic variable is exported under the spelling it was **first written** with: `Msg$` and later `MSG$` are one variable, Python `Msg`.
 - When a Classic program reads a name it has not defined, it looks for a Python name with the exact spelling first, then for one matching without regard to case. More than one case-insensitive match is an error.
+- A Classic write goes to the Python name a read would find, so with Python's `Total`, `TOTAL = 9` changes `Total`; only a name Python does not have is made under the spelling written. Names found in Python are looked for again with each command typed. *(Decided 2026-11-26.)*
 - In BBC BASIC, names are case-sensitive, so they map one-to-one.
 - A type mismatch (e.g. `PRINT msg$` when Python `msg` is an `int`) raises the dialect's "Type mismatch" error.
 
@@ -321,7 +322,7 @@ Collisions (`A`, `A%`, `A$` and `A()` all map to Python `A`):
 - **Inside BASIC they stay separate variables**, as on the C64 and the BBC, so old listings work: `A=5: A$="X": PRINT A` prints 5.
 - **Python sees one name, `A`**, holding the value either language wrote last (here `"X"`).
 - **When Python changes `A`, BASIC takes the new value on its next read** of any of them, with the type rules above: after Python's `msg = 3`, `PRINT msg$` is "Type mismatch".
-- To notice Python's change, BASIC remembers the value it last exported under each name. It needs that list anyway: `RUN` and `NEW` remove only the variables BASIC defined (§6.4).
+- To notice Python's change, BASIC remembers the value it last exported under each name. It needs that list anyway: `RUN` and `NEW` remove only the variables BASIC defined (§6.4): the names BASIC made, unless Python has changed them since. *(Decided 2026-11-26.)*
 
 ---
 

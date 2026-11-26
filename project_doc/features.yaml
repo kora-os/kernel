@@ -322,7 +322,8 @@ categories:
         description: A second dialect modelled on BBC BASIC V, with PROC, FN, multi-line IF and star commands.
       - id: koracli-shared-variables
         name: Shared variables
-        status: planned
+        status: completed
+        completed: 2026-11-26
         description: Python and BASIC see the same variables, with BASIC's type suffixes mapped to Python types.
       - id: koracli-machine-access
         name: Machine access
