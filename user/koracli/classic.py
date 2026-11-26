@@ -18,8 +18,18 @@
 # calls, and REM and DATA at a statement's start begin a remark or data.
 #
 # The host gives the interpreter `write(text)`, `readline()` (a line typed,
-# for INPUT), `getkey()` ("" when no key is waiting, for GET and INKEY$) and
-# the screen's width.
+# for INPUT), `getkey()` ("" when no key is waiting, for GET and INKEY$), the
+# screen's width, the Python namespace BASIC shares its variables with, and
+# `command(name, args)` for SYS (an OS command or wrapper; False if there is
+# none).
+#
+# Shared variables (spec §7): every write of BASIC's also goes into the
+# Python namespace, under the name's spelling first used (A, A%, A$ and A()
+# are all Python's A), and BASIC remembers the object it put there. A read
+# finds Python's value newer when the namespace holds another object: it
+# is taken, with the type rules (numbers convert, nothing else does), until
+# BASIC writes again. Inside BASIC, A, A%, A$ and A() stay separate. Arrays
+# are Python lists, nested for more dimensions, shared as they are.
 
 import math
 
@@ -43,7 +53,7 @@ except ImportError:
 STATEMENTS = (
     "CLR", "CLS", "CONT", "DATA", "DEF", "DIM", "ELSE", "END", "FOR", "GET", "GOSUB",
     "GOTO", "IF", "INPUT", "LET", "LIST", "NEW", "NEXT", "ON", "PRINT", "RANDOMIZE",
-    "READ", "REM", "RESTORE", "RETURN", "RUN", "STOP", "SWAP", "WEND", "WHILE",
+    "READ", "REM", "RESTORE", "RETURN", "RUN", "STOP", "SWAP", "SYS", "WEND", "WHILE",
 )
 OPERATORS = ("AND", "OR", "XOR", "MOD", "NOT")
 CLAUSES = ("THEN", "TO", "STEP", "GOTO", "GOSUB", "ELSE")
@@ -64,12 +74,14 @@ KEYWORDS = set(STATEMENTS + OPERATORS + CLAUSES + tuple(FUNCTIONS) +
 BY_LENGTH = sorted(KEYWORDS, key=lambda k: -len(k))
 
 SYNTAX = "SYNTAX"
+AMBIGUOUS = "AMBIGUOUS NAME"
 TYPE = "TYPE MISMATCH"
 QUANTITY = "ILLEGAL QUANTITY"
 UNDEF_LINE = "UNDEF'D STATEMENT"
 UNDEF_FN = "UNDEF'D FUNCTION"
 
 INF = float("inf")
+MISSING = object()  # no value in the Python namespace
 
 
 # --- Lexing -------------------------------------------------------------------------
@@ -229,6 +241,9 @@ class _Nothing:
         self.vars = {}
         self.arrays = {}
         self.fns = {}
+        self.ns = {}
+        self.exports = {}
+        self.names = {}
 
 
 def _assigns(toks, idx):
@@ -413,24 +428,39 @@ def key_char(ch, key):
     return ch or ""
 
 
-class Array:
-    def __init__(self, dims, default):
-        self.dims = dims
-        size = 1
-        for d in dims:
-            size *= d + 1
-        self.data = [default] * size
+def _nested(dims, default):
+    """An array of `dims` (the highest index of each dimension): lists,
+    nested for more than one dimension."""
+    if len(dims) == 1:
+        return [default] * (dims[0] + 1)
+    return [_nested(dims[1:], default) for _ in range(dims[0] + 1)]
 
-    def at(self, idx):
-        dims = self.dims
-        if len(idx) != len(dims):
-            raise BasicError("BAD SUBSCRIPT")
-        flat = 0
-        for i, d in zip(idx, dims):
-            if i > d:
-                raise BasicError("BAD SUBSCRIPT")
-            flat = flat * (d + 1) + i
-        return flat
+
+def _base(key):
+    """A variable's name without its type suffix: what Python calls it."""
+    return key[:-1] if key[-1:] in ("$", "%") else key
+
+
+def _from_python(suffix, v):
+    """A value from Python for a BASIC variable with `suffix`: numbers
+    convert (True is -1), strings are strings, anything else is a type
+    mismatch."""
+    t = type(v)
+    if suffix == "$":
+        if t is str:
+            return v
+        raise BasicError(TYPE)
+    if t is float:
+        n = v
+    elif t is bool:
+        n = -1.0 if v else 0.0
+    elif t is int:
+        n = v
+    else:
+        raise BasicError(TYPE)
+    if suffix == "%":
+        return to_int(n)
+    return finite(float(n))
 
 
 def _default(name):
@@ -760,6 +790,9 @@ class Compiler:
             raise BasicError(SYNTAX)
         kind = "s" if key.endswith("$") else "n"
         conv = _converter(key)
+        base = _base(key)
+        spelling = name[:len(base)]
+        suffix = key[len(base):]
         rt = self.rt
         if self.is_op("("):
             self.pos += 1
@@ -768,19 +801,35 @@ class Compiler:
                 self.pos += 1
                 idx.append(self.num())
             self.expect_op(")")
-            return _element(rt, key, idx, conv) + (kind,)
+            return _element(rt, key, base, spelling, suffix, idx, conv) + (kind,)
         variables = rt.vars
+        ns = rt.ns
+        exports = rt.exports
+        names = rt.names
         default = _default(key)
 
         def get():
-            return variables.get(key, default)
+            py = names.get(base)
+            if py is None:
+                py = rt.resolve(base, spelling)
+                if py is None:
+                    return variables.get(key, default)
+            v = ns.get(py, MISSING)
+            if v is MISSING or v is exports.get(py, MISSING):
+                return variables.get(key, default)
+            v = _from_python(suffix, v)  # Python's, newer
+            variables[key] = v
+            return v
 
-        if conv is None:
-            def set_(v):
-                variables[key] = v
-        else:
-            def set_(v):
-                variables[key] = conv(v)
+        def set_(v):
+            if conv is not None:
+                v = conv(v)
+            variables[key] = v
+            py = names.get(base)
+            if py is None:
+                py = rt.name_for(base, spelling)
+            ns[py] = v
+            exports[py] = v
         return get, set_, kind
 
     # Statements.
@@ -1054,15 +1103,15 @@ class Compiler:
                 self.pos += 1
                 dims.append(self.num())
             self.expect_op(")")
-            decls.append((key, dims))
+            decls.append((key, dims, t[1][:len(_base(key))]))
             if not self.is_op(","):
                 break
             self.pos += 1
         rt = self.rt
 
         def dim():
-            for key, dims in decls:
-                rt.dim(key, [_index(d()) for d in dims])
+            for key, dims, spelling in decls:
+                rt.dim(key, [_index(d()) for d in dims], spelling)
         out.append(dim)
 
     def s_DEF(self, out, kinds, in_then):
@@ -1082,7 +1131,7 @@ class Compiler:
             p = self.next()
             if p[0] != "W" or p[1].upper() in KEYWORDS:
                 raise BasicError(SYNTAX)
-            params.append(p[1].upper())
+            params.append((p[1].upper(), p[1][:len(_base(p[1]))]))
             if not self.is_op(","):
                 break
             self.pos += 1
@@ -1174,6 +1223,17 @@ class Compiler:
             set2(a)
         out.append(swap)
 
+    def s_SYS(self, out, kinds, in_then):
+        name, kind = self.expr()
+        if kind != "s":
+            raise BasicError(SYNTAX)  # SYS with an address comes in phase 4
+        args = []
+        while self.is_op(","):
+            self.pos += 1
+            args.append(self.expr()[0])
+        rt = self.rt
+        out.append(lambda: rt.sys(name(), [f() for f in args]))
+
     def s_CLR(self, out, kinds, in_then):
         rt = self.rt
         out.append(rt.clear)
@@ -1246,41 +1306,35 @@ def _compare(op, a, b):
     return lambda: -1.0 if a() >= b() else 0.0
 
 
-def _element(rt, key, idx, conv):
-    arrays = rt.arrays
+def _element(rt, key, base, spelling, suffix, idx, conv):
+    last = idx[-1]
+    outer = idx[:-1]
 
-    def array():
-        a = arrays.get(key)
-        if a is None:
-            a = rt.dim(key, [10] * len(idx))
-        return a
-
-    if len(idx) == 1:
-        i0 = idx[0]
-
-        def where():
-            a = array()
-            i = _index(i0())
-            if len(a.dims) != 1 or i > a.dims[0]:
+    def where():
+        """The list holding the element, and its index there."""
+        lst = rt.array(key, base, spelling, len(idx))
+        for f in outer:
+            i = _index(f())
+            if i >= len(lst) or type(lst[i]) is not list:
                 raise BasicError("BAD SUBSCRIPT")
-            return a.data, i
-    else:
-        def where():
-            a = array()
-            return a.data, a.at([_index(f()) for f in idx])
+            lst = lst[i]
+        i = _index(last())
+        if i >= len(lst):
+            raise BasicError("BAD SUBSCRIPT")
+        return lst, i
 
     def get():
-        data, i = where()
-        return data[i]
+        lst, i = where()
+        v = lst[i]
+        if type(v) is float and suffix == "":
+            return v
+        if type(v) is list:
+            raise BasicError("BAD SUBSCRIPT")  # fewer indices than dimensions
+        return _from_python(suffix, v)
 
-    if conv is None:
-        def set_(v):
-            data, i = where()
-            data[i] = v
-    else:
-        def set_(v):
-            data, i = where()
-            data[i] = conv(v)
+    def set_(v):
+        lst, i = where()
+        lst[i] = v if conv is None else conv(v)
     return get, set_
 
 
@@ -1412,6 +1466,16 @@ def _print(rt, parts, newline):
         col = out.col
         width = out.width
         buf = []
+        try:
+            items(buf, col, width)
+        except BaseException:
+            out.write("".join(buf))  # what came before the error, as a C64 shows it
+            raise
+        if newline:
+            buf.append("\n")
+        out.write("".join(buf))
+
+    def items(buf, col, width):
         for kind, f in parts:
             if kind == "n":
                 s = num_str(finite(f())) + " "
@@ -1428,9 +1492,6 @@ def _print(rt, parts, newline):
                 buf.append(s)
                 nl = s.rfind("\n")
                 col = (len(s) - nl - 1 if nl >= 0 else col + len(s)) % width
-        if newline:
-            buf.append("\n")
-        out.write("".join(buf))
     return print_
 
 
@@ -1466,11 +1527,17 @@ def _skip(rt, end):
 class Interpreter:
     """Classic BASIC: the program, its variables and its run."""
 
-    def __init__(self, write, readline=None, getkey=None, width=80):
+    def __init__(self, write, readline=None, getkey=None, width=80, ns=None, command=None):
         self.program = basic.Program(normalize)
         self.out = basic.Output(write, width)
         self.readline = readline
         self.getkey = getkey
+        self.command = command
+        self.ns = {} if ns is None else ns  # Python's namespace, shared
+        self.exports = {}  # Python name: the object BASIC last put there
+        self.names = {}  # BASIC's name without its suffix: Python's name
+        self.created = set()  # Python names BASIC made (RUN takes them away)
+        self.unresolved = set()  # names Python has none for, until it runs again
         self.vars = {}
         self.arrays = {}
         self.fns = {}
@@ -1529,6 +1596,12 @@ class Interpreter:
         """A line typed without a number: its statements run at once (and
         RUN, GOTO or CONT go on into the program)."""
         self._sync()
+        # Python may have run since: the names BASIC found there are looked
+        # for again (those BASIC made stay).
+        self.unresolved.clear()
+        names = self.names  # in place: compiled lines hold this dict
+        for b in [b for b, py in names.items() if py not in self.created]:
+            del names[b]
         try:
             self.direct = Compiler(self, tokenize(text)).statements()
         except BasicError as e:
@@ -1669,8 +1742,8 @@ class Interpreter:
             raise BasicError("NEXT WITHOUT FOR")
         _, k, limit, step, li, si = stack[j]
         del stack[j + 1:]
-        v = finite(self.vars.get(k, 0.0) + step)
-        self.vars[k] = v if not k.endswith("%") else to_int(v)
+        v = finite(self.scalar_get(k) + step)
+        self.scalar_set(k, v if not k.endswith("%") else to_int(v))
         if (step >= 0 and v <= limit) or (step < 0 and v >= limit):
             self.li = li
             self.si = si
@@ -1740,6 +1813,19 @@ class Interpreter:
     # Variables.
 
     def clear(self):
+        """BASIC's variables gone, and from Python's namespace the names BASIC
+        made (unless Python has changed them since): Python's own stay, with
+        what BASIC last wrote there."""
+        ns = self.ns
+        exports = self.exports
+        for py in self.created:
+            v = exports.get(py, MISSING)
+            if v is not MISSING and ns.get(py, MISSING) is v:
+                del ns[py]
+        exports.clear()
+        self.created.clear()
+        self.names.clear()
+        self.unresolved.clear()
         self.vars.clear()
         self.arrays.clear()
         self.fns.clear()
@@ -1747,22 +1833,97 @@ class Interpreter:
         self.data = None
         self.data_pos = 0
 
-    def dim(self, key, dims):
+    def resolve(self, base, spelling):
+        """The Python name BASIC's `base` reads, or None: the same spelling,
+        else the one name that matches without regard to case."""
+        if base in self.unresolved:
+            return None
+        ns = self.ns
+        if spelling in ns:
+            py = spelling
+        else:
+            found = [k for k in ns if type(k) is str and k.upper() == base]
+            if len(found) > 1:
+                raise BasicError(AMBIGUOUS)
+            if not found:
+                self.unresolved.add(base)
+                return None
+            py = found[0]
+        self.names[base] = py
+        return py
+
+    def name_for(self, base, spelling):
+        """The Python name BASIC's `base` writes: the one it would read (a
+        name Python has, then shared), or else the spelling written (a name
+        BASIC makes)."""
+        py = self.resolve(base, spelling)
+        if py is None:
+            py = spelling
+            self.names[base] = py
+            self.created.add(py)
+            self.unresolved.discard(base)
+        return py
+
+    def array(self, key, base, spelling, n):
+        """The list behind array `key` (used with `n` indices): Python's if
+        it is newer, else BASIC's, made with indices to 10 if there is none."""
+        py = self.names.get(base)
+        if py is None:
+            py = self.resolve(base, spelling)
+        if py is not None:
+            v = self.ns.get(py, MISSING)
+            if v is not MISSING and v is not self.exports.get(py, MISSING):
+                if type(v) is list:
+                    return v
+                raise BasicError(TYPE)
+        a = self.arrays.get(key)
+        if a is None:
+            a = self.dim(key, [10] * n, spelling)
+        return a
+
+    def dim(self, key, dims, spelling=None):
         if key in self.arrays:
             raise BasicError("REDIM'D ARRAY")
-        a = Array(dims, _default(key))
+        a = _nested(dims, _default(key))
         self.arrays[key] = a
+        base = _base(key)
+        py = self.names.get(base)
+        if py is None:
+            py = self.name_for(base, spelling if spelling is not None else base)
+        self.ns[py] = a
+        self.exports[py] = a
         return a
+
+    def scalar_get(self, key):
+        base = _base(key)
+        py = self.names.get(base)
+        if py is not None:
+            v = self.ns.get(py, MISSING)
+            if v is not MISSING and v is not self.exports.get(py, MISSING):
+                v = _from_python(key[len(base):], v)
+                self.vars[key] = v
+                return v
+        return self.vars.get(key, _default(key))
+
+    def scalar_set(self, key, v):
+        self.vars[key] = v
+        base = _base(key)
+        py = self.names.get(base)
+        if py is None:
+            py = self.name_for(base, base)
+        self.ns[py] = v
+        self.exports[py] = v
 
     def define(self, key, params, body):
         variables = self.vars
-        defaults = [_default(p) for p in params]
-        convs = [_converter(p) for p in params]
-        kinds = ["s" if p.endswith("$") else "n" for p in params]
-        missing = object()
+        ns = self.ns
+        exports = self.exports
+        keys = [p for p, _ in params]
+        convs = [_converter(p) for p in keys]
+        kinds = ["s" if p.endswith("$") else "n" for p in keys]
 
         def call(args):
-            if len(args) != len(params):
+            if len(args) != len(keys):
                 raise BasicError(SYNTAX)
             values = []
             for (f, k), want, conv in zip(args, kinds, convs):
@@ -1770,18 +1931,55 @@ class Interpreter:
                     raise BasicError(TYPE)
                 v = f()
                 values.append(v if conv is None else conv(v))
-            saved = [variables.get(p, missing) for p in params]
-            for p, v in zip(params, values):
+            # The parameters are the function's own: BASIC's variables of
+            # those names wait, and Python's are not read meanwhile (their
+            # value counts as BASIC's while the body runs).
+            saved = [variables.get(p, MISSING) for p in keys]
+            shadowed = []
+            for p, spelling in params:
+                base = _base(p)
+                py = self.names.get(base)
+                if py is None:
+                    py = self.resolve(base, spelling)
+                if py is not None:
+                    shadowed.append((py, exports.get(py, MISSING)))
+                    exports[py] = ns.get(py, MISSING)
+            for p, v in zip(keys, values):
                 variables[p] = v
             try:
                 return body()
             finally:
-                for p, v in zip(params, saved):
-                    if v is missing:
+                for p, v in zip(keys, saved):
+                    if v is MISSING:
                         variables.pop(p, None)
                     else:
                         variables[p] = v
+                for py, v in reversed(shadowed):
+                    if v is MISSING:
+                        exports.pop(py, None)
+                    else:
+                        exports[py] = v
         self.fns[key] = call
+
+    def sys(self, name, args):
+        """SYS "name", args: a Python function in the namespace, else an OS
+        command or a wrapper (numbers passed to those as BASIC prints them)."""
+        f = self.ns.get(name)
+        try:
+            if f is not None and callable(f):
+                f(*args)
+            elif self.command is None or not self.command(
+                    name, [num_str(a).strip() if type(a) is not str else a for a in args]):
+                raise BasicError(UNDEF_FN)
+        except (BasicError, KeyboardInterrupt):
+            raise
+        except Exception as e:  # the function's own: its type and message
+            self.out.newline_if_needed()
+            self.out.write("%s: %s\n" % (type(e).__name__, e))
+            raise BasicError("PYTHON")
+        finally:
+            self.unresolved.clear()  # it may have made names
+            self.out.col = 0
 
     # DATA.
 

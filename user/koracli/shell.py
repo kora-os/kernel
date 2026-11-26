@@ -2,9 +2,9 @@
 #
 # KoraCLI's shell loop: the bars, the editor on key events, F2 between
 # Python, BASIC and OS mode, and the blocks run. Python runs in a namespace
-# of its own and BASIC in its interpreter (classic.py, loaded when first
-# used), both with ESC as a break (KeyboardInterrupt); the console stays in
-# key-event mode, and input() reads the keys as bytes.
+# of its own, which BASIC's interpreter (classic.py, loaded when first used)
+# shares its variables with; both have ESC as a break (KeyboardInterrupt).
+# The console stays in key-event mode, and input() reads the keys as bytes.
 
 import sys
 
@@ -34,7 +34,8 @@ HELP = """KoraCLI: Python at the prompt.
   A line starting with a number is a BASIC program line, in every mode but
   OS; RUN runs the program, LIST lists it, NEW clears it, ESC stops it and
   CONT goes on. % runs a line of the other language: %RUN in Python mode,
-  %print(x) in BASIC mode."""
+  %print(x) in BASIC mode. Python and BASIC share variables: msg$ is
+  Python's msg, and SYS "name", args calls a Python function."""
 
 
 def write(s):
@@ -107,7 +108,16 @@ def basic(state):
             k = kora.key(False)
             return "" if k is None else classic.key_char(k[0], k[1])
 
-        b = classic.Interpreter(write, readline, getkey, state["width"])
+        def command(name, args):
+            """SYS's OS commands and wrappers; False if there is none."""
+            try:
+                kora.run(name, *args)
+            except OSError:
+                return False
+            return True
+
+        # BASIC's variables are Python's too: the namespace Python runs in.
+        b = classic.Interpreter(write, readline, getkey, state["width"], state["ns"], command)
         state["basic"] = b
     return b
 
@@ -208,7 +218,7 @@ def main():
         version = ""
     print("KoraCLI on MicroPython%s. F1 for help." % version)
     kora.mode(kora.EVENTS)
-    state = {"mode": "PY", "width": width}
+    state = {"mode": "PY", "width": width, "ns": ns}
     try:
         while True:
             # A Ctrl+C may come at any moment, also while the editor works on

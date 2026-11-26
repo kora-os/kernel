@@ -1638,7 +1638,11 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
             lit = sum(1 for i in range(0, len(row), 3 * 4) if row[i:i + 3] != b"\x00\x00\x00")
             if lit < width // 8:
                 raise Failure("koracli's %s bar is not drawn" % name)
-        q.send("10 PRINT f(1)\r")   # a program line: stored, nothing printed
+        # The spec's example (step 2b): a program line reads Python's msg.
+        q.send('msg = "hello world"\r')
+        q.send("10 PRINT msg$\r")   # a program line: stored, nothing printed
+        q.send("%RUN\r")
+        q.expect(rb"^hello world\r?$")
         q.send("[n for n in range(3)]\r")
         q.expect(rb"^\[0, 1, 2\]\r?$")
         q.send("while True: pass\r\r\r")
@@ -1699,18 +1703,19 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         q.expect(rb"^-9\r?$")
         # BASIC (step 2a): a line of it from Python mode, then BASIC mode
         # with READY., the program line typed in Python mode, keywords
-        # without spaces, ESC as a break and % for a line of Python.
+        # without spaces, ESC as a break and % for a line of Python, which
+        # sees BASIC's variables (step 2b).
         q.send("%PRINT 6*7\r")
         q.expect(rb"^ 42 \r?$")
         q.key("f2")
         q.expect(rb"READY\.\r?\n")
         q.send("LIST\r")
-        q.expect(rb"^10 PRINT f\(1\)\r?$")
+        q.expect(rb"^10 PRINT msg\$\r?$")
         q.expect(rb"^READY\.\r?$")
         q.send('20 FORI=1TO3:PRINTI;:NEXT:PRINT "DONE"\r')
         q.send("30 N = N + 1: GOTO 30\r")
         q.send("RUN\r")
-        q.expect(rb"^ 0 \r?$")  # f(1): an element of BASIC's own array f
+        q.expect(rb"^hello world\r?$")
         q.expect(rb"^ 1  2  3 DONE\r?$")
         for attempt in range(5):  # ESC, once the program runs
             time.sleep(0.5)
@@ -1724,8 +1729,8 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         q.expect(rb"^READY\.\r?$")
         q.send("PRINT N > 0\r")
         q.expect(rb"^-1 \r?$")
-        q.send("%print('python', 6 * 7)\r")
-        q.expect(rb"^python 42\r?$")
+        q.send("%print('python', N > 0, msg)\r")  # BASIC's N, shared
+        q.expect(rb"^python True hello world\r?$")
         q.expect(rb"^READY\.\r?$")
         q.send("NEW\r")
         q.expect(rb"^READY\.\r?$")

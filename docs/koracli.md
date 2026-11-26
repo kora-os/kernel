@@ -3,11 +3,11 @@
 KoraCLI is the shell KoraOS starts in: a fullscreen prompt where you can type
 Python, a line of BASIC or an OS command, and see what happens.
 
-> **Status: KoraCLI is the shell (phase 1 done), and Classic BASIC runs
-> (step 2a).** KoraOS starts in it, with Python, BASIC and OS modes, OS
-> commands from Python, and its own editor (`koracli` starts another one).
-> BASIC's variables are still its own (shared with Python in step 2b), and
-> SAVE, LOAD, RENUM and AUTO come in step 2c. This reference is written ahead of the implementation and grows
+> **Status: KoraCLI is the shell (phase 1 done), and Classic BASIC runs,
+> sharing its variables with Python (steps 2a and 2b).** KoraOS starts in
+> it, with Python, BASIC and OS modes, OS commands from Python, and its own
+> editor (`koracli` starts another one). SAVE, LOAD, RENUM and AUTO come in
+> step 2c. This reference is written ahead of the implementation and grows
 > with it: each section says whether what it describes works today or which
 > step brings it. The
 > design behind it is `project_doc/koracli-spec.md`, and the steps are in
@@ -274,8 +274,8 @@ for scripting: use Python mode for that.
 
 ## BASIC
 
-*Works: Classic BASIC (step 2a), without SAVE, LOAD, RENUM and AUTO (step
-2c) and with variables of its own until step 2b. BBC BASIC comes in phase 3.*
+*Works: Classic BASIC (steps 2a and 2b), without SAVE, LOAD, RENUM and AUTO
+(step 2c). BBC BASIC comes in phase 3.*
 
 BASIC mode uses one of two dialects at a time, chosen in the configuration.
 Switching dialect with a program in memory asks first, then clears the
@@ -331,6 +331,7 @@ Statements:
 | Variables | `LET` (optional), `DIM a(10, 5)`, `SWAP a, b`, `CLR`; `DEF FNname(x) = expression` |
 | Flow | `GOTO`, `GOSUB` and `RETURN`, `ON n GOTO` / `ON n GOSUB`, `IF ... THEN ... ELSE ...` (THEN or ELSE may be a line number), `FOR ... TO ... STEP` and `NEXT [i, j]`, `WHILE` and `WEND`, `END`, `STOP` |
 | Data | `DATA`, `READ`, `RESTORE [line]` |
+| Python | `SYS "name", args` (see Calling Python from BASIC) |
 | Others | `REM` or `'`, `RANDOMIZE [n]` |
 
 Functions: `ABS`, `ATN`, `COS`, `EXP`, `INT`, `LOG`, `RND`, `SGN`, `SIN`,
@@ -369,8 +370,9 @@ when the line runs: `?SYNTAX ERROR IN 10`.
 - `GET` gives the C64's codes for Return (13), Delete (20), Home (19) and
   the cursor keys (17 down, 145 up, 29 right, 157 left); other keys give
   their character.
-- Not there: `PEEK`, `POKE`, `SYS` and `WAIT` (phase 4), the C64's screen
-  codes in strings (colours, cursor moves), and `ST`.
+- `SYS "name"` calls Python; `SYS` with an address, `PEEK`, `POKE` and
+  `WAIT` come in phase 4. Not there: the C64's screen codes in strings
+  (colours, cursor moves), and `ST`.
 
 ### Files
 
@@ -384,10 +386,10 @@ current dialect.
 
 ## Variables shared by Python and BASIC
 
-*Planned (step 2b).* Until then BASIC's variables are its own: Python's `x`
-and BASIC's `X` are different.
+*Works (step 2b), in Classic BASIC;* BBC BASIC comes in phase 3.
 
-Python and BASIC see the same variables. BASIC's type suffix is dropped in
+Python and BASIC see the same variables: the ones in KoraCLI's Python
+namespace, where your code at `>>>` runs. BASIC's type suffix is dropped in
 Python:
 
 | BASIC | Python | Example |
@@ -420,11 +422,44 @@ The rules, and where they surprise:
   BASIC reads the new value next time.
 - **Case:** names keep their case in Python. In Classic BASIC, where case
   does not matter, a variable keeps the spelling it was first written with
-  (`Msg$`, later `MSG$`, is Python `Msg`). Reading a name it has not defined,
-  Classic BASIC tries Python's exact spelling first, then any spelling; two
-  different spellings in Python are an error. In BBC BASIC names are
-  case-sensitive and match exactly.
-- BASIC's system variables (BBC's `@%`, `TIME`) are not shared.
+  (`Msg$`, later `MSG$`, is Python `Msg`). For a name Python already has,
+  Classic BASIC tries Python's exact spelling first, then any spelling, and
+  reads and writes that one: with Python's `Total`, BASIC's `TOTAL = 9`
+  changes `Total`. Two spellings in Python that match (`abc` and `ABC` for
+  `Abc`) are `?AMBIGUOUS NAME ERROR`. A name is looked for again with each
+  command you type, so a name Python defines meanwhile is found. In BBC
+  BASIC names are case-sensitive and match exactly.
+- **Arrays are Python lists,** nested for more than one dimension
+  (`DIM M(1, 2)` is `[[0.0, 0.0, 0.0], [0.0, 0.0, 0.0]]`), and shared as they
+  are: a change on either side is seen by the other. A Python list can be
+  read as an array without `DIM`, and an index past its end is
+  `?BAD SUBSCRIPT ERROR`.
+- **`RUN`, `NEW` and `CLR` take away the variables BASIC made,** unless
+  Python has changed them since. Python's own variables stay, with what
+  BASIC last wrote in them.
+- **A function's parameters are its own:** in `DEF FNTWICE(X) = X * 2`, `X`
+  is the argument, whatever Python's `X` holds.
+- BASIC's system variables (Classic's `TI` and `TI$`, BBC's `@%`, `TIME`)
+  are not shared.
+
+### Calling Python from BASIC
+
+`SYS "name", args` calls the Python function `name` with the arguments
+(numbers as floats, strings as strings); its result is dropped. Without
+such a function, `name` is an OS command or a wrapper (`kora.cmd`), run with
+the arguments as text, numbers as BASIC prints them: `SYS "echo", 5`. A name
+that is neither is `?UNDEF'D FUNCTION ERROR`; a Python exception in the
+function prints its type and message, then `?PYTHON ERROR IN 20`. `SYS` with
+an address (`SYS 49152`) comes with machine access in phase 4.
+
+```
+>>> def beep(n):
+...     print("beep" * int(n))
+...
+...
+>>> %SYS "beep", 3
+beepbeepbeep
+```
 
 ## Keys
 
