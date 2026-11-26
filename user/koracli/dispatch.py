@@ -8,11 +8,26 @@
 # Python block are Python.
 #
 # `!` lines are Python's in both modes: bang.py turns them into calls.
+#
+# The mode keys: F3 is Python and F4 BASIC, F2 goes to OS mode and back to
+# the language it came from.
 
 PYTHON = "python"
 BASIC = "basic"
 PROGRAM_LINE = "program line"
 OS_COMMAND = "os"
+
+
+MODE_KEYS = {"F3": "PY", "F4": "BAS"}
+
+
+def switch(mode, language, key):
+    """(mode, language) after the mode key `key` ("F2", "F3" or "F4"), in
+    `mode` with `language` the last language mode ("PY" or "BAS")."""
+    if key == "F2":
+        return (language if mode == "OS" else "OS"), language
+    mode = MODE_KEYS[key]
+    return mode, mode
 
 
 def routed(line):

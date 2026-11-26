@@ -147,14 +147,15 @@ press(ed, keys.PAGE_DOWN)
 check(ed.lines == ["draft"], "PgDn back to the draft")
 check(len(hist.blocks) == 2, "the history keeps the blocks run")
 
-# Ctrl+D, F1 and F2.
+# Ctrl+D and the function keys.
 ed, screen = new()
 check(press(ed, 0x07, 0x01, "d") == ("eof",), "Ctrl+D on an empty prompt ends")
 ed, screen = new()
 type_text(ed, "ab")
 press(ed, keys.HOME)
 check(press(ed, 0x07, 0x01, "d") is None and ed.lines == ["b"], "elsewhere it deletes")
-check(press(ed, keys.F1) == ("key", "F1") and press(ed, keys.F2) == ("key", "F2"), "F1, F2")
+check(press(ed, keys.F1) == ("key", "F1") and press(ed, keys.F2) == ("key", "F2") and
+      press(ed, keys.F3) == ("key", "F3") and press(ed, keys.F4) == ("key", "F4"), "F1 to F4")
 
 # Drawing: typed at the end, a character is all that is written, until it
 # reaches the last column; a wrapped line, and the cursor brought back.
@@ -185,6 +186,17 @@ check(dispatch.classify("10 PRINT", "BAS") == (dispatch.PROGRAM_LINE, "10 PRINT"
       "BASIC mode's program lines and ! commands")
 check(dispatch.classify("print(1)", "OS") == (dispatch.OS_COMMAND, "print(1)"),
       "OS mode has no prefixes")
+
+# The mode keys: F3 Python, F4 BASIC, F2 OS mode and back to the language.
+check(dispatch.switch("PY", "PY", "F4") == ("BAS", "BAS") and
+      dispatch.switch("BAS", "BAS", "F3") == ("PY", "PY"), "F3 and F4 between the languages")
+check(dispatch.switch("PY", "PY", "F3") == ("PY", "PY") and
+      dispatch.switch("BAS", "BAS", "F4") == ("BAS", "BAS"), "a language's own key stays")
+check(dispatch.switch("BAS", "BAS", "F2") == ("OS", "BAS") and
+      dispatch.switch("OS", "BAS", "F2") == ("BAS", "BAS") and
+      dispatch.switch("OS", "PY", "F2") == ("PY", "PY"), "F2 to OS mode and back")
+check(dispatch.switch("OS", "BAS", "F3") == ("PY", "PY") and
+      dispatch.switch("OS", "PY", "F4") == ("BAS", "BAS"), "a language's key from OS mode")
 check(editor.is_compound("  for x in y:") and editor.is_compound("@deco") and
       not editor.is_compound("format = 1"), "compound statements")
 

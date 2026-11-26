@@ -1,9 +1,10 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
-# KoraCLI's shell loop: the bars, the editor on key events, F2 between
-# Python, BASIC and OS mode, and the blocks run. Python runs in a namespace
-# of its own, which BASIC's interpreter (classic.py, loaded when first used)
-# shares its variables with; both have ESC as a break (KeyboardInterrupt).
+# KoraCLI's shell loop: the bars, the editor on key events, the mode keys
+# (F3 Python, F4 BASIC, F2 OS mode and back), and the blocks run. Python
+# runs in a namespace of its own, which BASIC's interpreter (classic.py,
+# loaded when first used) shares its variables with; both have ESC as a
+# break (KeyboardInterrupt).
 # The console stays in key-event mode, and input() reads the keys as bytes.
 
 import sys
@@ -16,7 +17,6 @@ import dispatch
 import editor
 import keys
 
-MODES = ("PY", "BAS", "OS")
 # Classic BASIC's prompt is READY., printed after each command: the line
 # typed has none.
 PROMPTS = {"PY": (">>> ", "... "), "BAS": ("", ""), "OS": ("$ ", "$ ")}
@@ -30,7 +30,8 @@ HELP = """KoraCLI: Python at the prompt.
   .status, .lines, .stderr); {expr} puts a Python value in; < > >> redirect;
   & runs it in the background, @N on core N. kora.run() and kora.capture()
   do the same in code.
-  F2 switches between Python (PY), BASIC (BAS) and OS commands (OS).
+  F3 switches to Python (PY), F4 to BASIC (BAS); F2 to OS commands (OS)
+  and back to the language you were in.
   A line starting with a number is a BASIC program line, in every mode but
   OS; RUN runs the program, LIST lists it, NEW clears it, ESC stops it and
   CONT goes on. % runs a line of the other language: %RUN in Python mode,
@@ -44,7 +45,8 @@ def write(s):
 
 def bars(mode):
     kora.bar(kora.TOP, " KoraCLI")
-    kora.bar(kora.BOTTOM, " %s | F1 Help  F2 Mode" % mode)
+    kora.bar(kora.BOTTOM, " %s | F1 Help  F2 %s  F3 PY  F4 BAS" %
+             (mode, "Back" if mode == "OS" else "OS"))
 
 
 def prompts(ed, mode, start=True):
@@ -169,15 +171,18 @@ def report_jobs():
 
 def read_action(ed, state):
     """One round at the prompt: the jobs that ended, a prompt, keys until
-    there is something to do (F2 switches mode on the way)."""
+    there is something to do (the mode keys switch mode on the way)."""
     report_jobs()
     prompts(ed, state["mode"])
     while True:
         action = ed.feed(*kora.key())
         if action is None:
             continue
-        if action[0] == "key" and action[1] == "F2":
-            mode = MODES[(MODES.index(state["mode"]) + 1) % len(MODES)]
+        if action[0] == "key" and action[1] != "F1":
+            mode, state["language"] = dispatch.switch(state["mode"], state["language"],
+                                                      action[1])
+            if mode == state["mode"]:
+                continue  # F3 in Python mode, F4 in BASIC mode
             state["mode"] = mode
             bars(mode)
             if mode == "BAS" and not ed.text():
@@ -218,7 +223,7 @@ def main():
         version = ""
     print("KoraCLI on MicroPython%s. F1 for help." % version)
     kora.mode(kora.EVENTS)
-    state = {"mode": "PY", "width": width, "ns": ns}
+    state = {"mode": "PY", "language": "PY", "width": width, "ns": ns}
     try:
         while True:
             # A Ctrl+C may come at any moment, also while the editor works on

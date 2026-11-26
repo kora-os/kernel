@@ -22,7 +22,8 @@ so in a **Differences** note.
 
 *Works (steps 1b, 1d and 2a),* on a screen of KoraCLI's own, the one KoraOS
 starts in: the top bar says `KoraCLI`, the bottom bar the mode (`PY`, `BAS`
-or `OS`) and the function keys there are so far (F1 Help, F2 Mode). Meta+M
+or `OS`) and the function keys there are so far (F1 Help, F2 OS or Back,
+F3 PY, F4 BAS). Meta+M
 switches between it and other programs' screens.
 
 ```
@@ -35,7 +36,7 @@ switches between it and other programs' screens.
 │ hello world                                                  │
 │ >>> _                                                        │
 ├──────────────────────────────────────────────────────────────┤
-│ PY | F1 Help  F2 Mode  F3 List  F5 Run  F6 Save  F7 Load     │  bottom bar
+│ PY | F1 Help  F2 OS  F3 PY  F4 BAS  F5 Run  F6 Save  F7 Load │  bottom bar
 └──────────────────────────────────────────────────────────────┘
 ```
 
@@ -55,7 +56,9 @@ its own screen ends, you are back in KoraCLI.
 *Works: Python and OS modes (phase 1), BASIC mode in the Classic dialect
 (step 2a); the BBC dialect comes in phase 3.*
 
-F2 switches mode: Python, then BASIC, then OS, then Python again.
+F3 switches to Python mode and F4 to BASIC mode; each does nothing in its
+own mode. F2 goes to OS mode, and from there back to the language mode you
+came from: you choose a language and keep it, and visit OS mode.
 
 | Mode | Indicator | Prompt | An unprefixed line is |
 |---|---|---|---|
@@ -97,7 +100,7 @@ Things to know:
   ...     !cat {f}
   ```
 - **OS mode has no prefixes at all.** Every line is an OS command; to type
-  Python or BASIC, switch mode with F2.
+  Python or BASIC, switch mode (F2 back, F3, F4).
 
 ## Python mode
 
@@ -254,13 +257,13 @@ scripting language.
 
 ## OS mode
 
-*Works (step 1d).* F2 switches to it, with the `$` prompt, and every line
+*Works (step 1d).* F2 switches to it from Python or BASIC mode, with the `$` prompt, and every line
 runs as a command, read as `!` reads one but without `{expr}`; a backslash
 takes the next character as it is (`my\ file.txt`), as quotes do. As the
 shell before KoraCLI did, each command's end is reported (`[12] exited with
 0`), a background job's start and end too (`[13] started`, `[13] done,
 exit 0`), and Ctrl+C at the prompt drops the line (`^C`). KoraCLI starts in
-Python mode: F2 once for OS mode.
+Python mode: F2 once for OS mode, F2 again to go back.
 
 A plain command shell with the `$` prompt: every line is an OS command, found
 and run as with `!` above, with the same `&`, `@N` and redirection.
@@ -466,8 +469,11 @@ beepbeepbeep
 | Key | Where | What it does |
 |---|---|---|
 | F1 | All modes | Help |
-| F2 | All modes | Next mode |
-| F3, F5, F6, F7 | Python and BASIC modes | `LIST`, `RUN`, `SAVE`, `LOAD` |
+| F2 | Python and BASIC modes | OS mode |
+| F2 | OS mode | Back to the language mode you came from |
+| F3 | All modes | Python mode |
+| F4 | All modes | BASIC mode |
+| F5, F6, F7, F8 | Python and BASIC modes | `RUN`, `SAVE`, `LOAD`, `LIST` |
 | ESC | While Python or BASIC runs | Interrupts it (`CONT` resumes BASIC) |
 | ESC | At the prompt | Nothing yet; may clear the line |
 | Ctrl+C | While a program runs | Stops the program in front. A program may catch it; a second Ctrl+C stops it anyway |
@@ -480,9 +486,9 @@ beepbeepbeep
 full-screen programs such as editors and games need ESC for themselves; stop
 those with Ctrl+C.
 
-**Today (step 1b):** F1 (help), F2 (between Python and OS mode), ESC and
-Ctrl+C on running code, PgUp and PgDn, Ctrl+Enter, Shift+PgUp and
-Shift+PgDn and Meta+M work. F3 to F7 come with BASIC. Every console sends F1
+**Today:** F1 (help), F2 to F4 (the modes), ESC and Ctrl+C on running
+code, PgUp and PgDn, Ctrl+Enter, Shift+PgUp and Shift+PgDn and Meta+M work.
+F5 to F8 come with step 2c. Every console sends F1
 to F12 as xterm does, and a program can read each key as an event and ask
 for ESC as a break (step 1a).
 

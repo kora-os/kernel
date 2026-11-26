@@ -317,7 +317,8 @@ display (`--no-graphics`) init starts no shell: the test checks that and runs
 the debug console's checks only (`version`, `irqs`, `cpus`, `heap` and
 `heaptest`, below). With one it boots to the shell, KoraCLI, which init runs
 under the screen manager on a screen of its own (`screens koracli`); the
-test presses F2 for its OS mode, where it types its commands, then
+test presses F4 and F2 for its OS mode (through BASIC mode's `READY.`),
+where it types its commands, then
 runs filesystem/argv/exit-code checks plus an EL0 namespace probe (child cwd
 inheritance and isolation, failed path handling, descriptors retained across
 chdir, volume/assign enumeration and assign syscall updates), checks shell
@@ -400,8 +401,9 @@ next program; more of them at the prompt leave the shell running.
 `def` typed with the editor's indentation and ended by two blank lines,
 `f(21)` printing 42, both bars found on a screendump, a program line taken
 quietly, a list's value printed, `while True: pass` stopped by ESC with
-`KeyboardInterrupt`, an exception's traceback, F2 to OS mode (it runs a
-line as a command, `{x}` kept as typed) and back, and Ctrl+D ending it. OS commands from Python: `!echo` live and `kora.status`, a capture with
+`KeyboardInterrupt`, an exception's traceback, F2 from BASIC mode to OS
+mode (it runs a line as a command, `{x}` kept as typed), F2 back to BASIC
+mode and F3 to Python, and Ctrl+D ending it. OS commands from Python: `!echo` live and `kora.status`, a capture with
 `{6 * 7}` and its `.lines` and `.status`, a list expanded, a redirection to
 a file and back on a writable volume, a wrapper registered with a
 decorator and run, a background job reported when it ends, and Ctrl+C
