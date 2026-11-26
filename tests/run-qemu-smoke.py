@@ -1772,6 +1772,13 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         q.expect(rb"^   10 FORI%=1 TO 3: PRINT I%;: NEXT: PRINT\r?$")
         q.send("RUN\r")
         q.expect(rb"^         1         2         3\r?$")
+        # Step 3c: an IF over several lines, its false part skipped.
+        for line in ("20 IF I%=4 THEN", '30 PRINT "block"', "40 ELSE",
+                     '50 PRINT "no"', "60 ENDIF"):
+            q.send(line + "\r")
+        q.send("RUN\r")
+        q.expect(rb"^         1         2         3\r?$")
+        q.expect(rb"^block\r?$")
         q.key("f4")
         q.expect(rb"^koracli: a program is in memory")
         q.send("NEW\r")

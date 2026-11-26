@@ -277,8 +277,8 @@ for scripting: use Python mode for that.
 
 ## BASIC
 
-*Works: Classic BASIC (steps 2a to 2c); BBC BASIC a line at a time (step
-3b), the rest of it coming in steps 3c to 3e.*
+*Works: Classic BASIC (steps 2a to 2c); BBC BASIC (steps 3b and 3c), its
+procedures, files and star commands coming in steps 3d and 3e.*
 
 BASIC mode uses one of two dialects at a time, Classic BASIC when KoraCLI
 starts. F4 pressed in BASIC mode switches dialect while no program is in
@@ -388,8 +388,8 @@ when the line runs: `?SYNTAX ERROR IN 10`.
 
 ### BBC BASIC
 
-*Works (step 3b): a line at a time. Multi-line `IF`, `CASE`, `REPEAT` and
-`WHILE` come in step 3c, `PROC`, `FN` and `ON ERROR` in 3d, star commands,
+*Works (steps 3b and 3c): the statements and the constructs over several
+lines below. `PROC`, `FN` and `ON ERROR` come in step 3d; star commands,
 `SAVE`, `LOAD` and `RENUMBER` in 3e.*
 
 BBC-inspired, modelled on BBC BASIC V: what a BBC BASIC manual says
@@ -402,6 +402,7 @@ Statements:
 | Output and input | `PRINT` with `;`, `,` (fields of `@%`'s width, 10), `'` (a new line), `~` (the next number in hex), `TAB(x)`, `TAB(x, y)` and `SPC(n)`; `INPUT ["prompt"[,]] a, b$`, `INPUT LINE a$`; `CLS` |
 | Variables | `LET` (optional), `+=` and `-=`, `DIM a(10, 5)`, `SWAP a, b`, `CLEAR`, `TIME = n` |
 | Flow | `GOTO` and `GOSUB` (to a line number or an expression), `RETURN`, `ON n GOTO` / `ON n GOSUB` with `ELSE`, `IF ... [THEN] ... ELSE ...` on one line (THEN or ELSE may be a line number), `FOR ... TO ... STEP` and `NEXT [i, j]`, `END`, `STOP` |
+| Over several lines | `IF ... THEN` ending its line, then `ELSE` and `ENDIF`; `CASE ... OF` ending its line, then `WHEN a, b:`, `OTHERWISE` and `ENDCASE`; `REPEAT` ... `UNTIL`; `WHILE` ... `ENDWHILE` |
 | Data | `DATA` (to the line's end), `READ`, `RESTORE [line]` |
 | Others | `REM` |
 
@@ -428,6 +429,30 @@ are integers (`%` variables, `7 DIV 2`, `1 + 2`); `+` and `-` on integers
 wrap at 32 bits, `*` gives a real when the result does not fit, and `/` and
 `^` always give reals. Reals print in `@%`'s format, nine digits by
 default, with an exponent from 1E9 and below 0.1 (`1.23456789E9`, `5E-2`).
+
+The constructs over several lines nest, and are matched when they run:
+an `IF ... THEN` whose condition is false goes on after its `ELSE` or
+`ENDIF`, a `CASE` after the first `WHEN` with an equal value (or
+`OTHERWISE`, or `ENDCASE`), and a `WHILE` whose condition is false after
+its `ENDWHILE`, which is why `WHILE` may run its body no times and
+`REPEAT` always runs it once. They may be on one line too
+(`REPEAT X%+=1: UNTIL X%>4`), and a statement may follow `REPEAT`,
+`WHEN`, `OTHERWISE` or `ELSE` without a colon (`REPEAT UNTIL GET`). A
+construct left open is `Missing ENDIF`, `Missing ENDCASE` or `Missing
+ENDWHILE`.
+
+```
+10 FOR N%=1 TO 3
+20   CASE N% OF
+30   WHEN 1: PRINT "one"
+40   WHEN 2
+50     IF TRUE THEN
+60       PRINT "two"
+70     ENDIF
+80   OTHERWISE PRINT "more"
+90   ENDCASE
+100 NEXT
+```
 
 Keywords are capitals only: `print` is a variable. Where only a keyword can
 stand they need no spaces (`FORI=1TO10:PRINTI`), as in Classic BASIC.

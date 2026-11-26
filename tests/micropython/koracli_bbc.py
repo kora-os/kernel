@@ -225,6 +225,79 @@ direct("i% = 7")
 check(ns["i"] == 7 and type(ns["i"]) is int, "a % variable is Python's int")
 direct("PRINT MSG$")
 
+# Constructs over several lines (step 3c): IF THEN at a line's end, ELSE
+# and ENDIF; CASE, WHEN, OTHERWISE, ENDCASE; REPEAT and UNTIL; WHILE and
+# ENDWHILE; nested, and each one's mistakes.
+run("IF over several lines",
+    "10 FOR I%=1 TO 3",
+    "20 IF I%=2 THEN",
+    '30   PRINT "two";',
+    "40   IF TRUE THEN",
+    '50     PRINT " (nested)";',
+    "60   ENDIF",
+    "70 ELSE",
+    '80   PRINT "not two";',
+    "90   IF FALSE THEN",
+    '100    PRINT "never"',
+    "110  ENDIF",
+    "120 ENDIF",
+    '130 PRINT " after"',
+    "140 NEXT",
+    '150 IF 1 THEN PRINT "one line" ELSE PRINT "other"')
+
+run("CASE",
+    '10 FOR N%=0 TO 4',
+    "20 CASE N% OF",
+    '30 WHEN 1, 2: PRINT N%; " small"',
+    '40 WHEN 3',
+    '50   CASE "x" OF',
+    '60   WHEN "x": PRINT "3, inner x"',
+    "70   ENDCASE",
+    '80 OTHERWISE PRINT N%; " other"',
+    "90 ENDCASE",
+    "100 NEXT",
+    '110 CASE "b" OF',
+    '120 WHEN "a": PRINT "a"',
+    '130 ENDCASE: PRINT "no clause: after ENDCASE"')
+
+run("REPEAT and WHILE",
+    "10 I%=0: REPEAT I%+=1: PRINT I%;: UNTIL I%=3: PRINT",
+    "20 REPEAT",
+    "30   J%=0",
+    "40   REPEAT J%+=1: UNTIL J%=2",
+    "50   I%-=1",
+    "60 UNTIL I%=0",
+    '70 PRINT "I% "; I%; ", J% "; J%',
+    "80 K=3",
+    "90 WHILE K>0",
+    "100  PRINT K;",
+    "110  WHILE FALSE: PRINT \"never\": ENDWHILE",
+    "120  K-=1",
+    "130 ENDWHILE",
+    '140 PRINT: WHILE FALSE',
+    '150 PRINT "skipped"',
+    '160 ENDWHILE: PRINT "WHILE FALSE skips its body"')
+
+print("== the constructs' mistakes")
+program("10 IF FALSE THEN", '20 PRINT "x"')
+direct("RUN")
+check(b.err == 49, "Missing ENDIF is 49: %d" % b.err)
+program("10 CASE 1 OF", "20 WHEN 2: PRINT")
+direct("RUN")
+program("10 CASE 1", "20 ENDCASE")
+direct("RUN")
+program('10 CASE 1 OF', '20 WHEN "a": PRINT', "30 ENDCASE")
+direct("RUN")
+direct("UNTIL TRUE")
+direct("ENDWHILE")
+direct('CASE 1 OF WHEN 1: PRINT')
+program("10 WHILE FALSE", "20 PRINT")
+direct("RUN")
+program("10 IF FALSE THEN", "20 PRINT (", "30 ENDIF")
+direct("RUN")
+direct("REPEAT X%+=1: UNTIL X%>4: PRINT X%")
+direct('X%=0: REPEAT UNTIL TRUE: PRINT "REPEAT UNTIL, no colon"')
+
 # LIST: line numbers in five columns; LIST 20,30 a range.
 print("== LIST")
 program("10 REM one", "20 PRINT 2", "30 PRINT 3", "1000 END")

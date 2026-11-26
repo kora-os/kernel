@@ -5,11 +5,17 @@
 # applies; old programs are not promised to run unchanged. A dialect over
 # basic.Runtime, as Classic BASIC is (classic.py).
 #
-# Step 3b: a line at a time. LET (with += and -=), PRINT, INPUT, IF THEN
-# ELSE on one line, GOTO, GOSUB, RETURN, ON, FOR, NEXT, DIM, READ, DATA,
-# RESTORE, END, STOP, REM, SWAP, CLS, CLEAR, TIME=; the commands RUN, LIST,
-# NEW and CONT. Multi-line constructs come in 3c, PROC and FN in 3d, star
-# commands and files in 3e.
+# Steps 3b and 3c: LET (with += and -=), PRINT, INPUT, IF THEN ELSE on one
+# line or over several (ENDIF), CASE OF WHEN OTHERWISE ENDCASE, REPEAT
+# UNTIL, WHILE ENDWHILE, GOTO, GOSUB, RETURN, ON, FOR, NEXT, DIM, READ,
+# DATA, RESTORE, END, STOP, REM, SWAP, CLS, CLEAR, TIME=; the commands RUN,
+# LIST, NEW and CONT. PROC and FN come in 3d, star commands and files in 3e.
+#
+# A construct over several lines is matched when it runs: lines are stored
+# unchecked (spec §4), so the statement that opens one looks ahead, through
+# the statements' keywords, for where it goes on (ELSE, WHEN, OTHERWISE)
+# and ends (ENDIF, ENDCASE, ENDWHILE), skipping constructs of its kind
+# inside it, and remembers what it found until the program changes.
 #
 # Keywords are capitals only, so a word in small letters is always a name;
 # a word in capitals is a keyword only where nothing but a keyword can
@@ -47,12 +53,13 @@ MISSING = basic.MISSING
 # --- Words -------------------------------------------------------------------------
 
 STATEMENTS = (
-    "CLEAR", "CLS", "CONT", "DATA", "DIM", "ELSE", "END", "FOR", "GOSUB", "GOTO", "IF",
-    "INPUT", "LET", "LIST", "NEW", "NEXT", "ON", "PRINT", "READ", "REM", "RESTORE",
-    "RETURN", "RUN", "STOP", "SWAP",
+    "CASE", "CLEAR", "CLS", "CONT", "DATA", "DIM", "ELSE", "END", "ENDCASE", "ENDIF",
+    "ENDWHILE", "FOR", "GOSUB", "GOTO", "IF", "INPUT", "LET", "LIST", "NEW", "NEXT", "ON",
+    "OTHERWISE", "PRINT", "READ", "REM", "REPEAT", "RESTORE", "RETURN", "RUN", "STOP",
+    "SWAP", "UNTIL", "WHEN", "WHILE",
 )
 OPERATORS = ("AND", "OR", "EOR", "DIV", "MOD", "NOT")
-CLAUSES = ("THEN", "TO", "STEP", "GOTO", "GOSUB", "ELSE", "LINE")
+CLAUSES = ("THEN", "TO", "STEP", "GOTO", "GOSUB", "ELSE", "LINE", "OF")
 # Functions taking one operand, with or without brackets (SIN X, LEN A$):
 # name -> (argument kind, result kind).
 UNARY = {
@@ -80,6 +87,8 @@ AFTER_VALUE = ("AND", "OR", "EOR", "DIV", "MOD", "TO", "STEP", "THEN", "ELSE", "
 # keyword, before its full stop. A longer one (PRI.) is the keyword it
 # starts, whose shortest form it starts with.
 ABBREVIATIONS = {
+    "CASE": "CAS", "ENDCASE": "ENDC", "ENDIF": "ENDI", "ENDWHILE": "ENDW",
+    "OTHERWISE": "OT", "WHEN": "WHE", "WHILE": "WH",
     "AND": "A", "AUTO": "AU", "CHAIN": "CH", "CHR$": "CHR", "CLEAR": "CL", "CLOSE": "CLO",
     "COLOUR": "C", "COUNT": "COU", "DATA": "D", "DELETE": "DEL", "DRAW": "DR",
     "ELSE": "EL", "ENDPROC": "E", "ENVELOPE": "ENV", "ERROR": "ERR", "EVAL": "EV",
@@ -101,15 +110,17 @@ ERRORS = {
     "Type mismatch": 6, "Missing \"": 9, "Bad DIM": 10, "Array": 14, "Subscript": 15,
     "Syntax error": 16, "Escape": 17, "Division by zero": 18, "Too big": 20,
     "-ve root": 21, "Log range": 22, "Exp range": 24, "No such variable": 26,
-    "Missing )": 27, "No such FN/PROC": 29, "No FOR": 32, "Can't match FOR": 33,
-    "FOR variable": 34, "No TO": 36, "No GOSUB": 38, "ON syntax": 39, "ON range": 40,
-    "No such line": 41, "Out of DATA": 42,
+    "Missing )": 27, "No such FN/PROC": 29, "Not in a FOR loop": 32, "Can't match FOR": 33,
+    "FOR variable": 34, "No TO": 36, "Not in a subroutine": 38, "ON syntax": 39,
+    "ON range": 40, "No such line": 41, "Out of DATA": 42, "Not in a REPEAT loop": 43,
+    "Not in a WHILE loop": 46, "Missing ENDCASE": 47, "Missing OF": 48, "Missing ENDIF": 49,
 }
 # The runtime's errors (Classic BASIC's names) in BBC BASIC's words.
 FROM_RUNTIME = {
     basic.SYNTAX: "Syntax error", basic.TYPE: "Type mismatch", basic.QUANTITY: "Too big",
     basic.UNDEF_LINE: "No such line", basic.UNDEF_FN: "No such FN/PROC",
-    "NEXT WITHOUT FOR": "No FOR", "RETURN WITHOUT GOSUB": "No GOSUB",
+    "NEXT WITHOUT FOR": "Not in a FOR loop", "RETURN WITHOUT GOSUB": "Not in a subroutine",
+    "WHILE WITHOUT WEND": "Missing ENDWHILE", "WEND WITHOUT WHILE": "Not in a WHILE loop",
     "OUT OF DATA": "Out of DATA", "DIVISION BY ZERO": "Division by zero",
     "OVERFLOW": "Too big", "OUT OF MEMORY": "No room", "REDIM'D ARRAY": "Bad DIM",
     "BAD SUBSCRIPT": "Subscript", "CAN'T CONTINUE": "Can't continue",
@@ -877,9 +888,11 @@ class Compiler:
             if self.is_op(":"):
                 self.pos += 1
                 continue
-            self.statement(out, kinds, in_then)
+            word = self.statement(out, kinds, in_then)
             if self.peek() is None or (in_then and self.is_word("ELSE")):
                 return
+            if word in GLUED:
+                continue  # REPEAT UNTIL GET, OTHERWISE PRINT: no colon needed
             if not self.is_op(":"):
                 raise BasicError(SYNTAX)
             self.pos += 1
@@ -900,7 +913,7 @@ class Compiler:
                     if self.at_end(in_then):
                         out.append(f)
                         kinds.append(None)
-                        return
+                        return None
                 except BasicError as e:
                     if word in ("TIME", "@%") or self.pos > pos + 1:
                         error = e  # it was an assignment, with a mistake
@@ -917,6 +930,7 @@ class Compiler:
             kinds.append(word)
         while len(kinds) < len(out):
             kinds.append(None)
+        return word
 
     def assignment(self):
         rt = self.rt
@@ -1018,10 +1032,22 @@ class Compiler:
 
     def s_IF(self, out, kinds, in_then):
         cond = self.num()
+        then = self.take_kw(("THEN",)) is not None  # optional, as on a BBC
+        if then and self.peek() is None and not in_then:
+            # THEN ending the line: IF over several lines, to ELSE and ENDIF.
+            rt = self.rt
+
+            def if_block():
+                if cond() != 0:
+                    return None
+                rt.li, rt.si = rt.block_end(BLOCK_IF, ("ELSE",), "Missing ENDIF")
+                return True
+            out.append(if_block)
+            kinds.append("IF THEN")
+            return
         skip = [0]
         out.append(_if(self.rt, cond, skip))
         kinds.append("IF")
-        self.take_kw(("THEN",))  # optional, as on a BBC
         self.branch(out, kinds)
         if self.is_word("ELSE"):
             self.pos += 1
@@ -1035,9 +1061,56 @@ class Compiler:
             skip[0] = -1  # the rest of the line
 
     def s_ELSE(self, out, kinds, in_then):
-        # An ELSE no IF took: the rest of the line is skipped.
-        self.pos = len(self.toks)
-        out.append(_skip(self.rt, [-1]))
+        # An ELSE no IF on its line took: a multi-line IF's, reached at the
+        # end of the part for a true condition, which goes on after ENDIF.
+        rt = self.rt
+
+        def else_():
+            rt.li, rt.si = rt.block_end(BLOCK_IF, (), "Missing ENDIF")
+            return True
+        out.append(else_)
+
+    def s_ENDIF(self, out, kinds, in_then):
+        out.append(lambda: None)
+
+    def s_CASE(self, out, kinds, in_then):
+        f, k = self.expr()
+        if self.take_kw(("OF",)) is None:
+            raise BasicError("Missing OF")
+        if self.peek() is not None:
+            raise BasicError(SYNTAX)  # OF ends the line; the WHENs follow
+        rt = self.rt
+        out.append(lambda: rt.do_case(f(), k))
+
+    def s_WHEN(self, out, kinds, in_then):
+        values = [self.expr()]
+        while self.is_op(","):
+            self.pos += 1
+            values.append(self.expr())
+        out.append(self.rt.case_end)  # the end of the clause before: on after ENDCASE
+        kinds.append(("WHEN", values))
+
+    def s_OTHERWISE(self, out, kinds, in_then):
+        out.append(self.rt.case_end)
+
+    def s_ENDCASE(self, out, kinds, in_then):
+        out.append(lambda: None)
+
+    def s_REPEAT(self, out, kinds, in_then):
+        out.append(self.rt.push_repeat)
+
+    def s_UNTIL(self, out, kinds, in_then):
+        cond = self.num()
+        rt = self.rt
+        out.append(lambda: rt.do_until(cond))
+
+    def s_WHILE(self, out, kinds, in_then):
+        cond = self.num()
+        rt = self.rt
+        out.append(lambda: rt.do_while(cond))
+
+    def s_ENDWHILE(self, out, kinds, in_then):
+        out.append(self.rt.do_wend)
 
     def s_FOR(self, out, kinds, in_then):
         t = self.peek()
@@ -1244,6 +1317,14 @@ class Compiler:
 
     def s_CONT(self, out, kinds, in_then):
         out.append(self.rt.do_cont)
+
+
+# The constructs over several lines: (the keywords that open one, those
+# that end it), as `Interpreter.scan` takes them.
+BLOCK_IF = (("IF THEN",), ("ENDIF",))
+BLOCK_CASE = (("CASE",), ("ENDCASE",))
+# The statements another may follow without a colon.
+GLUED = ("REPEAT", "WHEN", "OTHERWISE", "ELSE")
 
 
 # --- Closures -------------------------------------------------------------------------
@@ -1616,6 +1697,115 @@ class Interpreter(basic.Runtime):
         if prompt is not None:
             self.out.write(prompt)
         return None
+
+    # Constructs over several lines.
+
+    def scan(self, li, si, block, stops):
+        """From after statement `si` of line `li`: the first statement, in
+        this construct (`block`: its opening and ending keywords), that
+        ends it or whose keyword is in `stops`, skipping the constructs of
+        its kind inside it. (line, statement, keyword, what the keyword
+        holds), or None at the program's end."""
+        opens, closes = block
+        depth = 0
+        si += 1
+        while True:
+            try:
+                kinds = self.compiled(li)[1]
+            except BasicError as e:
+                if e.line is None and li >= 0:
+                    e.line = self.order[li]  # the mistake is that line's
+                raise
+            while si < len(kinds):
+                k = kinds[si]
+                name = k[0] if type(k) is tuple else k
+                if name in opens:
+                    depth += 1
+                elif name in closes:
+                    if depth == 0:
+                        return li, si, name, k
+                    depth -= 1
+                elif depth == 0 and name in stops:
+                    return li, si, name, k
+                si += 1
+            if li < 0 or li + 1 >= len(self.order):
+                return None
+            li += 1
+            si = 0
+
+    def block_end(self, block, stops, missing):
+        """The place after where this construct goes on (`stops`) or ends,
+        from the statement running; remembered until the program changes."""
+        place = (block, stops, self.li, self.si)
+        found = self.wends.get(place) if self.li >= 0 else None
+        if found is None:
+            r = self.scan(self.li, self.si, block, stops)
+            if r is None:
+                raise BasicError(missing)
+            found = (r[0], r[1] + 1)
+            if self.li >= 0:
+                self.wends[place] = found
+        return found
+
+    def do_case(self, v, kind):
+        """CASE: on after the first WHEN with a value equal to `v`, else
+        after OTHERWISE, else after ENDCASE."""
+        place = ("CASE", self.li, self.si)
+        clauses = self.wends.get(place) if self.li >= 0 else None
+        if clauses is None:
+            clauses = []
+            li, si = self.li, self.si
+            while True:
+                r = self.scan(li, si, BLOCK_CASE, ("WHEN", "OTHERWISE"))
+                if r is None:
+                    raise BasicError("Missing ENDCASE")
+                clauses.append(r)
+                li, si = r[0], r[1]
+                if r[2] == "ENDCASE":
+                    break
+            if self.li >= 0:
+                self.wends[place] = clauses
+        for li, si, name, k in clauses:
+            if name == "WHEN":
+                for f, wkind in k[1]:
+                    if wkind != kind:
+                        raise BasicError(TYPE)
+                    if f() == v:
+                        break
+                else:
+                    continue
+            self.li, self.si = li, si + 1
+            return True
+        return None  # not reached: the last clause is ENDCASE's
+
+    def case_end(self):
+        """WHEN or OTHERWISE reached at the end of a clause: on after the
+        ENDCASE."""
+        self.li, self.si = self.block_end(BLOCK_CASE, (), "Missing ENDCASE")
+        return True
+
+    # REPEAT frames share the stack with FOR, GOSUB and WHILE: ("R", line,
+    # statement).
+
+    def push_repeat(self):
+        self.stack.append(("R", self.li, self.si + 1))
+
+    def do_until(self, cond):
+        stack = self.stack
+        j = len(stack) - 1
+        while j >= 0 and stack[j][0] != "R":
+            if stack[j][0] == "G":
+                j = -1
+                break
+            j -= 1
+        if j < 0:
+            raise BasicError("Not in a REPEAT loop")
+        del stack[j + 1:]
+        if cond() != 0:
+            stack.pop()
+            return None
+        self.li, self.si = stack[j][1], stack[j][2]
+        return True
 
     def wait_key(self, cs):
         """A key: waiting for one (GET), or up to `cs` centiseconds (INKEY);

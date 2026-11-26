@@ -359,7 +359,7 @@ Phase 3, BBC BASIC. Decided 2026-11-26 (spec §6.2, §6.3):
   Input, DEF FN, the clock and RND stay Classic's.
   Tests: the Classic suites unchanged; `koracli_runtime.py` runs a toy
   dialect over the runtime, so what a dialect must give is pinned down.
-- [ ] **3b. BBC BASIC runs, a line at a time.** `sys:koracli/bbc.py`, the
+- [x] **3b. BBC BASIC runs, a line at a time.** (#132) `sys:koracli/bbc.py`, the
   `>` prompt, `BBC` in the bar, F4 switching with no program in memory.
   LET, PRINT (fields of ten, `'`, `~`, `@%`), INPUT, single-line IF THEN
   ELSE, GOTO, GOSUB, RETURN, FOR, NEXT, DIM, READ, DATA, RESTORE, END,
@@ -387,6 +387,20 @@ Phase 3, BBC BASIC. Decided 2026-11-26 (spec §6.2, §6.3):
   ENDIF; CASE OF, WHEN, OTHERWISE, ENDCASE; REPEAT, UNTIL; WHILE,
   ENDWHILE: matched over the program when it runs (lines are stored
   unchecked, spec §4).
+  *Built:* the statement that opens a construct looks ahead through the
+  compiled lines' keywords (skipping nested constructs of its kind) for
+  where it goes on or ends, and remembers it until the program changes,
+  as WHILE already did; a mistake in a line looked through is reported
+  at that line. REPEAT frames join FOR, GOSUB and WHILE on the stack.
+  As in BASIC V, `IF ... THEN` must end its line to open a block and
+  `CASE ... OF` must end its line, while a statement may follow REPEAT,
+  WHEN, OTHERWISE and ELSE without a colon. The errors take BASIC V's
+  wording: `Not in a FOR loop` (was `No FOR`), `Not in a subroutine`,
+  `Not in a REPEAT loop`, `Not in a WHILE loop`, `Missing ENDIF`,
+  `Missing ENDCASE`, `Missing OF`.
+  Tests: listings with nested constructs of each kind, each one's
+  mistakes, on the unix port (`koracli_bbc.py`); the smoke step runs a
+  multi-line IF.
 - [ ] **3d. Procedures, functions and errors.** DEF PROC, ENDPROC, DEF FN,
   `=`, parameters, LOCAL, BASIC V's RETURN parameters, recursion; a PROC or
   FN the program does not define calls Python's function of that name
