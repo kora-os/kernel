@@ -122,8 +122,8 @@ class Toy(basic.Runtime):
         self.out.newline_if_needed()
         self.out.write("toy: %s%s\n" % (e.name.lower(), " at %d" % line if line is not None else ""))
 
-    def report_break(self, line):
-        self.out.write("toy: break%s\n" % (" at %d" % line if line is not None else ""))
+    def report_break(self, line, how):
+        self.out.write("toy: %s%s\n" % (how.lower(), " at %d" % line if line is not None else ""))
 
     def line_refs(self, text):
         refs = []

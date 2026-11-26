@@ -346,7 +346,7 @@ Phase 3, BBC BASIC. Decided 2026-11-26 (spec §6.2, §6.3):
   are BBC BASIC V's.**
 - Merged on green CI (the user's choice, 2026-11-26).
 
-- [ ] **3a. The runtime the dialects share.** No change in behaviour:
+- [x] **3a. The runtime the dialects share.** (#131) No change in behaviour:
   `basic.Runtime` takes from `classic.py` what any BASIC with line numbers
   needs, and Classic BASIC's interpreter becomes a dialect over it.
   *Built:* the run of the compiled lines, GOTO, the FOR, GOSUB and WHILE
@@ -366,6 +366,23 @@ Phase 3, BBC BASIC. Decided 2026-11-26 (spec §6.2, §6.3):
   STOP, REM; the usual functions with TRUE, FALSE, PI, TIME, GET, GET$ and
   INKEY; `&` hex, DIV, MOD, EOR, `<<`, `>>`; BBC's error messages; names
   shared with Python one to one.
+  *Built:* `bbc.py` over `basic.Runtime`, which gained three hooks: the
+  value of a variable never written (`No such variable` here, A% to Z%
+  excepted), an array used before DIM (`Array`), and how a program
+  stopped (`STOP at line 20` or `Escape at line 20`). Integers are Python
+  ints and reals floats, so 32-bit `+` and `-` wrap, `*` becomes a real
+  when it overflows, and integers print whole. Numbers print in `@%`'s G,
+  E or F format. Unary functions take their operand without brackets, at
+  the tightest precedence with `NOT` and unary minus, as BBC BASIC V's
+  table has it. Where it was open: a `,` at a field's start adds no
+  spaces (`PRINT 1,2` fills two fields), GOTO and GOSUB take expressions,
+  INPUT reads numbers as VAL does, `INKEY` with a negative number gives
+  -1, EVAL is numeric, and CONT stays (KoraCLI's). The bar shows `BBC`,
+  with `F4 Classic` (and `F4 BBC` in Classic BASIC); F6 and F7 wait for
+  3e. KoraCLI starts in Classic BASIC.
+  Tests: type-in listings on the unix port (`koracli_bbc.py`, with what
+  BBC BASIC V prints); the smoke step switches to BBC BASIC, lists an
+  abbreviated line, runs it, and switches back after NEW.
 - [ ] **3c. Constructs over several lines.** Multi-line IF THEN, ELSE,
   ENDIF; CASE OF, WHEN, OTHERWISE, ENDCASE; REPEAT, UNTIL; WHILE,
   ENDWHILE: matched over the program when it runs (lines are stored

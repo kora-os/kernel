@@ -1,10 +1,11 @@
 # SPDX-License-Identifier: GPL-3.0-or-later
 #
 # KoraCLI's shell loop: the bars, the editor on key events, the mode keys
-# (F3 Python, F4 BASIC, F2 OS mode and back), and the blocks run. Python
-# runs in a namespace of its own, which BASIC's interpreter (classic.py,
-# loaded when first used) shares its variables with; both have ESC as a
-# break (KeyboardInterrupt).
+# (F3 Python, F4 BASIC, F2 OS mode and back; F4 in BASIC mode switches
+# dialect), and the blocks run. Python runs in a namespace of its own,
+# which BASIC's interpreters (classic.py and bbc.py, each loaded when first
+# used) share their variables with; all have ESC as a break
+# (KeyboardInterrupt).
 # The console stays in key-event mode, and input() reads the keys as bytes.
 
 import sys
@@ -18,8 +19,9 @@ import editor
 import keys
 
 # Classic BASIC's prompt is READY., printed after each command: the line
-# typed has none.
-PROMPTS = {"PY": (">>> ", "... "), "BAS": ("", ""), "OS": ("$ ", "$ ")}
+# typed has none. BBC BASIC's is >, before the line.
+PROMPTS = {"PY": (">>> ", "... "), "BAS": ("", ""), "BBC": (">", ">"), "OS": ("$ ", "$ ")}
+DIALECTS = {"Classic": "classic", "BBC": "bbc"}  # the dialect's module
 
 HELP = """KoraCLI: Python at the prompt.
   Enter runs a line; a block (def, for, if...) runs at the second blank line,
@@ -31,7 +33,8 @@ HELP = """KoraCLI: Python at the prompt.
   & runs it in the background, @N on core N. kora.run() and kora.capture()
   do the same in code.
   F3 switches to Python (PY), F4 to BASIC (BAS); F2 to OS commands (OS)
-  and back to the language you were in.
+  and back to the language you were in. In BASIC mode, F4 switches between
+  Classic BASIC and BBC BASIC (BBC) while no program is in memory.
   A line starting with a number is a BASIC program line, in every mode but
   OS; RUN runs the program, LIST lists it, NEW clears it, ESC stops it and
   CONT goes on. % runs a line of the other language: %RUN in Python mode,
@@ -46,17 +49,30 @@ def write(s):
     print(s, end="")
 
 
-def bars(mode):
+def shown(state):
+    """The mode as the bar shows it: BBC for BASIC mode in BBC BASIC."""
+    mode = state["mode"]
+    return "BBC" if mode == "BAS" and state["dialect"] == "BBC" else mode
+
+
+def bars(state):
     kora.bar(kora.TOP, " KoraCLI")
+    mode = state["mode"]
     if mode == "OS":
         keys_ = "F1 Help  F2 Back  F3 PY  F4 BAS"
+    elif mode == "BAS" and state["dialect"] == "BBC":
+        # SAVE and LOAD come to BBC BASIC with step 3e.
+        keys_ = "F1 Help  F2 OS  F3 PY  F4 Classic  F5 Run  F8 List"
+    elif mode == "BAS":
+        keys_ = "F1 Help  F2 OS  F3 PY  F4 BBC  F5 Run  F6 Save  F7 Load  F8 List"
     else:
         keys_ = "F1 Help  F2 OS  F3 PY  F4 BAS  F5 Run  F6 Save  F7 Load  F8 List"
-    kora.bar(kora.BOTTOM, " %s | %s" % (mode, keys_))
+    kora.bar(kora.BOTTOM, " %s | %s" % (shown(state), keys_))
 
 
-def prompts(ed, mode, start=True, text=""):
-    prompt, more = PROMPTS[mode]
+def prompts(ed, state, start=True, text=""):
+    mode = state["mode"]
+    prompt, more = PROMPTS[shown(state)]
     # Only Python has blocks: in BASIC and OS mode every line runs at Enter.
     routed = dispatch.routed if mode == "PY" else (lambda line: True)
     if start:
@@ -100,11 +116,13 @@ def run_os(text):
                background=c["background"], core=c["core"], report=True)
 
 
-def basic(state):
-    """Classic BASIC's interpreter, made when BASIC is first used."""
-    b = state.get("basic")
+def basic(state, dialect=None):
+    """The dialect's interpreter (the one in use by default), made when it
+    is first used."""
+    dialect = dialect or state["dialect"]
+    b = state["basics"].get(dialect)
     if b is None:
-        import classic
+        module = __import__(DIALECTS[dialect])
 
         def readline():
             try:
@@ -114,7 +132,7 @@ def basic(state):
 
         def getkey():
             k = kora.key(False)
-            return "" if k is None else classic.key_char(k[0], k[1])
+            return "" if k is None else module.key_char(k[0], k[1])
 
         def command(name, args):
             """SYS's OS commands and wrappers; False if there is none."""
@@ -125,9 +143,14 @@ def basic(state):
             return True
 
         # BASIC's variables are Python's too: the namespace Python runs in.
-        b = classic.Interpreter(write, readline, getkey, state["width"], state["ns"], command)
-        state["basic"] = b
+        b = module.Interpreter(write, readline, getkey, state["width"], state["ns"], command)
+        state["basics"][dialect] = b
     return b
+
+
+def current(state):
+    """The interpreter in use, if BASIC has been used."""
+    return state["basics"].get(state["dialect"])
 
 
 def run_basic(text, state):
@@ -136,7 +159,8 @@ def run_basic(text, state):
     try:
         b.execute(text)
     except KeyboardInterrupt:
-        print("BREAK")
+        b.out.newline_if_needed()
+        b.report_break(None, "BREAK")
     except Exception as e:  # a mistake in the interpreter, not the program
         sys.print_exception(e)
     finally:
@@ -144,9 +168,36 @@ def run_basic(text, state):
 
 
 def stop_auto(state):
-    b = state.get("basic")
+    b = current(state)
     if b is not None:
         b.auto = None
+
+
+def ready(state):
+    """After a command in BASIC mode: Classic BASIC says READY.; BBC BASIC's
+    prompt starts a line of its own."""
+    if state["dialect"] == "BBC":
+        b = current(state)
+        if b is not None:
+            b.out.newline_if_needed()
+    else:
+        print("READY.")
+
+
+def switch_dialect(ed, state):
+    """F4 in BASIC mode: the other dialect, while no program is in memory."""
+    b = current(state)
+    other = "Classic" if state["dialect"] == "BBC" else "BBC"
+    ed.cancel(mark=False)
+    if b is not None and b.program.lines:
+        print("koracli: a program is in memory: NEW or SAVE it first, to switch to %s BASIC"
+              % other)
+        return
+    state["dialect"] = other
+    bars(state)
+    print("%s BASIC" % other)
+    if other == "Classic":
+        print("READY.")
 
 
 def run(text, mode, ns, state):
@@ -163,7 +214,7 @@ def run(text, mode, ns, state):
         if rest.strip():
             run_basic(rest, state)
         if mode == "BAS" and text.strip():
-            print("READY.")
+            ready(state)
     elif text.strip():
         # Python (a ! line too), its ! lines made calls of kora's (bang.py).
         code = text if kind == dispatch.OS_COMMAND or mode == "PY" else rest
@@ -174,7 +225,7 @@ def run(text, mode, ns, state):
             return
         run_python(code, ns)
         if mode == "BAS":
-            print("READY.")
+            ready(state)
 
 
 def report_jobs():
@@ -187,9 +238,9 @@ def read_action(ed, state):
     """One round at the prompt: the jobs that ended, a prompt, keys until
     there is something to do (the mode keys switch mode on the way)."""
     report_jobs()
-    b = state.get("basic")
+    b = current(state)
     auto = b.auto_text() if b is not None and state["mode"] != "OS" else None
-    prompts(ed, state["mode"], text=auto or "")
+    prompts(ed, state, text=auto or "")
     while True:
         action = ed.feed(*kora.key())
         if action is None:
@@ -206,25 +257,31 @@ def read_action(ed, state):
             if action[1] == "F8":
                 ed.type_text(text + "LIST")
                 return ed.submit()
+            if state["dialect"] == "BBC" and state["mode"] == "BAS" and \
+                    action[1] in ("F6", "F7"):
+                continue  # BBC BASIC's SAVE and LOAD come with step 3e
             if action[1] == "F6":
                 name = b.file if b is not None else None
                 ed.type_text(text + ('SAVE "%s"' % name if name else 'SAVE "'))
             else:
                 ed.type_text(text + 'LOAD "')
             continue
+        if action[0] == "key" and action[1] == "F4" and state["mode"] == "BAS":
+            switch_dialect(ed, state)
+            return ("help",)  # a new prompt, in the dialect now in use
         if action[0] == "key" and action[1] != "F1":
             mode, state["language"] = dispatch.switch(state["mode"], state["language"],
                                                       action[1])
             if mode == state["mode"]:
-                continue  # F3 in Python mode, F4 in BASIC mode
+                continue  # F3 in Python mode
             state["mode"] = mode
-            bars(mode)
-            if mode == "BAS" and not ed.text():
+            bars(state)
+            if mode == "BAS" and state["dialect"] == "Classic" and not ed.text():
                 # On an empty line, BASIC says it is ready, as a C64 does.
                 write("\r\x1b[KREADY.\n")
-                prompts(ed, mode)
+                prompts(ed, state)
             else:
-                prompts(ed, mode, start=False)
+                prompts(ed, state, start=False)
             continue
         if action[0] == "key":  # F1
             ed.cancel(mark=False)
@@ -250,14 +307,15 @@ def main():
     ns = {"__name__": "__main__", "kora": kora}
     ed = editor.Editor(write, width)
     commands.register()
-    bars("PY")
     try:
         version = " " + ".".join(str(n) for n in sys.implementation.version[:3])
     except AttributeError:
         version = ""
     print("KoraCLI on MicroPython%s. F1 for help." % version)
     kora.mode(kora.EVENTS)
-    state = {"mode": "PY", "language": "PY", "width": width, "ns": ns}
+    state = {"mode": "PY", "language": "PY", "dialect": "Classic", "basics": {},
+             "width": width, "ns": ns}
+    bars(state)
     try:
         while True:
             # A Ctrl+C may come at any moment, also while the editor works on
