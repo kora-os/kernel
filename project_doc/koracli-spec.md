@@ -426,7 +426,8 @@ In the full-screen editor, Enter on a single line re-enters that line, as on the
   ```
 - `LOAD` reads line 0 to determine the dialect. If it differs from the active dialect, the shell applies the dialect-switch rule (§6.3: warn and confirm).
 - `RENUM` never moves line 0.
-- A `.BAS` file without a header is loaded in the active dialect *(proposed)*.
+- A `.BAS` file without a header is loaded in the active dialect.
+- *Decided (step 2c):* the header is the **file's** line 0 only. `LOAD` takes it away and `SAVE` writes it without changing the program in memory, so `LIST` never shows it, `CONT` still works after a `SAVE`, and a program's own line 0 (saved after the header) stays its own. `.BAS` is added to a name without an extension. `LOAD` typed clears BASIC's variables (as `NEW`); in a program it chains, as on a C64, keeping them.
 
 ### 12.2 Python files
 - `.py` files are **pure Python**. Shell syntax (`!`, `%`, line numbers) is not interpreted inside them.

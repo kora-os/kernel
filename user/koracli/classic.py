@@ -48,12 +48,18 @@ try:
 except ImportError:
     gc = None
 
+try:
+    import os
+except ImportError:
+    os = None
+
 # --- Words -------------------------------------------------------------------------
 
 STATEMENTS = (
-    "CLR", "CLS", "CONT", "DATA", "DEF", "DIM", "ELSE", "END", "FOR", "GET", "GOSUB",
-    "GOTO", "IF", "INPUT", "LET", "LIST", "NEW", "NEXT", "ON", "PRINT", "RANDOMIZE",
-    "READ", "REM", "RESTORE", "RETURN", "RUN", "STOP", "SWAP", "SYS", "WEND", "WHILE",
+    "AUTO", "CLR", "CLS", "CONT", "DATA", "DEF", "DIM", "ELSE", "END", "FOR", "GET",
+    "GOSUB", "GOTO", "IF", "INPUT", "LET", "LIST", "LOAD", "NEW", "NEXT", "ON", "PRINT",
+    "RANDOMIZE", "READ", "REM", "RENUM", "RESTORE", "RETURN", "RUN", "SAVE", "STOP",
+    "SWAP", "SYS", "WEND", "WHILE",
 )
 OPERATORS = ("AND", "OR", "XOR", "MOD", "NOT")
 CLAUSES = ("THEN", "TO", "STEP", "GOTO", "GOSUB", "ELSE")
@@ -79,6 +85,12 @@ TYPE = "TYPE MISMATCH"
 QUANTITY = "ILLEGAL QUANTITY"
 UNDEF_LINE = "UNDEF'D STATEMENT"
 UNDEF_FN = "UNDEF'D FUNCTION"
+
+# Files (spec §12): plain text, `.BAS` when the name has no extension, with
+# the dialect in a header that is the file's line 0. The header is the
+# file's only: LOAD takes it away, so a program's own line 0 stays its own.
+DIALECT = "Classic"
+HEADER = "0 REM !KoraBasic:"
 
 INF = float("inf")
 MISSING = object()  # no value in the Python namespace
@@ -1267,6 +1279,50 @@ class Compiler:
         rt = self.rt
         out.append(lambda: rt.do_list(low, high))
 
+    def file_name(self, in_then):
+        """SAVE's and LOAD's name, a string; a C64's device and secondary
+        address after it (`,8`, `,8,1`) are read and left alone."""
+        if self.at_end(in_then):
+            raise BasicError("MISSING FILE NAME")
+        name, kind = self.expr()
+        if kind != "s":
+            raise BasicError(TYPE)
+        while self.is_op(","):
+            self.pos += 1
+            self.num()
+        return name
+
+    def numbering(self, in_then):
+        """RENUM's and AUTO's [start[, step]], 10 and 10 when not given."""
+        start = step = 10
+        if not self.at_end(in_then):
+            if not self.is_op(","):
+                start = self.line_number()
+            if self.is_op(","):
+                self.pos += 1
+                step = self.line_number()
+        return start, step
+
+    def s_SAVE(self, out, kinds, in_then):
+        name = self.file_name(in_then)
+        rt = self.rt
+        out.append(lambda: rt.do_save(name()))
+
+    def s_LOAD(self, out, kinds, in_then):
+        name = self.file_name(in_then)
+        rt = self.rt
+        out.append(lambda: rt.do_load(name()))
+
+    def s_RENUM(self, out, kinds, in_then):
+        start, step = self.numbering(in_then)
+        rt = self.rt
+        out.append(lambda: rt.do_renum(start, step))
+
+    def s_AUTO(self, out, kinds, in_then):
+        start, step = self.numbering(in_then)
+        rt = self.rt
+        out.append(lambda: rt.do_auto(start, step))
+
     def s_NEW(self, out, kinds, in_then):
         rt = self.rt
         out.append(rt.do_new)
@@ -1274,6 +1330,86 @@ class Compiler:
     def s_CONT(self, out, kinds, in_then):
         rt = self.rt
         out.append(rt.do_cont)
+
+
+# --- Files and line numbers ----------------------------------------------------------
+
+# The words before a line number (or ON's list of them).
+REFERENCES = ("GOTO", "GOSUB", "THEN", "ELSE", "RESTORE", "RUN")
+
+
+def line_refs(text):
+    """The line numbers a program line names: (start, end, number) for each
+    after GOTO, GOSUB (and ON's lists), THEN, ELSE, RESTORE and RUN. GOTO,
+    GOSUB, THEN and ELSE may be joined to the number (GOTO30), as the
+    parser takes them."""
+    toks = tokenize(text)
+    refs = []
+    i = 0
+    while i < len(toks):
+        kind, value, s, e = toks[i]
+        i += 1
+        if kind != "W":
+            continue
+        up = value.upper()
+        if up not in REFERENCES:
+            k = _keyword_prefix(value, CLAUSES)
+            if k is None or k == "TO" or k == "STEP":
+                continue
+            if i < len(toks) and toks[i][0] == "O" and toks[i][1] == "=":
+                continue  # a name assigned to (GOTO1 = 5)
+            # The rest of the word, lexed again where it stands.
+            toks[i:i] = tokenize(" " * (s + len(k)) + value[len(k):])
+            up = k
+        while i < len(toks) and toks[i][0] == "N" and toks[i][1] == int(toks[i][1]):
+            refs.append((toks[i][2], toks[i][3], int(toks[i][1])))
+            i += 1
+            if up not in ("GOTO", "GOSUB") or i + 1 >= len(toks) or \
+                    toks[i][0] != "O" or toks[i][1] != ",":
+                break
+            i += 1  # ON's list goes on
+    return refs
+
+
+def renumber_line(text, new):
+    """`text` with the line numbers it names changed as `new` maps them."""
+    for s, e, n in reversed(line_refs(text)):
+        if n in new:
+            text = text[:s] + str(new[n]) + text[e:]
+    return text
+
+
+def file_path(name):
+    """A program's file: `.BAS` added when the name has no extension."""
+    if not name:
+        raise BasicError("MISSING FILE NAME")
+    base = name[max(name.rfind("/"), name.rfind(":")) + 1:]
+    return name if "." in base else name + ".BAS"
+
+
+def read_program(text):
+    """A file's lines, by number, after its header (a dialect other than
+    Classic BASIC's is refused); blank lines are skipped, and a line without
+    a number, or past 63999, is the file's mistake."""
+    program = basic.Program(normalize)
+    first = True
+    for line in text.split("\n"):
+        line = line.strip()
+        if not line:
+            continue
+        if first:
+            first = False
+            if line.upper().startswith(HEADER.upper()):
+                if line[len(HEADER):].strip().upper() != DIALECT.upper():
+                    raise BasicError("UNKNOWN DIALECT")
+                continue
+        if not _is_digit(line[0]):
+            raise BasicError("FILE DATA")
+        try:
+            program.enter(line)
+        except BasicError:
+            raise BasicError("FILE DATA")
+    return program.lines
 
 
 def _round(v, divisor=False):
@@ -1556,16 +1692,38 @@ class Interpreter:
         self.cont = None
         self.random = basic.Random(ticks_ms())
         self.ti_base = 0
+        self.file = None  # the name last saved or loaded (F6 offers it)
+        self.auto = None  # AUTO's [next line, step]: KoraCLI types the number
 
     # The program.
 
     def enter(self, text):
-        """A program line typed (from the dispatcher)."""
+        """A program line typed (from the dispatcher). Under AUTO, its
+        number alone ends AUTO (the line stays), and any other line moves
+        AUTO on past it."""
+        auto = self.auto
+        if auto is not None and text.strip() == str(auto[0]):
+            self.auto = None
+            return None
         try:
-            return self.program.enter(text)
+            number, rest = self.program.enter(text)
         except BasicError as e:
             self.report(e, None)
             return None
+        if auto is not None:
+            auto[0] = number + auto[1]
+            if auto[0] > basic.MAX_LINE:
+                self.auto = None
+        return number, rest
+
+    def auto_text(self):
+        """The line AUTO offers: its next number, and the line there if
+        there is one (to change or keep); None without AUTO."""
+        if self.auto is None:
+            return None
+        n = self.auto[0]
+        line = self.program.lines.get(n)
+        return "%d %s" % (n, line) if line is not None else "%d " % n
 
     def _sync(self):
         if self.order_version != self.program.version:
@@ -2104,6 +2262,93 @@ class Interpreter:
         self.code = {}
         self._sync()
         return self.halt("NEW")
+
+    def do_save(self, name):
+        """SAVE: the program as LIST shows it, after the dialect's header."""
+        path = file_path(name)
+        if self.li < 0:
+            self.out.write("SAVING %s\n" % name)
+        lines = [HEADER + DIALECT]
+        for number in self.program.numbers():
+            lines.append("%d %s" % (number, self.program.lines[number]))
+        try:
+            with open(path, "w") as f:
+                f.write("\n".join(lines) + "\n")
+            if os is not None and hasattr(os, "sync"):
+                os.sync()  # to the medium now: a failure is SAVE's
+        except OSError:
+            raise BasicError("WRITE")
+        self.file = name
+        return None
+
+    def do_load(self, name):
+        """LOAD: the program from the file, in place of the one in memory.
+        Typed, it clears the variables, as NEW does; in a program, the new
+        one runs from its start with the variables kept (a C64's chaining)."""
+        path = file_path(name)
+        direct = self.li < 0
+        if direct:
+            self.out.write("SEARCHING FOR %s\n" % name)
+        try:
+            with open(path) as f:
+                text = f.read()
+        except OSError as e:
+            raise BasicError("FILE NOT FOUND" if e.args and e.args[0] == 2 else "READ")
+        lines = read_program(text)
+        if direct:
+            self.out.write("LOADING\n")
+        self.program.lines = lines
+        self.program.version += 1
+        self.code = {}
+        self.cont = None
+        self.file = name
+        self._sync()
+        if direct:
+            self.clear()
+            return None
+        self.stack.clear()
+        self.data = None
+        self.data_pos = 0
+        if not self.order:
+            return self.halt("END")
+        self.li = 0
+        self.si = 0
+        return True
+
+    def do_renum(self, start, step):
+        """RENUM: the lines from `start`, `step` apart, line 0 staying where
+        it is, with the GOTO, GOSUB, THEN, ELSE, RESTORE and RUN that name
+        them. One naming a line there is not stays, with a warning."""
+        old = [n for n in self.program.numbers() if n != 0]
+        if not old:
+            return None
+        if start < 1 or step < 1 or start + step * (len(old) - 1) > basic.MAX_LINE:
+            raise BasicError(QUANTITY)
+        new = {0: 0} if 0 in self.program.lines else {}
+        for i, n in enumerate(old):
+            new[n] = start + step * i
+        lines = {}
+        for n, text in self.program.lines.items():
+            for _, _, target in line_refs(text):
+                if target not in new:
+                    self.out.newline_if_needed()
+                    self.out.write("?UNDEF'D STATEMENT %d IN %d\n" % (target, new[n]))
+            lines[new[n]] = renumber_line(text, new)
+        self.program.lines = lines
+        self.program.version += 1
+        self.code = {}
+        self.cont = None
+        self.data = None
+        self.data_pos = 0
+        self._sync()  # the order is the same: a running program's place holds
+        return None
+
+    def do_auto(self, start, step):
+        """AUTO: KoraCLI types the line numbers, from `start`, `step` apart."""
+        if step < 1:
+            raise BasicError(QUANTITY)
+        self.auto = [start, step]
+        return None
 
     def do_cont(self):
         c = self.cont

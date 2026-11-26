@@ -156,6 +156,27 @@ press(ed, keys.HOME)
 check(press(ed, 0x07, 0x01, "d") is None and ed.lines == ["b"], "elsewhere it deletes")
 check(press(ed, keys.F1) == ("key", "F1") and press(ed, keys.F2) == ("key", "F2") and
       press(ed, keys.F3) == ("key", "F3") and press(ed, keys.F4) == ("key", "F4"), "F1 to F4")
+check(all(press(ed, k) == ("key", n) for k, n in ((keys.F5, "F5"), (keys.F6, "F6"),
+                                                   (keys.F7, "F7"), (keys.F8, "F8"))),
+      "F5 to F8")
+
+# A function key's text, typed at the cursor, and the block run (F5, F8).
+ed, screen = new()
+check(ed.at_start(), "an empty block: the cursor at its start")
+ed.type_text("%RUN")
+check(not ed.at_start() and ed.submit() == ("run", "%RUN"), "typed, then run")
+ed, screen = new()
+type_text(ed, "ab")
+press(ed, keys.LEFT)
+ed.type_text("XY")
+check(ed.lines == ["aXYb"] and ed.col == 3, "at the cursor: %r" % ed.lines)
+
+# AUTO's line: the number typed already, the cursor after it.
+screen = Screen()
+ed = editor.Editor(screen.write, 40)
+ed.start("", "", lambda line: True, "20 ")
+check(screen.take() == "20 " and ed.col == 3, "the number shown, the cursor after it")
+check(type_text(ed, "PRINT\n") == ("run", "20 PRINT"), "Enter runs the numbered line")
 
 # Drawing: typed at the end, a character is all that is written, until it
 # reaches the last column; a wrapped line, and the cursor brought back.

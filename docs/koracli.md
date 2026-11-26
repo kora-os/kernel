@@ -4,10 +4,10 @@ KoraCLI is the shell KoraOS starts in: a fullscreen prompt where you can type
 Python, a line of BASIC or an OS command, and see what happens.
 
 > **Status: KoraCLI is the shell (phase 1 done), and Classic BASIC runs,
-> sharing its variables with Python (steps 2a and 2b).** KoraOS starts in
-> it, with Python, BASIC and OS modes, OS commands from Python, and its own
-> editor (`koracli` starts another one). SAVE, LOAD, RENUM and AUTO come in
-> step 2c. This reference is written ahead of the implementation and grows
+> sharing its variables with Python, with SAVE, LOAD, RENUM and AUTO
+> (phase 2).** KoraOS starts in it, with Python, BASIC and OS modes, OS
+> commands from Python, and its own editor (`koracli` starts another one).
+> This reference is written ahead of the implementation and grows
 > with it: each section says whether what it describes works today or which
 > step brings it. The
 > design behind it is `project_doc/koracli-spec.md`, and the steps are in
@@ -277,8 +277,7 @@ for scripting: use Python mode for that.
 
 ## BASIC
 
-*Works: Classic BASIC (steps 2a and 2b), without SAVE, LOAD, RENUM and AUTO
-(step 2c). BBC BASIC comes in phase 3.*
+*Works: Classic BASIC (steps 2a to 2c). BBC BASIC comes in phase 3.*
 
 BASIC mode uses one of two dialects at a time, chosen in the configuration.
 Switching dialect with a program in memory asks first, then clears the
@@ -308,9 +307,9 @@ variable); in KoraCLI the whole name counts.
 | `NEW` | Clears the program and BASIC's variables | Works |
 | `CONT` | Continues after ESC or `STOP`, unless the program was changed | Works |
 | `CLR` | Clears the variables, keeping the program | Works |
-| `SAVE "name"`, `LOAD "name"` | Saves and loads `.BAS` files | Step 2c |
-| `RENUM [start[,step]]` | Renumbers the program | Step 2c |
-| `AUTO [start[,step]]` | Numbers lines for you as you type | Step 2c |
+| `SAVE "name"`, `LOAD "name"` | Saves and loads `.BAS` files (see [Files](#files)) | Works |
+| `RENUM [start[,step]]` | Renumbers the program, 10 and 10 by default | Works |
+| `AUTO [start[,step]]` | Numbers lines for you as you type, 10 and 10 by default | Works |
 | `HELP [keyword]` | Help on a keyword | Phase 6 |
 
 Any other statement typed without a line number runs at once:
@@ -379,13 +378,61 @@ when the line runs: `?SYNTAX ERROR IN 10`.
 
 ### Files
 
-*Planned (step 2c).*
+*Works (step 2c), in Classic BASIC.*
 
-Programs are saved as plain text with the `.BAS` extension. `SAVE` writes
-line 0 to record the dialect (`0 REM !KoraBasic:Classic` or
-`0 REM !KoraBasic:BBC`). `LOAD` reads it and offers to switch dialect if
-needed. `RENUM` never moves line 0. A file without line 0 loads in the
-current dialect.
+```
+READY.
+SAVE "HELLO"
+SAVING HELLO
+READY.
+LOAD "HELLO"
+SEARCHING FOR HELLO
+LOADING
+READY.
+```
+
+- **Programs are plain text,** as `LIST` shows them, in the current
+  directory or wherever the name says (`SAVE "df0:GAME"`). `.BAS` is added
+  when the name has no extension. The name is any string expression
+  (`SAVE N$`), and a C64's `,8` or `,8,1` after it is accepted and ignored.
+- **The file's first line records the dialect:** `0 REM
+  !KoraBasic:Classic`, written by `SAVE` (`0 REM !KoraBasic:BBC` once BBC
+  BASIC exists). The header belongs to the file only: `LOAD` takes it
+  away, so `LIST` never shows it and a program's own line 0 stays its own.
+  A file without a header loads as Classic BASIC; one for another dialect
+  is `?UNKNOWN DIALECT ERROR` for now.
+- **`LOAD` replaces the program and clears BASIC's variables,** as `NEW`
+  does. In a program it chains, as on a C64: the new program runs from its
+  start with the variables kept.
+- **A file written by hand** may have blank lines and keywords in any case.
+  A line without a number, or one past 63999, is `?FILE DATA ERROR`, and
+  the program in memory stays as it was.
+- **Errors:** `?FILE NOT FOUND ERROR`, `?MISSING FILE NAME ERROR`, and
+  `?WRITE ERROR` when the file cannot be written (an SD card or USB drive
+  is read-only in a normal build; the ramdisk and a writable VirtIO disk
+  are not). `SAVE` syncs the volume, so a failure shows there.
+- `SAVING` and `SEARCHING FOR` show when the command is typed, not in a
+  program.
+
+### RENUM and AUTO
+
+*Works (step 2c).*
+
+- **`RENUM [start[,step]]`** numbers the lines from `start`, `step` apart,
+  and changes the line numbers that `GOTO`, `GOSUB`, `ON`, `THEN`, `ELSE`,
+  `RESTORE` and `RUN` name (also `GOTO30` written without a space). Line 0
+  never moves. A `GOTO` to a line that is not there stays as it is, with a
+  warning: `?UNDEF'D STATEMENT 99 IN 30`. Line numbers past 63999 are
+  `?ILLEGAL QUANTITY ERROR`, and nothing changes.
+- **`AUTO [start[,step]]`** types each line's number for you: the prompt
+  shows `10 `, and after each program line, the next. Where a line is
+  there already it is shown, to change or keep. Enter on the number alone,
+  Ctrl+C, or a line that is not a program line ends `AUTO`; typing another
+  number goes on from there.
+
+**Differences:** a C64 has neither; they are GW-BASIC's. GW-BASIC marks a
+line already there with `*` and ends `AUTO` only with Ctrl+C; KoraCLI
+shows the line, since its editor can change it.
 
 ## Variables shared by Python and BASIC
 
@@ -486,9 +533,12 @@ beepbeepbeep
 full-screen programs such as editors and games need ESC for themselves; stop
 those with Ctrl+C.
 
-**Today:** F1 (help), F2 to F4 (the modes), ESC and Ctrl+C on running
-code, PgUp and PgDn, Ctrl+Enter, Shift+PgUp and Shift+PgDn and Meta+M work.
-F5 to F8 come with step 2c. Every console sends F1
+F5 to F8 type their command at the cursor, as GW-BASIC's keys do, with `%`
+in front in Python mode on an empty line: F5 `RUN` and F8 `LIST` press Enter
+too, F6 types `SAVE "` with the name last saved or loaded (Enter saves it
+again), and F7 types `LOAD "` for the name. In OS mode they do nothing.
+
+**Today:** all of the keys above work. Every console sends F1
 to F12 as xterm does, and a program can read each key as an event and ask
 for ESC as a break (step 1a).
 

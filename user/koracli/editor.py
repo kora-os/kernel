@@ -18,11 +18,12 @@
 #   Ctrl+D         on an empty block, the end; otherwise Delete
 #
 # feed() returns None, or what the shell is to do: ("run", text),
-# ("eof",), ("key", name) for F1 to F4.
+# ("eof",), ("key", name) for F1 to F8.
 
 import keys
 
-FUNCTION_KEYS = {keys.F1: "F1", keys.F2: "F2", keys.F3: "F3", keys.F4: "F4"}
+FUNCTION_KEYS = {keys.F1: "F1", keys.F2: "F2", keys.F3: "F3", keys.F4: "F4", keys.F5: "F5",
+                 keys.F6: "F6", keys.F7: "F7", keys.F8: "F8"}
 INDENT = 4
 HISTORY_SIZE = 100
 
@@ -113,18 +114,20 @@ class Editor:
 
     # --- the block on the screen ---
 
-    def start(self, prompt, more, routed=None):
-        """A new block at a new prompt. `routed(line)` says whether a first
-        line goes elsewhere whole (a prefix): it runs at Enter."""
+    def start(self, prompt, more, routed=None, text=""):
+        """A new block at a new prompt, with `text` typed already (AUTO's
+        line number). `routed(line)` says whether a first line goes
+        elsewhere whole (a prefix): it runs at Enter."""
         self.prompt = prompt
         self.more = more
         self.routed = routed
-        self.lines = [""]
-        self.row = self.col = 0
+        self.lines = [text]
+        self.row = 0
+        self.col = len(text)
         self.shown_row = 0
         self.browse = None
         self.draft = None
-        self.write(prompt)
+        self.write(prompt + text)
 
     def set_prompts(self, prompt, more, routed=None):
         """New prompts for the block being typed (a mode change), redrawn."""
@@ -135,6 +138,19 @@ class Editor:
 
     def text(self):
         return "\n".join(self.lines)
+
+    def at_start(self):
+        """Whether the cursor is at the block's very start."""
+        return self.row == 0 and self.col == 0
+
+    def type_text(self, s):
+        """`s` typed at the cursor (a function key's text)."""
+        self._insert(s)
+        self.redraw()
+
+    def submit(self):
+        """The block runs, as at Ctrl+Enter."""
+        return self._finish()
 
     def _prefix(self, i):
         return self.prompt if i == 0 else self.more

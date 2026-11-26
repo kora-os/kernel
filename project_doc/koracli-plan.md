@@ -311,6 +311,23 @@ Phase 2, Classic BASIC. Decided 2026-11-26:
 - [ ] **2c. Files and line tools.** `SAVE` and `LOAD` (`.BAS`, line 0's
   dialect header), `RENUM` (line 0 stays), `AUTO`, and the function keys
   in the bar (F5 Run, F6 Save, F7 Load, F8 List).
+  *Built:* the header is the file's line 0 only: `LOAD` takes it away, so
+  `LIST` never shows it, a program's own line 0 stays its own, and `SAVE`
+  changes nothing in memory (`CONT` still works after it). A file without
+  one is Classic; another dialect is `?UNKNOWN DIALECT ERROR` until phase
+  3. `.BAS` is added to a name without an extension; `,8` is accepted.
+  `LOAD` clears BASIC's variables when typed, and chains in a program (the
+  new program runs, the variables kept), as on a C64; `SAVE` syncs the
+  volume. A hand-written file's mistakes are `?FILE DATA ERROR`, the
+  program kept. `RENUM` changes the numbers after GOTO, GOSUB (ON's lists),
+  THEN, ELSE, RESTORE and RUN, warns about lines not there, and moves no
+  line 0. `AUTO` is the interpreter's state; the shell starts each prompt
+  with its number (and the line there, to change or keep); the number alone,
+  Ctrl+C or any other line ends it. F5 to F8 type their command at the
+  cursor as GW-BASIC's do (`%` first in Python mode), F5 and F8 with Enter;
+  F6 offers the name last saved or loaded.
+  Tests: `koracli_files.py` on the unix port; the smoke step presses F8,
+  renumbers, and saves, clears and loads where a volume is writable.
 
 Later phases, in a line each, to be split into PRs when they come up:
 

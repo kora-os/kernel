@@ -1732,6 +1732,31 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         q.send("%print('python', N > 0, msg)\r")  # BASIC's N, shared
         q.expect(rb"^python True hello world\r?$")
         q.expect(rb"^READY\.\r?$")
+        # Step 2c: F8 lists, RENUM follows the GOTO, and on a writable volume
+        # SAVE, NEW and LOAD bring the program back.
+        q.key("f8")
+        q.expect(rb"^30 N = N \+ 1: GOTO 30\r?$")
+        q.expect(rb"^READY\.\r?$")
+        q.send("RENUM 100, 10\r")
+        q.expect(rb"^READY\.\r?$")
+        q.send("LIST 120\r")
+        q.expect(rb"^120 N = N \+ 1: GOTO 120\r?$")
+        q.expect(rb"^READY\.\r?$")
+        q.send("%print('writable:', bool(writable))\r")
+        if q.expect(rb"^writable: (True|False)\r?$").group(1) == b"True":
+            q.send("%prog = writable[0].replace('kcli.txt', 'kcli')\r")
+            q.expect(rb"^READY\.\r?$")
+            q.send("SAVE PROG$\r")
+            q.expect(rb"^SAVING \S+:kcli\r?$")
+            q.expect(rb"^READY\.\r?$")
+            q.send("NEW\r")
+            q.expect(rb"^READY\.\r?$")
+            q.send("LOAD PROG$\r")
+            q.expect(rb"^LOADING\r?$")
+            q.expect(rb"^READY\.\r?$")
+            q.send("LIST 100\r")
+            q.expect(rb"^100 PRINT msg\$\r?$")
+            q.expect(rb"^READY\.\r?$")
         q.send("NEW\r")
         q.expect(rb"^READY\.\r?$")
         # OS mode runs every line as a command, with no {expr}; F2 goes
