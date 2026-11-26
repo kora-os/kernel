@@ -277,8 +277,8 @@ for scripting: use Python mode for that.
 
 ## BASIC
 
-*Works: Classic BASIC (steps 2a to 2c); BBC BASIC (steps 3b and 3c), its
-procedures, files and star commands coming in steps 3d and 3e.*
+*Works: Classic BASIC (steps 2a to 2c); BBC BASIC (steps 3b to 3d), its
+files and star commands coming in step 3e.*
 
 BASIC mode uses one of two dialects at a time, Classic BASIC when KoraCLI
 starts. F4 pressed in BASIC mode switches dialect while no program is in
@@ -388,9 +388,9 @@ when the line runs: `?SYNTAX ERROR IN 10`.
 
 ### BBC BASIC
 
-*Works (steps 3b and 3c): the statements and the constructs over several
-lines below. `PROC`, `FN` and `ON ERROR` come in step 3d; star commands,
-`SAVE`, `LOAD` and `RENUMBER` in 3e.*
+*Works (steps 3b to 3d): the statements, the constructs over several lines,
+procedures and functions, and error handling below. Star commands, `SAVE`,
+`LOAD` and `RENUMBER` come in step 3e.*
 
 BBC-inspired, modelled on BBC BASIC V: what a BBC BASIC manual says
 applies, though old programs are not promised to run unchanged.
@@ -403,6 +403,8 @@ Statements:
 | Variables | `LET` (optional), `+=` and `-=`, `DIM a(10, 5)`, `SWAP a, b`, `CLEAR`, `TIME = n` |
 | Flow | `GOTO` and `GOSUB` (to a line number or an expression), `RETURN`, `ON n GOTO` / `ON n GOSUB` with `ELSE`, `IF ... [THEN] ... ELSE ...` on one line (THEN or ELSE may be a line number), `FOR ... TO ... STEP` and `NEXT [i, j]`, `END`, `STOP` |
 | Over several lines | `IF ... THEN` ending its line, then `ELSE` and `ENDIF`; `CASE ... OF` ending its line, then `WHEN a, b:`, `OTHERWISE` and `ENDCASE`; `REPEAT` ... `UNTIL`; `WHILE` ... `ENDWHILE` |
+| Procedures and functions | `DEF PROCname(a, b$)` ... `ENDPROC`, called as `PROCname(1, "x")`; `DEF FNname(x)` ... `= value`, or `DEF FNname(x) = expression` on one line; `LOCAL a, b$`; `RETURN` before a parameter (`DEF PROCswap(RETURN a, RETURN b)`) |
+| Errors | `ON ERROR statements`, `ON ERROR LOCAL statements`, `ON ERROR OFF`; `LOCAL ERROR`, `RESTORE ERROR`; `ERROR number, "message"`; `REPORT` |
 | Data | `DATA` (to the line's end), `READ`, `RESTORE [line]` |
 | Others | `REM` |
 
@@ -416,7 +418,8 @@ Functions: `ABS`, `ACS`, `ASN`, `ATN`, `COS`, `DEG`, `EXP`, `INT`, `LN`,
 `STRING$(n, s$)`, `VAL`, `EVAL`; `TRUE`, `FALSE`; `GET`, `GET$` (they wait
 for a key), `INKEY(t)` and `INKEY$(t)` (wait up to `t` hundredths of a
 second; -1 or `""` when none came), `POS`, `COUNT`, `TIME` (hundredths of a
-second). A function of one argument needs no brackets: `SIN X`, `LEN A$`.
+second), `ERR`, `ERL`, `REPORT$`. A function of one argument needs no
+brackets: `SIN X`, `LEN A$`.
 
 Operators, from the tightest: unary `-`, `+`, `NOT` and the functions;
 `^`; `*`, `/`, `DIV`, `MOD`; `+` and `-` (`+` joins strings); `=`, `<>`,
@@ -454,6 +457,38 @@ ENDWHILE`.
 100 NEXT
 ```
 
+A procedure or function is found by its `DEF`, the first statement of a
+line, wherever it is; reached as the program runs, a `DEF` line is skipped,
+so the definitions usually follow an `END`. Parameters and `LOCAL`
+variables are the call's own: what they held before comes back when it
+ends, in BASIC and in Python's namespace, and a `RETURN` parameter's value
+goes back into the variable passed. Loops left open inside a call end with
+it. Functions may call themselves (`DEF FNfact(n)`, `IF n <= 1 THEN = 1`,
+`= n * FNfact(n - 1)`). A `PROC` or `FN` the program does not define calls
+Python's function of that name (see [Calling Python from
+BASIC](#calling-python-from-basic)).
+
+```
+10 PRINT FNfact(10)
+20 PROCgreet("Ada")
+30 END
+40 DEF FNfact(n)
+50 IF n <= 1 THEN = 1
+60 = n * FNfact(n - 1)
+70 DEF PROCgreet(n$)
+80   LOCAL t$: t$ = "Hello, " + n$
+90   PRINT t$
+100 ENDPROC
+```
+
+`ON ERROR` sets the rest of its line as the handler: when an error comes,
+`ERR`, `ERL` and `REPORT$` tell which, where and what, and the handler runs,
+forgetting the loops, subroutines and calls that were running. `ON ERROR
+LOCAL` keeps them, and inside a procedure `LOCAL ERROR` first keeps the
+handler in use, to come back when the procedure ends. ESC is an error too
+(`ERR` 17), so a handler can catch it; ESC pressed again within a second
+stops the program anyway. A handler lasts while its program runs.
+
 Keywords are capitals only: `print` is a variable. Where only a keyword can
 stand they need no spaces (`FORI=1TO10:PRINTI`), as in Classic BASIC.
 Abbreviations are written in full when the line is stored: `P."HI":G.10`
@@ -469,9 +504,13 @@ line 20`), with its numbers; ESC stops a program with `Escape at line 20`,
 - `GET` gives a BBC's codes for Return (13), Delete (127) and the cursor
   keys (136 left, 137 right, 138 down, 139 up). `INKEY` with a negative
   number (a key scan) gives -1. `EVAL` takes numeric expressions only.
-- `CONT` is KoraCLI's. Not there yet: what steps 3c to 3e bring (above),
-  the indirection operators and `SYS` (phase 4), and `MODE`, `PLOT`, `VDU`
-  and the rest of the graphics and sound (phase 5).
+- `CONT` is KoraCLI's; it cannot go back into a `PROC` or `FN` that a
+  break or `STOP` left. A name starting with `PROC` or `FN` is a call.
+  Parameters are variables, not arrays. A `PROC` or `FN` the program does
+  not define is Python's, not a mistake.
+- Not there yet: what step 3e brings (above), the indirection operators and
+  `SYS` (phase 4), and `MODE`, `PLOT`, `VDU` and the rest of the graphics
+  and sound (phase 5).
 
 ### Files
 
@@ -598,6 +637,14 @@ the arguments as text, numbers as BASIC prints them: `SYS "echo", 5`. A name
 that is neither is `?UNDEF'D FUNCTION ERROR`; a Python exception in the
 function prints its type and message, then `?PYTHON ERROR IN 20`. `SYS` with
 an address (`SYS 49152`) comes with machine access in phase 4.
+
+In BBC BASIC, a `PROC` or `FN` the program does not define calls the
+Python function of that name, with the arguments' values: `PROCled_on(17)`
+calls `led_on(17)`, and `FNhalf(9)` is `half(9)`'s value. A function's value
+for an `FN` must be a number (`True` is -1) or a string, else it is `Type
+mismatch`; a Python exception is the error, with its type and message
+(`ZeroDivisionError: divide by zero at line 20`). A name that is neither
+the program's nor Python's is `No such FN/PROC`.
 
 ```
 >>> def beep(n):

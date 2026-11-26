@@ -112,6 +112,27 @@ class Random:
         return x / 4294967296.0
 
 
+class Halted(Exception):
+    """A program halted (END, STOP, NEW) inside a call that runs statements
+    of its own (BBC BASIC's PROC and FN): out to the run."""
+
+
+def as_error(exc):
+    """A Python exception a program caused, as BASIC's error; None for one
+    that is not the program's (a mistake of the interpreter's)."""
+    if isinstance(exc, BasicError):
+        return exc
+    if isinstance(exc, ZeroDivisionError):
+        return BasicError("DIVISION BY ZERO")
+    if isinstance(exc, OverflowError):
+        return BasicError("OVERFLOW")
+    if isinstance(exc, MemoryError):
+        return BasicError("OUT OF MEMORY")
+    if isinstance(exc, RuntimeError) and "recursion" in str(exc):
+        return BasicError("OUT OF MEMORY")  # recursion too deep (FN calling itself)
+    return None
+
+
 # --- Values ---------------------------------------------------------------------------
 
 SYNTAX = "SYNTAX"
@@ -280,6 +301,7 @@ class Runtime:
         self.si = 0
         self.direct = ([], [])
         self.halted = None
+        self.no_cont = False  # stopped inside a call: CONT cannot go back into it
         self.cont = None
         self.random = Random(seed)
         self.file = None  # the name last saved or loaded (F6 offers it)
@@ -370,74 +392,80 @@ class Runtime:
 
     def _run(self):
         self.halted = None
-        try:
-            li = self.li
-            i = self.si
-            stmts = self.compiled(li)[0]
-            while True:
-                n = len(stmts)
-                while i < n:
-                    self.si = i
-                    if stmts[i]():
-                        break
-                    i += 1
-                else:
-                    i = -1
-                if i >= 0:
-                    # Moved: a jump, a skip to the line's end, or an end.
-                    if self.halted is not None:
-                        break
-                    li = self.li
-                    i = self.si
-                    stmts = self.compiled(li)[0]
-                    if i < len(stmts):
-                        continue
-                # Past this line's end: the next line, if there is one.
-                if li < 0:
-                    return  # a line typed without a number: CONT still works
-                if li + 1 >= len(self.order):
-                    self.cont = None
+        self.no_cont = False
+        while True:
+            try:
+                if not self.steps():
                     return
-                li += 1
-                self.li = li
-                self.si = i = 0
-                stmts = self.compiled(li)[0]
-        except BasicError as e:
-            self.ended()
-            self.report(e, self.line())
-            return
-        except KeyboardInterrupt:
-            self.halted = "BREAK"
-        except ZeroDivisionError:
-            self.ended()
-            self.report(BasicError("DIVISION BY ZERO"), self.line())
-            return
-        except OverflowError:
-            self.ended()
-            self.report(BasicError("OVERFLOW"), self.line())
-            return
-        except MemoryError:
-            self.ended()
-            self.report(BasicError("OUT OF MEMORY"), self.line())
-            return
-        except RuntimeError as e:  # recursion too deep (FN calling itself)
-            if "recursion" not in str(e):
-                raise
-            self.ended()
-            self.report(BasicError("OUT OF MEMORY"), self.line())
-            return
+                break  # halted
+            except Halted:  # END, STOP or NEW inside a call (BBC's PROC, FN)
+                break
+            except KeyboardInterrupt:
+                if self.trap(BasicError("ESCAPE")):
+                    continue
+                self.halted = "BREAK"
+                break
+            except Exception as exc:
+                e = as_error(exc)
+                if e is None:
+                    raise
+                if self.trap(e):
+                    continue  # the program's own handler (BBC's ON ERROR) goes on
+                self.ended()
+                self.report(e, self.line())
+                return
         how = self.halted
         if how == "END" or how == "NEW":
             self.cont = None
             return
         # STOP, or ESC: CONT goes on from the next statement (STOP) or the
-        # one that was interrupted (ESC).
+        # one that was interrupted (ESC), unless that was inside a call.
         line = self.line()
         if line is not None:
             si = self.si + 1 if how == "STOP" else self.si
-            self.cont = (self.li, si, self.program.version)
+            self.cont = None if self.no_cont else (self.li, si, self.program.version)
         self.out.newline_if_needed()
         self.report_break(line, how)  # line None: a line typed without a number
+
+    def steps(self):
+        """The statements from the place: False at the end (the program's,
+        or a typed line's), True when one halted the program."""
+        li = self.li
+        i = self.si
+        stmts = self.compiled(li)[0]
+        while True:
+            n = len(stmts)
+            while i < n:
+                self.si = i
+                if stmts[i]():
+                    break
+                i += 1
+            else:
+                i = -1
+            if i >= 0:
+                # Moved: a jump, a skip to the line's end, or an end.
+                if self.halted is not None:
+                    return True
+                li = self.li
+                i = self.si
+                stmts = self.compiled(li)[0]
+                if i < len(stmts):
+                    continue
+            # Past this line's end: the next line, if there is one.
+            if li < 0:
+                return False  # a line typed without a number: CONT still works
+            if li + 1 >= len(self.order):
+                self.cont = None
+                return False
+            li += 1
+            self.li = li
+            self.si = i = 0
+            stmts = self.compiled(li)[0]
+
+    def trap(self, e):
+        """Whether the program handles error `e` itself (BBC's ON ERROR),
+        having set the place to its handler; ESC comes as "ESCAPE"."""
+        return False
 
     def line(self):
         return self.order[self.li] if self.li >= 0 else None
