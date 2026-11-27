@@ -167,6 +167,54 @@ Syntax error at line 20
          5
 >X%=0: REPEAT UNTIL TRUE: PRINT "REPEAT UNTIL, no colon"
 REPEAT UNTIL, no colon
+== PROC and FN
+one 10 2
+x still 1
+        49   3628800 479001600
+Hello, Ada|42|Hello, xHello, y
+         65
+after PROCloop
+n is 4
+        11
+== calls' mistakes
+>RUN
+No such FN/PROC at line 10
+>RUN
+Arguments at line 10
+>RUN
+Not in a procedure at line 40
+>ENDPROC
+Not in a procedure
+>= 1
+Not in a function
+>LOCAL z
+Not LOCAL
+>RUN
+Type mismatch at line 10
+>RUN
+>RUN
+No room at line 10
+>RUN
+no ENDPROC
+== calling Python
+>PROCshout("hello"): PRINT FNhalf(9); " "; FNjoin("a", "b"); " "; FNis_big(500)
+HELLO!
+       4.5 a-b -1
+>PRINT FNfails
+ZeroDivisionError: divide by zero
+>PRINT FNthing
+Type mismatch
+>A$ = FNhalf(2)
+Type mismatch
+== ON ERROR
+caught 18 at 20: Division by zero
+mine: 100 my error
+local: -ve root
+after PROCsafe
+No such variable at line 90
+>RUN
+Escape caught
+Escape at line 20
 == LIST
 >LIST
    10 REM one

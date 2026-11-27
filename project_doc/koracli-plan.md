@@ -383,7 +383,7 @@ Phase 3, BBC BASIC. Decided 2026-11-26 (spec §6.2, §6.3):
   Tests: type-in listings on the unix port (`koracli_bbc.py`, with what
   BBC BASIC V prints); the smoke step switches to BBC BASIC, lists an
   abbreviated line, runs it, and switches back after NEW.
-- [ ] **3c. Constructs over several lines.** Multi-line IF THEN, ELSE,
+- [x] **3c. Constructs over several lines.** (#133) Multi-line IF THEN, ELSE,
   ENDIF; CASE OF, WHEN, OTHERWISE, ENDCASE; REPEAT, UNTIL; WHILE,
   ENDWHILE: matched over the program when it runs (lines are stored
   unchecked, spec §4).
@@ -405,6 +405,24 @@ Phase 3, BBC BASIC. Decided 2026-11-26 (spec §6.2, §6.3):
   `=`, parameters, LOCAL, BASIC V's RETURN parameters, recursion; a PROC or
   FN the program does not define calls Python's function of that name
   (spec §9.1). ON ERROR, LOCAL ERROR, ERR, ERL, REPORT.
+  *Built:* a call runs its body in a loop of its own (Python recursion),
+  so an FN returns its value into the expression; END or STOP inside a
+  call leave through `basic.Halted`, and errors as exceptions, each call
+  restoring its parameters and LOCALs (in BASIC and in Python's
+  namespace) and the stack's height. The runtime's run gained a `trap`
+  hook for ON ERROR, which also catches ESC (`ERR` 17); a second ESC
+  within a second is never caught, so a program stays stoppable. An FN's
+  value is a number or a string, a third kind ("*") checked where it is
+  used. Also: `ON ERROR LOCAL`, `RESTORE ERROR`, `ERROR n, "text"`,
+  `REPORT` and `REPORT$` from BASIC V; one-line FNs; a handler lasts while
+  its program runs; CONT does not go back into a call; recursion too deep
+  is `No room`. Python's functions stand in for PROCs and FNs the program
+  does not define, their exceptions the error's message.
+  Tests: listings with parameters, LOCAL, RETURN parameters, recursion,
+  string FNs, END in a PROC; each call mistake; Python's functions; ON
+  ERROR, ERR, ERL, REPORT, ERROR, ON ERROR LOCAL with LOCAL ERROR, ESC
+  caught once (`koracli_bbc.py`); the smoke step runs an FN and a PROC
+  that is Python's.
 - [ ] **3e. Star commands, files and switching on LOAD.** `*` commands and
   OSCLI; SAVE, LOAD and CHAIN with the BBC header; RENUMBER, AUTO, LISTO;
   F5 to F8 in BBC BASIC; LOAD of a file in the other dialect asking first.

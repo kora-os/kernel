@@ -5,11 +5,20 @@
 # applies; old programs are not promised to run unchanged. A dialect over
 # basic.Runtime, as Classic BASIC is (classic.py).
 #
-# Steps 3b and 3c: LET (with += and -=), PRINT, INPUT, IF THEN ELSE on one
+# Steps 3b to 3d: LET (with += and -=), PRINT, INPUT, IF THEN ELSE on one
 # line or over several (ENDIF), CASE OF WHEN OTHERWISE ENDCASE, REPEAT
 # UNTIL, WHILE ENDWHILE, GOTO, GOSUB, RETURN, ON, FOR, NEXT, DIM, READ,
-# DATA, RESTORE, END, STOP, REM, SWAP, CLS, CLEAR, TIME=; the commands RUN,
-# LIST, NEW and CONT. PROC and FN come in 3d, star commands and files in 3e.
+# DATA, RESTORE, END, STOP, REM, SWAP, CLS, CLEAR, TIME=; DEF PROC and FN
+# with LOCAL and RETURN parameters, ON ERROR [LOCAL], LOCAL ERROR, RESTORE
+# ERROR, ERROR, REPORT; the commands RUN, LIST, NEW and CONT. Star commands
+# and files come in 3e.
+#
+# PROC and FN run their bodies in a loop of their own (run_body), so an FN
+# returns its value into the expression that called it; END or STOP inside
+# one leaves through basic.Halted, and errors as Python exceptions, past
+# each call's LOCAL ERROR handler. A PROC or FN the program does not define
+# is the Python function of that name (spec §9.1). An FN's value may be a
+# number or a string: its kind is "*", checked when it is used.
 #
 # A construct over several lines is matched when it runs: lines are stored
 # unchecked (spec §4), so the statement that opens one looks ahead, through
@@ -56,10 +65,10 @@ STATEMENTS = (
     "CASE", "CLEAR", "CLS", "CONT", "DATA", "DIM", "ELSE", "END", "ENDCASE", "ENDIF",
     "ENDWHILE", "FOR", "GOSUB", "GOTO", "IF", "INPUT", "LET", "LIST", "NEW", "NEXT", "ON",
     "OTHERWISE", "PRINT", "READ", "REM", "REPEAT", "RESTORE", "RETURN", "RUN", "STOP",
-    "SWAP", "UNTIL", "WHEN", "WHILE",
+    "SWAP", "UNTIL", "WHEN", "WHILE", "DEF", "ENDPROC", "ERROR", "LOCAL", "REPORT",
 )
 OPERATORS = ("AND", "OR", "EOR", "DIV", "MOD", "NOT")
-CLAUSES = ("THEN", "TO", "STEP", "GOTO", "GOSUB", "ELSE", "LINE", "OF")
+CLAUSES = ("THEN", "TO", "STEP", "GOTO", "GOSUB", "ELSE", "LINE", "OF", "OFF")
 # Functions taking one operand, with or without brackets (SIN X, LEN A$):
 # name -> (argument kind, result kind).
 UNARY = {
@@ -77,7 +86,8 @@ BRACKETED = {
     "INSTR": ("ssn", 2, "n"), "STRING$": ("ns", 2, "s"),
 }
 # Values without an argument.
-VALUES = ("PI", "TRUE", "FALSE", "GET", "GET$", "POS", "COUNT", "TIME", "RND", "VPOS")
+VALUES = ("PI", "TRUE", "FALSE", "GET", "GET$", "POS", "COUNT", "TIME", "RND", "VPOS",
+          "ERR", "ERL", "REPORT$")
 KEYWORDS = set(STATEMENTS + OPERATORS + CLAUSES + tuple(UNARY) + tuple(BRACKETED) + VALUES +
                ("TAB", "SPC"))
 BY_LENGTH = sorted(KEYWORDS, key=lambda k: -len(k))
@@ -114,11 +124,12 @@ ERRORS = {
     "FOR variable": 34, "No TO": 36, "Not in a subroutine": 38, "ON syntax": 39,
     "ON range": 40, "No such line": 41, "Out of DATA": 42, "Not in a REPEAT loop": 43,
     "Not in a WHILE loop": 46, "Missing ENDCASE": 47, "Missing OF": 48, "Missing ENDIF": 49,
+    "Not in a function": 7, "Not LOCAL": 12, "Not in a procedure": 13, "Arguments": 31,
 }
 # The runtime's errors (Classic BASIC's names) in BBC BASIC's words.
 FROM_RUNTIME = {
     basic.SYNTAX: "Syntax error", basic.TYPE: "Type mismatch", basic.QUANTITY: "Too big",
-    basic.UNDEF_LINE: "No such line", basic.UNDEF_FN: "No such FN/PROC",
+    basic.UNDEF_LINE: "No such line", basic.UNDEF_FN: "No such FN/PROC", "ESCAPE": "Escape",
     "NEXT WITHOUT FOR": "Not in a FOR loop", "RETURN WITHOUT GOSUB": "Not in a subroutine",
     "WHILE WITHOUT WEND": "Missing ENDWHILE", "WEND WITHOUT WHILE": "Not in a WHILE loop",
     "OUT OF DATA": "Out of DATA", "DIVISION BY ZERO": "Division by zero",
@@ -557,6 +568,41 @@ def _count(v):
     return n if n > 0 else 0
 
 
+def _want(f, k, want):
+    """`f` (of kind `k`) where a value of kind `want` must be: as it is, or
+    checked when it runs for an FN's value (kind "*")."""
+    if k == want:
+        return f
+    if k != "*":
+        raise BasicError(TYPE)
+    if want == "s":
+        def string():
+            v = f()
+            if type(v) is not str:
+                raise BasicError(TYPE)
+            return v
+        return string
+
+    def number():
+        v = f()
+        if type(v) is str:
+            raise BasicError(TYPE)
+        return v
+    return number
+
+
+def _same_kind(v, w):
+    if (type(v) is str) != (type(w) is str):
+        raise BasicError(TYPE)
+
+
+def _call_name(word, prefix):
+    """PROCname's or FNname's name, or None for another word."""
+    if word.startswith(prefix) and len(word) > len(prefix):
+        return word[len(prefix):]
+    return None
+
+
 # --- Parsing into closures ------------------------------------------------------------
 
 class Compiler:
@@ -636,15 +682,11 @@ class Compiler:
 
     def num(self):
         f, k = self.expr()
-        if k != "n":
-            raise BasicError(TYPE)
-        return f
+        return _want(f, k, "n")
 
     def string(self):
         f, k = self.expr()
-        if k != "s":
-            raise BasicError(TYPE)
-        return f
+        return _want(f, k, "s")
 
     def expr(self):
         f, k = self.and_()
@@ -654,8 +696,7 @@ class Compiler:
                 return f, k
             self.pos += 1
             g, k2 = self.and_()
-            if k != "n" or k2 != "n":
-                raise BasicError(TYPE)
+            f, g = _want(f, k, "n"), _want(g, k2, "n")
             if op == "OR":
                 f = (lambda a, b: lambda: _int(a()) | _int(b()))(f, g)
             else:
@@ -666,8 +707,7 @@ class Compiler:
         while self.word_kw(("AND",)):
             self.pos += 1
             g, k2 = self.relation()
-            if k != "n" or k2 != "n":
-                raise BasicError(TYPE)
+            f, g = _want(f, k, "n"), _want(g, k2, "n")
             f = (lambda a, b: lambda: _int(a()) & _int(b()))(f, g)
         return f, k
 
@@ -681,9 +721,12 @@ class Compiler:
             self.pos += 1
             g, k2 = self.add()
             if t[1] in ("<<", ">>", ">>>"):
-                if k != "n" or k2 != "n":
-                    raise BasicError(TYPE)
+                f, g = _want(f, k, "n"), _want(g, k2, "n")
                 f = _shift(t[1], f, g)
+                k = "n"
+                continue
+            if k == "*" or k2 == "*":
+                f, k = _compare_checked(t[1], f, g), "n"
                 continue
             if k != k2:
                 raise BasicError(TYPE)
@@ -695,17 +738,18 @@ class Compiler:
             if self.is_op("+"):
                 self.pos += 1
                 g, k2 = self.mul()
-                if k != k2:
-                    raise BasicError(TYPE)
-                if k == "s":
-                    f = (lambda a, b: lambda: a() + b())(f, g)
-                else:
-                    f = _add(f, g)
+                if "s" in (k, k2):
+                    f, g = _want(f, k, "s"), _want(g, k2, "s")
+                    f, k = (lambda a, b: lambda: a() + b())(f, g), "s"
+                elif "n" in (k, k2):
+                    f, g = _want(f, k, "n"), _want(g, k2, "n")
+                    f, k = _add(f, g), "n"
+                else:  # two FNs' values: numbers or strings, as they come
+                    f, k = _add_checked(f, g), "*"
             elif self.is_op("-"):
                 self.pos += 1
                 g, k2 = self.mul()
-                if k != "n" or k2 != "n":
-                    raise BasicError(TYPE)
+                f, g = _want(f, k, "n"), _want(g, k2, "n")
                 f = _sub(f, g)
             else:
                 return f, k
@@ -723,8 +767,7 @@ class Compiler:
                     return f, k
             self.pos += 1
             g, k2 = self.power()
-            if k != "n" or k2 != "n":
-                raise BasicError(TYPE)
+            f, g = _want(f, k, "n"), _want(g, k2, "n")
             if op == "*":
                 f = _mul(f, g)
             elif op == "/":
@@ -739,8 +782,7 @@ class Compiler:
         while self.is_op("^"):
             self.pos += 1
             g, k2 = self.unary()
-            if k != "n" or k2 != "n":
-                raise BasicError(TYPE)
+            f, g = _want(f, k, "n"), _want(g, k2, "n")
             f = _power(f, g)
         return f, k
 
@@ -748,8 +790,7 @@ class Compiler:
         if self.is_op("-"):
             self.pos += 1
             f, k = self.unary()
-            if k != "n":
-                raise BasicError(TYPE)
+            f = _want(f, k, "n")
 
             def neg(a=f):
                 v = a()
@@ -758,14 +799,12 @@ class Compiler:
         if self.is_op("+"):
             self.pos += 1
             f, k = self.unary()
-            if k != "n":
-                raise BasicError(TYPE)
+            f = _want(f, k, "n")
             return f, "n"
         if self.is_word("NOT"):
             self.pos += 1
             f, k = self.unary()
-            if k != "n":
-                raise BasicError(TYPE)
+            f = _want(f, k, "n")
             return (lambda a: lambda: ~_int(a()))(f), "n"
         return self.atom()
 
@@ -810,23 +849,56 @@ class Compiler:
                 self.expect_op(")")
                 return (lambda: rt.rnd(f())), "n"
             return (lambda: rt.rnd(None)), "n"
+        if value == "ERR":
+            return (lambda: rt.err), "n"
+        if value == "ERL":
+            return (lambda: rt.erl), "n"
+        if value == "REPORT$":
+            return (lambda: rt.report_text), "s"
+        name = _call_name(value, "FN")
+        if name is not None:
+            args = self.call_args()
+            return (lambda: rt.call("FN", name, args)), "*"
         if value in KEYWORDS:
             raise BasicError(SYNTAX)
         self.pos -= 1
         get, _, kind = self.variable()
         return get, kind
 
+    def call_args(self):
+        """A call's arguments, in brackets if there are any: (closure, kind,
+        setter) each, the setter a variable's (for RETURN parameters) or
+        None."""
+        args = []
+        if not self.is_op("("):
+            return args
+        self.pos += 1
+        while True:
+            t = self.peek()
+            nxt = self.toks[self.pos + 1] if self.pos + 1 < len(self.toks) else None
+            if t is not None and t[0] == "W" and t[1] not in KEYWORDS and \
+                    nxt is not None and nxt[0] == "O" and nxt[1] in (",", ")") and \
+                    _call_name(t[1], "FN") is None:
+                get, set_, kind = self.variable()
+                args.append((get, kind, set_))
+            else:
+                f, kind = self.expr()
+                args.append((f, kind, None))
+            if self.is_op(","):
+                self.pos += 1
+                continue
+            self.expect_op(")")
+            return args
+
     def unary_function(self, name):
         want, result = UNARY[name]
         if name == "STR$" and self.is_op("~"):
             self.pos += 1
             f, k = self.unary()
-            if k != "n":
-                raise BasicError(TYPE)
+            f = _want(f, k, "n")
             return (lambda: "%X" % (_int(f()) & 0xFFFFFFFF)), "s"
         f, k = self.unary()
-        if k != want:
-            raise BasicError(TYPE)
+        f = _want(f, k, want)
         rt = self.rt
         if name == "EVAL":
             return (lambda: rt.eval(f())), "n"
@@ -842,10 +914,8 @@ class Compiler:
         self.expect_op(")")
         if not needed <= len(a) <= len(kinds):
             raise BasicError(SYNTAX)
-        for (f, k), want in zip(a, kinds):
-            if k != want:
-                raise BasicError(TYPE)
-        return _bracketed(name, [f for f, _ in a]), result
+        fs = [_want(f, k, want) for (f, k), want in zip(a, kinds)]
+        return _bracketed(name, fs), result
 
     def variable(self):
         """A variable or array element: (getter, setter, kind). The setter
@@ -854,7 +924,8 @@ class Compiler:
         if t[0] != "W":
             raise BasicError(SYNTAX)
         key = t[1]
-        if key in KEYWORDS:
+        if key in KEYWORDS or _call_name(key, "FN") is not None or \
+                _call_name(key, "PROC") is not None:
             raise BasicError(SYNTAX)
         kind = "s" if key.endswith("$") else "n"
         rt = self.rt
@@ -899,9 +970,27 @@ class Compiler:
 
     def statement(self, out, kinds, in_then):
         t = self.peek()
+        rt = self.rt
+        if t[0] == "O" and t[1] == "=":
+            # An FN's value, ending its body.
+            self.pos += 1
+            f, k = self.expr()
+            out.append(lambda: rt.fn_return(f()))
+            kinds.append("=")
+            return "="
         if t[0] != "W":
             raise BasicError(MISTAKE)
         word = t[1]
+        name = _call_name(word, "PROC")
+        if name is not None:
+            self.pos += 1
+            args = self.call_args()
+
+            def proc():
+                rt.call("PROC", name, args)
+            out.append(proc)
+            kinds.append("PROC")
+            return "PROC"
         if word not in STATEMENTS:
             # An assignment, or a keyword without its space (PRINTI, FORI=1):
             # the assignment is tried first, so names may start with one.
@@ -944,8 +1033,7 @@ class Compiler:
         if op[0] != "O" or op[1] not in ("=", "+=", "-="):
             raise BasicError(MISTAKE)
         f, k = self.expr()
-        if k != kind:
-            raise BasicError(TYPE)
+        f = _want(f, k, kind)
         if op[1] == "=":
             return lambda: set_(f())
         if op[1] == "-=":
@@ -1166,6 +1254,9 @@ class Compiler:
         return t[1]
 
     def s_ON(self, out, kinds, in_then):
+        if self.is_word("ERROR"):
+            self.pos += 1
+            return self.on_error(out, kinds)
         sel = self.num()
         how = self.take_kw(("GOTO", "GOSUB"))
         if how is None:
@@ -1244,6 +1335,10 @@ class Compiler:
         out.append(read)
 
     def s_RESTORE(self, out, kinds, in_then):
+        if self.is_word("ERROR"):
+            self.pos += 1
+            out.append(self.rt.restore_error)
+            return
         line = None
         if not self.at_end(in_then):
             line = self.line_number()
@@ -1300,6 +1395,91 @@ class Compiler:
         rt = self.rt
         out.append(lambda: rt.do_run(line))
 
+    def on_error(self, out, kinds):
+        """ON ERROR statements, ON ERROR LOCAL statements, ON ERROR OFF. The
+        statements are the rest of the line, run when an error comes; run
+        here, ON ERROR only sets them as the handler."""
+        rt = self.rt
+        if self.take_kw(("OFF",)) is not None:
+            out.append(rt.error_off)
+            return
+        local = self.take_kw(("LOCAL",)) is not None
+        start = len(out) + 1
+
+        def on_error():
+            rt.set_handler(start, local)
+            rt.si = 1 << 30  # the handler's statements wait for an error
+            return True
+        out.append(on_error)
+        kinds.append("ON ERROR")
+        self.stmt_list(out, kinds, False)
+
+    def s_DEF(self, out, kinds, in_then):
+        """DEF PROCname(params) or DEF FNname(params) [= expression]: the
+        header of a body that starts after it. Reached as the program runs,
+        DEF skips its line, as REM does."""
+        t = self.next()
+        if t[0] != "W":
+            raise BasicError(SYNTAX)
+        kind = "PROC" if _call_name(t[1], "PROC") is not None else "FN"
+        name = _call_name(t[1], kind)
+        if name is None:
+            raise BasicError(SYNTAX)
+        params = []
+        if self.is_op("("):
+            self.pos += 1
+            while True:
+                ret = self.take_kw(("RETURN",)) is not None
+                p = self.next()
+                if p[0] != "W" or p[1] in KEYWORDS or p[1] == "@%" or self.is_op("("):
+                    raise BasicError(SYNTAX)
+                params.append((p[1], ret))
+                if not self.is_op(","):
+                    break
+                self.pos += 1
+            self.expect_op(")")
+        value = None
+        if kind == "FN" and self.is_op("="):
+            self.pos += 1
+            value = self.expr()[0]  # a one-line FN
+        rt = self.rt
+
+        def skip():
+            rt.si = 1 << 30
+            return True
+        out.append(skip)
+        kinds.append(("DEF", kind, name, params, value))
+
+    def s_ENDPROC(self, out, kinds, in_then):
+        out.append(self.rt.end_proc)
+
+    def s_LOCAL(self, out, kinds, in_then):
+        rt = self.rt
+        if self.take_kw(("ERROR",)) is not None:
+            out.append(rt.local_error)
+            return
+        keys = [self.next_name()]
+        while self.is_op(","):
+            self.pos += 1
+            keys.append(self.next_name())
+        out.append(lambda: rt.do_local(keys))
+
+    def s_ERROR(self, out, kinds, in_then):
+        """ERROR number, message: an error of the program's own."""
+        number = self.num()
+        self.expect_op(",")
+        text = self.string()
+
+        def error():
+            e = BasicError(text())
+            e.number = _int(number())
+            raise e
+        out.append(error)
+
+    def s_REPORT(self, out, kinds, in_then):
+        rt = self.rt
+        out.append(lambda: rt.out.write(rt.report_text))
+
     def s_LIST(self, out, kinds, in_then):
         """LIST, LIST 20, LIST 20,50, LIST 20, and LIST ,50."""
         low, high = 0, basic.MAX_LINE
@@ -1325,6 +1505,47 @@ BLOCK_IF = (("IF THEN",), ("ENDIF",))
 BLOCK_CASE = (("CASE",), ("ENDCASE",))
 # The statements another may follow without a colon.
 GLUED = ("REPEAT", "WHEN", "OTHERWISE", "ELSE")
+
+
+def _compare_checked(op, a, b):
+    """A comparison with an FN's value: both numbers or both strings."""
+    c = _compare(op, lambda: x[0], lambda: x[1])
+    x = [None, None]
+
+    def compare():
+        v, w = a(), b()
+        _same_kind(v, w)
+        x[0], x[1] = v, w
+        return c()
+    return compare
+
+
+def _add_checked(a, b):
+    """+ on two FNs' values: strings join, numbers add."""
+    add = _add(lambda: x[0], lambda: x[1])
+    x = [None, None]
+
+    def plus():
+        v, w = a(), b()
+        _same_kind(v, w)
+        if type(v) is str:
+            return v + w
+        x[0], x[1] = v, w
+        return add()
+    return plus
+
+
+def _from_python(v):
+    """A Python function's value for BASIC: numbers (True is -1) and
+    strings; anything else is a type mismatch."""
+    t = type(v)
+    if t is bool:
+        return -1 if v else 0
+    if t is int:
+        return v if -2147483648 <= v <= 2147483647 else float(v)
+    if t is float or t is str:
+        return v
+    raise BasicError(TYPE)
 
 
 # --- Closures -------------------------------------------------------------------------
@@ -1499,6 +1720,10 @@ def _print(rt, parts):
         hex_ = False
         try:
             for kind, f in parts:
+                if kind == "*":  # an FN's value: a number or a string
+                    v = f()
+                    kind = "s" if type(v) is str else "n"
+                    f = (lambda v: lambda: v)(v)
                 if kind == "n":
                     v = f()
                     s = "%X" % (_int(v) & 0xFFFFFFFF) if hex_ else num_format(v, at)
@@ -1564,6 +1789,18 @@ def _skip(rt, end):
 
 # --- The interpreter ----------------------------------------------------------------
 
+class Call:
+    """A PROC or FN running: what it made its own (to come back when it
+    ends), the stack's height when it began, and the error handler LOCAL
+    ERROR kept (MISSING until then)."""
+
+    def __init__(self, kind, stack):
+        self.kind = kind
+        self.saved = []
+        self.stack = stack
+        self.error = MISSING
+
+
 class Interpreter(basic.Runtime):
     """BBC BASIC: the program, its variables and its run, over the runtime
     both dialects share (basic.Runtime)."""
@@ -1578,6 +1815,12 @@ class Interpreter(basic.Runtime):
         self.last_rnd = 0.0
         self.err = 0
         self.erl = 0
+        self.report_text = ""  # REPORT's: the last error's message
+        self.calls = []  # the PROCs and FNs running: their frames (Call)
+        self.handler = None  # ON ERROR's: (line, statement, depth, local)
+        self.returning = False  # ENDPROC or = ran: the body's loop ends
+        self.value = None  # what = gave
+        self.escaped = None  # when a handler last caught ESC
 
     # What the runtime asks of the dialect.
 
@@ -1595,14 +1838,44 @@ class Interpreter(basic.Runtime):
                 items += split_items(toks[j + 1][1])
         return items
 
-    def report(self, e, line):
+    def note(self, e, line):
+        """An error, for ERR, ERL and REPORT: its message."""
         if e.line is not None:
             line = e.line
         message = FROM_RUNTIME.get(e.name, e.name)
-        self.err = ERRORS.get(message, 0)
+        number = getattr(e, "number", None)
+        self.err = number if number is not None else ERRORS.get(message, 0)
         self.erl = line if line is not None else 0
+        self.report_text = message
+        return message, line
+
+    def report(self, e, line):
+        message, line = self.note(e, line)
         self.out.newline_if_needed()
         self.out.write("%s%s\n" % (message, " at line %d" % line if line is not None else ""))
+
+    def trap(self, e):
+        """ON ERROR: the error noted, the handler run. A global handler
+        forgets the loops, subroutines and calls that were running."""
+        h = self.handler
+        if h is None or not self.catchable(e):
+            return False
+        self.note(e, self.line())
+        if not h[3]:
+            self.stack.clear()
+            self.restore_calls(0)
+        self.li, self.si = h[0], h[1]
+        return True
+
+    def execute(self, text):
+        self.handler = None  # a program's handler ends with it
+        self.restore_calls(0)
+        basic.Runtime.execute(self, text)
+
+    def do_run(self, line):
+        self.handler = None
+        self.restore_calls(0)
+        return basic.Runtime.do_run(self, line)
 
     def report_break(self, line, how):
         self.err = 17 if how == "BREAK" else 0
@@ -1698,6 +1971,220 @@ class Interpreter(basic.Runtime):
             self.out.write(prompt)
         return None
 
+    # PROC and FN.
+
+    def find_def(self, kind, name):
+        """Where DEF PROCname or DEF FNname is (the first statement of its
+        line): (line, its header), or None."""
+        defs = self.wends.get("DEFS")
+        if defs is None:
+            defs = {}
+            for li, number in enumerate(self.order):
+                if not self.program.lines[number].startswith("DEF"):
+                    continue
+                try:
+                    k = self.compiled(li)[1][0]
+                except BasicError as e:
+                    if e.line is None:
+                        e.line = number
+                    raise
+                if type(k) is tuple and k[0] == "DEF":
+                    defs.setdefault((k[1], k[2]), (li, k))
+            self.wends["DEFS"] = defs
+        return defs.get((kind, name))
+
+    def call(self, kind, name, args):
+        """PROCname(args) or FNname(args): the program's, else Python's."""
+        found = self.find_def(kind, name)
+        if found is None:
+            return self.call_python(kind, name, args)
+        li, header = found
+        params = header[3]
+        if len(params) != len(args):
+            raise BasicError("Arguments")
+        values = []
+        for (key, ret), (f, k, _) in zip(params, args):
+            v = _want(f, k, "s" if key.endswith("$") else "n")()
+            values.append(v)
+        place = (self.li, self.si)
+        frame = Call(kind, len(self.stack))
+        self.calls.append(frame)
+        depth = len(self.calls)
+        try:
+            for (key, ret), v in zip(params, values):
+                self.make_local(frame, key)
+                self.scalar(key, basic.base_name(key))[1](v)
+            if header[4] is not None:  # DEF FNname(x) = expression
+                result = header[4]()
+            else:
+                self.run_body(li, 1, depth)
+                result = self.value
+            # RETURN parameters: their values back into the variables passed.
+            back = [(self.scalar(key, basic.base_name(key))[0](), a[2])
+                    for (key, ret), a in zip(params, args) if ret]
+        except BaseException:
+            self.no_cont = True  # CONT cannot go back into a call
+            raise
+        finally:
+            self.restore_calls(depth - 1)
+        for v, set_ in back:
+            if set_ is None:
+                raise BasicError("Arguments")  # RETURN needs a variable
+            set_(v)
+        self.li, self.si = place
+        return result
+
+    def call_python(self, kind, name, args):
+        """A PROC or FN the program does not define: the Python function of
+        that name, with the arguments' values (spec §9.1)."""
+        f = self.ns.get(name)
+        if f is None or not callable(f):
+            raise BasicError("No such FN/PROC")
+        values = [g() for g, _, _ in args]
+        try:
+            v = f(*values)
+        except (BasicError, KeyboardInterrupt):
+            raise
+        except Exception as e:  # the function's own: its type and message
+            raise BasicError("%s: %s" % (type(e).__name__, e))
+        finally:
+            self.unresolved.clear()  # it may have made names
+        return _from_python(v) if kind == "FN" else None
+
+    def run_body(self, li, si, depth):
+        """A PROC's or FN's statements, from `si` on line `li`, until ENDPROC
+        or `=`; a LOCAL ERROR handler of this call's catches errors."""
+        self.li, self.si = li, si
+        while True:
+            try:
+                self.body_steps()
+                return
+            except KeyboardInterrupt:
+                e = BasicError("ESCAPE")
+                h = self.handler
+                if h is None or not h[3] or h[2] != depth or not self.catchable(e):
+                    raise
+            except basic.Halted:
+                raise
+            except Exception as exc:
+                e = basic.as_error(exc)
+                h = self.handler
+                if e is None or h is None or not h[3] or h[2] != depth:
+                    raise
+            self.note(e, self.line())
+            self.li, self.si = self.handler[0], self.handler[1]
+
+    def body_steps(self):
+        li, i = self.li, self.si
+        stmts = self.compiled(li)[0]
+        while True:
+            n = len(stmts)
+            while i < n:
+                self.si = i
+                if stmts[i]():
+                    break
+                i += 1
+            else:
+                i = -1
+            if i >= 0:
+                if self.returning:
+                    self.returning = False
+                    return
+                if self.halted is not None:
+                    raise basic.Halted
+                li, i = self.li, self.si
+                stmts = self.compiled(li)[0]
+                if i < len(stmts):
+                    continue
+            if li < 0 or li + 1 >= len(self.order):
+                self.halted = "END"  # the program's end, before ENDPROC
+                raise basic.Halted
+            li += 1
+            self.li = li
+            self.si = i = 0
+            stmts = self.compiled(li)[0]
+
+    def end_proc(self):
+        if not self.calls or self.calls[-1].kind != "PROC":
+            raise BasicError("Not in a procedure")
+        self.returning = True
+        return True
+
+    def fn_return(self, v):
+        if not self.calls or self.calls[-1].kind != "FN":
+            raise BasicError("Not in a function")
+        self.value = v
+        self.returning = True
+        return True
+
+    def make_local(self, frame, key):
+        """`key` the call's own: its value now kept, to come back when the
+        call ends (in BASIC and in Python's namespace)."""
+        base = basic.base_name(key)
+        py = self.names.get(base, base)
+        frame.saved.append((key, py, self.vars.get(key, MISSING), self.ns.get(py, MISSING),
+                            self.exports.get(py, MISSING)))
+
+    def do_local(self, keys):
+        if not self.calls:
+            raise BasicError("Not LOCAL")
+        frame = self.calls[-1]
+        for key in keys:
+            self.make_local(frame, key)
+            self.scalar(key, basic.base_name(key))[1]("" if key.endswith("$") else 0)
+
+    def restore_calls(self, depth):
+        """The calls deeper than `depth` ended: their variables and handlers
+        back, their loops and subroutines gone."""
+        while len(self.calls) > depth:
+            frame = self.calls.pop()
+            for key, py, v, n, x in reversed(frame.saved):
+                for d, old in ((self.vars, v), (self.ns, n), (self.exports, x)):
+                    k = key if d is self.vars else py
+                    if old is MISSING:
+                        d.pop(k, None)
+                    else:
+                        d[k] = old
+            if frame.error is not MISSING:
+                self.handler = frame.error
+            del self.stack[frame.stack:]
+        self.returning = False
+
+    # ON ERROR.
+
+    def catchable(self, e):
+        """Whether a handler may catch `e`: anything but ESC pressed again
+        within a second of an ESC it caught, which stops the program (so
+        one that catches Escape can still be stopped)."""
+        if e.name != "ESCAPE":
+            return True
+        now = ticks_ms()
+        if self.escaped is not None and now - self.escaped < 1000:
+            self.escaped = None
+            return False
+        self.escaped = now
+        return True
+
+    def set_handler(self, start, local):
+        self.handler = (self.li, start, len(self.calls), local)
+
+    def error_off(self):
+        self.handler = None
+
+    def local_error(self):
+        """LOCAL ERROR: the handler in use comes back when the call ends."""
+        if not self.calls:
+            raise BasicError("Not LOCAL")
+        frame = self.calls[-1]
+        if frame.error is MISSING:
+            frame.error = self.handler
+
+    def restore_error(self):
+        """RESTORE ERROR: the handler LOCAL ERROR kept, back now."""
+        if self.calls and self.calls[-1].error is not MISSING:
+            self.handler = self.calls[-1].error
+            self.calls[-1].error = MISSING
+
     # Constructs over several lines.
 
     def scan(self, li, si, block, stops):
@@ -1768,9 +2255,11 @@ class Interpreter(basic.Runtime):
         for li, si, name, k in clauses:
             if name == "WHEN":
                 for f, wkind in k[1]:
-                    if wkind != kind:
+                    if wkind != kind and "*" not in (wkind, kind):
                         raise BasicError(TYPE)
-                    if f() == v:
+                    w = f()
+                    _same_kind(v, w)
+                    if w == v:
                         break
                 else:
                     continue

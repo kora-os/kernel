@@ -298,6 +298,103 @@ direct("RUN")
 direct("REPEAT X%+=1: UNTIL X%>4: PRINT X%")
 direct('X%=0: REPEAT UNTIL TRUE: PRINT "REPEAT UNTIL, no colon"')
 
+# PROC and FN (step 3d): parameters, LOCAL, RETURN parameters, recursion,
+# one-line FNs, an FN's string value, DEF skipped as the program runs,
+# loops left inside a call, END inside one.
+run("PROC and FN",
+    '10 x = 1: PROCshow("one", x): PRINT "x still "; x',
+    "20 PRINT FNsq(7), FNfact(10), FNfact(12)",
+    '30 PRINT FNgreet$("Ada"); "|"; FNtwice(21); "|"; FNgreet$("x") + FNgreet$("y")',
+    "40 a% = 5: b% = 6: PROCswap(a%, b%): PRINT a%; b%",
+    "50 PROCloop: PRINT \"after PROCloop\"",
+    "60 n = 3: PROCcount(n): PRINT \"n is \"; n",
+    "70 PRINT FNsum(4) + 1",
+    "80 END",
+    '100 DEF PROCshow(t$, x)',
+    '110   LOCAL y',
+    '120   x = x * 10: y = 2',
+    '130   PRINT t$; " "; x; " "; y',
+    "140 ENDPROC",
+    "150 DEF FNsq(v) = v * v",
+    "160 DEF FNfact(n)",
+    "170   IF n <= 1 THEN = 1",
+    "180 = n * FNfact(n - 1)",
+    '190 DEF FNgreet$(n$) = "Hello, " + n$',
+    "200 DEF FNtwice(v) = v + v",
+    "210 DEF PROCswap(RETURN p%, RETURN q%)",
+    "220   LOCAL t%: t% = p%: p% = q%: q% = t%",
+    "230 ENDPROC",
+    "240 DEF PROCloop",
+    "250   FOR i% = 1 TO 10: IF i% = 3 THEN ENDPROC",
+    "260   NEXT",
+    "270 ENDPROC",
+    "280 DEF PROCcount(RETURN c): c += 1: ENDPROC",
+    "290 DEF FNsum(k)",
+    "300   LOCAL t, j: FOR j = 1 TO k: t += j: NEXT",
+    "310 = t")
+
+print("== calls' mistakes")
+program("10 PROCnone", "20 END")
+direct("RUN")
+check(b.err == 29, "No such FN/PROC is 29: %d" % b.err)
+program("10 PROCp(1, 2)", "20 END", "30 DEF PROCp(a): ENDPROC")
+direct("RUN")
+program("10 PRINT FNq", "20 END", "30 DEF FNq", "40 ENDPROC")
+direct("RUN")
+direct("ENDPROC")
+direct("= 1")
+direct("LOCAL z")
+program('10 PROCp("text")', "20 END", "30 DEF PROCp(a): ENDPROC")
+direct("RUN")
+program("10 PROCp", "20 PRINT \"not here\"", "30 DEF PROCp: END")
+direct("RUN")
+program("10 PRINT FNinf(1)", "20 DEF FNinf(n) = FNinf(n + 1)")
+direct("RUN")
+program("10 PROCpart", "20 DEF PROCpart", '30 PRINT "no ENDPROC"')
+direct("RUN")
+
+# Python's functions, for a PROC or FN the program does not define.
+print("== calling Python")
+ns["shout"] = lambda t: print(t.upper() + "!")
+ns["half"] = lambda x: x / 2
+ns["join"] = lambda a, b: a + "-" + b
+ns["is_big"] = lambda x: x > 100
+ns["fails"] = lambda: 1 // 0
+ns["thing"] = lambda: [1, 2]
+direct('PROCshout("hello"): PRINT FNhalf(9); " "; FNjoin("a", "b"); " "; FNis_big(500)')
+direct("PRINT FNfails")
+check(b.report_text == "ZeroDivisionError: divide by zero" or
+      b.report_text.startswith("ZeroDivisionError"), "the exception's message: %r" % b.report_text)
+direct("PRINT FNthing")
+direct('A$ = FNhalf(2)')
+
+# ON ERROR: the handler runs, ERR, ERL and REPORT tell what came; ON ERROR
+# OFF; ON ERROR LOCAL inside a PROC, LOCAL ERROR and RESTORE ERROR; ERROR
+# raises the program's own; Escape is caught, but not twice in a second.
+run("ON ERROR",
+    '10 ON ERROR PRINT "caught "; ERR; " at "; ERL; ": "; REPORT$: GOTO 40',
+    "20 PRINT 1 / 0",
+    '30 PRINT "not here"',
+    '40 ON ERROR OFF',
+    '50 ON ERROR PRINT "mine: "; ERR; " "; : REPORT: PRINT: GOTO 70',
+    '60 ERROR 100, "my error"',
+    '70 PROCsafe: PRINT "after PROCsafe"',
+    "80 ON ERROR OFF",
+    "90 PRINT nosuch",
+    "100 DEF PROCsafe",
+    "110   LOCAL ERROR",
+    '120   ON ERROR LOCAL PRINT "local: "; REPORT$: ENDPROC',
+    "130   FOR i = 1 TO 3",
+    "140     PRINT SQR(-i)",
+    "150   NEXT",
+    "160 ENDPROC")
+
+b.getkey = lambda: (_ for _ in ()).throw(KeyboardInterrupt)  # ESC, whenever asked
+program('10 ON ERROR IF ERR = 17 THEN PRINT "Escape caught": GOTO 20',
+        "20 K = INKEY(0): GOTO 20")
+direct("RUN")
+b.getkey = host.getkey
+
 # LIST: line numbers in five columns; LIST 20,30 a range.
 print("== LIST")
 program("10 REM one", "20 PRINT 2", "30 PRINT 3", "1000 END")

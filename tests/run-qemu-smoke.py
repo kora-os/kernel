@@ -1779,6 +1779,15 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         q.send("RUN\r")
         q.expect(rb"^         1         2         3\r?$")
         q.expect(rb"^block\r?$")
+        # Step 3d: an FN, defined after END, and a PROC that is Python's.
+        for line in ("70 PRINT FNsq(12): PROCshout(\"proc\")", "80 END",
+                     "90 DEF FNsq(x) = x * x"):
+            q.send(line + "\r")
+        q.send("%shout = lambda t: print(t.upper())\r")
+        q.send("RUN\r")
+        q.expect(rb"^block\r?$")
+        q.expect(rb"^       144\r?$")
+        q.expect(rb"^PROC\r?$")
         q.key("f4")
         q.expect(rb"^koracli: a program is in memory")
         q.send("NEW\r")
