@@ -321,7 +321,7 @@ categories:
         name: BBC BASIC
         status: completed
         description: A second dialect modelled on BBC BASIC V, with PROC, FN, multi-line IF and star commands.
-        prs: [131, 132, 133, 134]
+        prs: [131, 132, 133, 134, 135]
         completed: 2026-11-28
       - id: koracli-shared-variables
         name: Shared variables
