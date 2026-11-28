@@ -215,6 +215,85 @@ No such variable at line 90
 >RUN
 Escape caught
 Escape at line 20
+== star commands
+>*CAT
+[os] ls
+>*.
+[os] ls
+>*cat sys:
+[os] ls sys:
+>*DIR df0:
+[os] cd df0:
+>*TYPE notes.txt
+[os] cat notes.txt
+>*echo P. stays as typed
+[os] echo P. stays as typed
+>OSCLI "DELETE old.bas"
+[os] rm old.bas
+>OSCLI "*COPY a b"
+[os] cp a b
+>LIST
+   10 *RENAME a.txt b.txt
+   20 PRINT "after"
+>RUN
+[os] mv a.txt b.txt
+after
+>X=1:*CAT
+Mistake
+== files
+>SAVE "FIRST"
+>SAVE "SECOND"
+>NEW
+>A% = 7: B = 2: LOAD "FIRST"
+>PRINT B
+No such variable
+>RUN
+first7
+second7
+>LIST
+   10 PRINT "first"; A%
+   20 CHAIN "SECOND"
+>CHAIN "SECOND"
+second7
+>LOAD "NOSUCH"
+File not found
+>SAVE
+Missing filename
+>CHAIN "OLD"
+other dialect: Classic OLD True
+>LOAD "BAD"
+Bad program
+== RENUMBER and AUTO
+>RENUMBER
+Failed at 50
+>LIST
+   10 ON K% GOSUB 20, 30 ELSE PRINT
+   20 IF K% THEN 30 ELSE 40
+   30 RESTORE 40: GOTO 17+K%
+   40 DATA 1: GOSUB99 is data
+   50 GOSUB99
+   60 IFX>1THEN10ELSE20
+>RENUMBER 100, 5
+Failed at 120
+>LIST ,105
+  100 ON K% GOSUB 105, 110 ELSE PRINT
+  105 IF K% THEN 110 ELSE 115
+>AUTO 200, 20
+== LISTO
+>LISTO 0: LIST ,20
+   10FOR I%=1 TO 2
+   20IF I%=1 THEN
+>LISTO 3: LIST
+   10 FOR I%=1 TO 2
+   20   IF I%=1 THEN
+   30     PRINT "one"
+   40   ELSE
+   50     REPEAT: PRINT "x";: UNTIL TRUE
+   60   ENDIF
+   70 NEXT
+   80 FOR J%=1 TO 2: NEXT
+   90 END
+>LISTO 1
 == LIST
 >LIST
    10 REM one

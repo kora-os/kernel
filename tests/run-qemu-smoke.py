@@ -1743,7 +1743,8 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         q.expect(rb"^120 N = N \+ 1: GOTO 120\r?$")
         q.expect(rb"^READY\.\r?$")
         q.send("%print('writable:', bool(writable))\r")
-        if q.expect(rb"^writable: (True|False)\r?$").group(1) == b"True":
+        can_write = q.expect(rb"^writable: (True|False)\r?$").group(1) == b"True"
+        if can_write:
             q.send("%prog = writable[0].replace('kcli.txt', 'kcli')\r")
             q.expect(rb"^READY\.\r?$")
             q.send("SAVE PROG$\r")
@@ -1788,13 +1789,42 @@ def run(q, graphics=True, keyboard=None, repeat=0, multi_volume=False, write_tes
         q.expect(rb"^block\r?$")
         q.expect(rb"^       144\r?$")
         q.expect(rb"^PROC\r?$")
+        # Step 3e: a star command is an OS command; RENUMBER follows the
+        # lines. Where a volume is writable, BBC BASIC saves, and Classic
+        # BASIC's LOAD of that file asks to switch: yes loads it in BBC BASIC.
+        q.send("*echo star command\r")
+        q.expect(rb"^star command\r?$")
+        # INPUT reads a line with MicroPython's input() (the port's line
+        # editor), as KoraCLI's questions do.
+        q.send('INPUT "Name" N$: PRINT "hi "; N$\r')
+        q.expect(rb"Name")
+        time.sleep(0.3)
+        q.send("Ada\r")
+        q.expect(rb"^hi Ada\r?$")
+        q.send("RENUMBER 100, 100\r")
+        q.send("LIST 700\r")
+        q.expect(rb"^  700 PRINT FNsq\(12\)")
         q.key("f4")
         q.expect(rb"^koracli: a program is in memory")
+        if can_write:
+            q.send("SAVE prog$\r")
+            time.sleep(0.5)
         q.send("NEW\r")
         time.sleep(0.3)
         q.key("f4")
         q.expect(rb"^Classic BASIC\r?$")
         q.expect(rb"^READY\.\r?$")
+        if can_write:
+            q.send("LOAD PROG$\r")
+            q.expect(rb"Switch to BBC BASIC\? \(y/N\) ")
+            q.send("y\r")
+            q.send("LIST 700\r")
+            q.expect(rb"^  700 PRINT FNsq\(12\)")
+            q.send("NEW\r")
+            time.sleep(0.3)
+            q.key("f4")
+            q.expect(rb"^Classic BASIC\r?$")
+            q.expect(rb"^READY\.\r?$")
         # OS mode runs every line as a command, with no {expr}; F2 goes
         # back to BASIC (READY.), F3 to Python.
         q.key("f2")

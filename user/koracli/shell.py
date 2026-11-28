@@ -34,7 +34,9 @@ HELP = """KoraCLI: Python at the prompt.
   do the same in code.
   F3 switches to Python (PY), F4 to BASIC (BAS); F2 to OS commands (OS)
   and back to the language you were in. In BASIC mode, F4 switches between
-  Classic BASIC and BBC BASIC (BBC) while no program is in memory.
+  Classic BASIC and BBC BASIC (BBC) while no program is in memory; LOAD of
+  a file saved in the other dialect asks to switch. In BBC BASIC, *cmd runs
+  an OS command (*CAT lists files, *DIR changes directory).
   A line starting with a number is a BASIC program line, in every mode but
   OS; RUN runs the program, LIST lists it, NEW clears it, ESC stops it and
   CONT goes on. % runs a line of the other language: %RUN in Python mode,
@@ -61,8 +63,7 @@ def bars(state):
     if mode == "OS":
         keys_ = "F1 Help  F2 Back  F3 PY  F4 BAS"
     elif mode == "BAS" and state["dialect"] == "BBC":
-        # SAVE and LOAD come to BBC BASIC with step 3e.
-        keys_ = "F1 Help  F2 OS  F3 PY  F4 Classic  F5 Run  F8 List"
+        keys_ = "F1 Help  F2 OS  F3 PY  F4 Classic  F5 Run  F6 Save  F7 Load  F8 List"
     elif mode == "BAS":
         keys_ = "F1 Help  F2 OS  F3 PY  F4 BBC  F5 Run  F6 Save  F7 Load  F8 List"
     else:
@@ -144,8 +145,37 @@ def basic(state, dialect=None):
 
         # BASIC's variables are Python's too: the namespace Python runs in.
         b = module.Interpreter(write, readline, getkey, state["width"], state["ns"], command)
+        b.oscli = oscli  # BBC BASIC's star commands and OSCLI
         state["basics"][dialect] = b
     return b
+
+
+def oscli(line):
+    """A star command: an OS mode line, ESC the program's meanwhile."""
+    kora.esc_break(False)
+    try:
+        run_os(line)
+    finally:
+        kora.esc_break(True)
+
+
+def load_other(state, e):
+    """LOAD or CHAIN of a file in the other dialect: switch, if the answer
+    is yes, clearing the program in memory, and load it there (spec §6.3)."""
+    other = "BBC BASIC" if e.dialect == "BBC" else "Classic BASIC"
+    try:
+        answer = input("Switch to %s? (y/N) " % other)
+    except EOFError:
+        answer = ""
+    if answer.strip().lower() not in ("y", "yes"):
+        return
+    current(state).execute("NEW")
+    state["dialect"] = e.dialect
+    bars(state)
+    b = basic(state)
+    b.load_typed(e.name)
+    if e.run and b.program.lines:
+        run_basic("RUN", state)  # CHAIN: with ESC as its break
 
 
 def current(state):
@@ -154,10 +184,15 @@ def current(state):
 
 
 def run_basic(text, state):
+    import basic as runtime  # loaded with the dialect already
+
     b = basic(state)
     kora.esc_break(True)
     try:
         b.execute(text)
+    except runtime.OtherDialect as e:
+        kora.esc_break(False)
+        load_other(state, e)
     except KeyboardInterrupt:
         b.out.newline_if_needed()
         b.report_break(None, "BREAK")
@@ -257,9 +292,6 @@ def read_action(ed, state):
             if action[1] == "F8":
                 ed.type_text(text + "LIST")
                 return ed.submit()
-            if state["dialect"] == "BBC" and state["mode"] == "BAS" and \
-                    action[1] in ("F6", "F7"):
-                continue  # BBC BASIC's SAVE and LOAD come with step 3e
             if action[1] == "F6":
                 name = b.file if b is not None else None
                 ed.type_text(text + ('SAVE "%s"' % name if name else 'SAVE "'))

@@ -10,8 +10,11 @@
 # UNTIL, WHILE ENDWHILE, GOTO, GOSUB, RETURN, ON, FOR, NEXT, DIM, READ,
 # DATA, RESTORE, END, STOP, REM, SWAP, CLS, CLEAR, TIME=; DEF PROC and FN
 # with LOCAL and RETURN parameters, ON ERROR [LOCAL], LOCAL ERROR, RESTORE
-# ERROR, ERROR, REPORT; the commands RUN, LIST, NEW and CONT. Star commands
-# and files come in 3e.
+# ERROR, ERROR, REPORT; star commands (*CAT) and OSCLI; the commands RUN,
+# LIST, LISTO, NEW, CONT, SAVE, LOAD, CHAIN, RENUMBER and AUTO.
+#
+# A star command is an OS command, as `!` is: the host's `oscli(line)` runs
+# it (KoraCLI's OS mode), a few BBC names mapped to KoraOS's (STAR_NAMES).
 #
 # PROC and FN run their bodies in a loop of their own (run_body), so an FN
 # returns its value into the expression that called it; END or STOP inside
@@ -66,7 +69,12 @@ STATEMENTS = (
     "ENDWHILE", "FOR", "GOSUB", "GOTO", "IF", "INPUT", "LET", "LIST", "NEW", "NEXT", "ON",
     "OTHERWISE", "PRINT", "READ", "REM", "REPEAT", "RESTORE", "RETURN", "RUN", "STOP",
     "SWAP", "UNTIL", "WHEN", "WHILE", "DEF", "ENDPROC", "ERROR", "LOCAL", "REPORT",
+    "OSCLI", "SAVE", "LOAD", "CHAIN", "RENUMBER", "AUTO", "LISTO",
 )
+# Star commands' BBC names (any case) and KoraOS's command for each; `*.`
+# is *CAT, as on a BBC. Other names run as they are typed.
+STAR_NAMES = {"CAT": "ls", ".": "ls", "DIR": "cd", "TYPE": "cat", "DELETE": "rm",
+              "RENAME": "mv", "COPY": "cp", "CDIR": "mkdir"}
 OPERATORS = ("AND", "OR", "EOR", "DIV", "MOD", "NOT")
 CLAUSES = ("THEN", "TO", "STEP", "GOTO", "GOSUB", "ELSE", "LINE", "OF", "OFF")
 # Functions taking one operand, with or without brackets (SIN X, LEN A$):
@@ -125,11 +133,15 @@ ERRORS = {
     "ON range": 40, "No such line": 41, "Out of DATA": 42, "Not in a REPEAT loop": 43,
     "Not in a WHILE loop": 46, "Missing ENDCASE": 47, "Missing OF": 48, "Missing ENDIF": 49,
     "Not in a function": 7, "Not LOCAL": 12, "Not in a procedure": 13, "Arguments": 31,
+    "File not found": 214,
 }
 # The runtime's errors (Classic BASIC's names) in BBC BASIC's words.
 FROM_RUNTIME = {
     basic.SYNTAX: "Syntax error", basic.TYPE: "Type mismatch", basic.QUANTITY: "Too big",
     basic.UNDEF_LINE: "No such line", basic.UNDEF_FN: "No such FN/PROC", "ESCAPE": "Escape",
+    "FILE NOT FOUND": "File not found", "FILE DATA": "Bad program", "READ": "Can't read file",
+    "WRITE": "Can't write file", "UNKNOWN DIALECT": "Unknown dialect",
+    "MISSING FILE NAME": "Missing filename",
     "NEXT WITHOUT FOR": "Not in a FOR loop", "RETURN WITHOUT GOSUB": "Not in a subroutine",
     "WHILE WITHOUT WEND": "Missing ENDWHILE", "WEND WITHOUT WHILE": "Not in a WHILE loop",
     "OUT OF DATA": "Out of DATA", "DIVISION BY ZERO": "Division by zero",
@@ -259,6 +271,11 @@ def tokenize(text):
             i = s[0]
             start = False
             continue
+        if c == "*" and not toks:
+            # A star command: the rest of the line is an OS command.
+            toks.append(("W", "*", i, i + 1))
+            toks.append(("R", text[i + 1:], i + 1, n))
+            break
         if start and text.startswith("REM", i):
             toks.append(("W", "REM", i, i + 3))
             toks.append(("R", text[i + 3:], i + 3, n))
@@ -333,7 +350,10 @@ def _abbreviation(prefix):
 
 def normalize(text):
     """A line as stored: its abbreviations written in full (P. is PRINT),
-    the rest as typed. Inside strings, REM and DATA nothing changes."""
+    the rest as typed. Inside strings, REM, DATA and star commands nothing
+    changes."""
+    if text.lstrip().startswith("*"):
+        return text
     out = []
     i = 0
     n = len(text)
@@ -971,6 +991,12 @@ class Compiler:
     def statement(self, out, kinds, in_then):
         t = self.peek()
         rt = self.rt
+        if t[0] == "W" and t[1] == "*":
+            text = self.toks[self.pos + 1][1] if self.pos + 1 < len(self.toks) else ""
+            self.pos = len(self.toks)
+            out.append(lambda: rt.do_oscli(text))
+            kinds.append("*")
+            return "*"
         if t[0] == "O" and t[1] == "=":
             # An FN's value, ending its body.
             self.pos += 1
@@ -1492,6 +1518,60 @@ class Compiler:
         rt = self.rt
         out.append(lambda: rt.do_list(low, high))
 
+    def s_OSCLI(self, out, kinds, in_then):
+        line = self.string()
+        rt = self.rt
+        out.append(lambda: rt.do_oscli(line()))
+
+    def file_name(self, in_then):
+        if self.at_end(in_then):
+            raise BasicError("Missing filename")
+        return self.string()
+
+    def s_SAVE(self, out, kinds, in_then):
+        name = self.file_name(in_then)
+        rt = self.rt
+        out.append(lambda: rt.do_save(name()))
+
+    def s_LOAD(self, out, kinds, in_then):
+        name = self.file_name(in_then)
+        rt = self.rt
+        out.append(lambda: rt.bbc_load(name(), False))
+
+    def s_CHAIN(self, out, kinds, in_then):
+        name = self.file_name(in_then)
+        rt = self.rt
+        out.append(lambda: rt.bbc_load(name(), True))
+
+    def numbering(self, in_then):
+        """RENUMBER's and AUTO's [start[, step]], 10 and 10 when not given."""
+        start = step = 10
+        if not self.at_end(in_then):
+            if not self.is_op(","):
+                start = self.line_number()
+            if self.is_op(","):
+                self.pos += 1
+                step = self.line_number()
+        return start, step
+
+    def s_RENUMBER(self, out, kinds, in_then):
+        start, step = self.numbering(in_then)
+        rt = self.rt
+        out.append(lambda: rt.do_renum(start, step))
+
+    def s_AUTO(self, out, kinds, in_then):
+        start, step = self.numbering(in_then)
+        rt = self.rt
+        out.append(lambda: rt.do_auto(start, step))
+
+    def s_LISTO(self, out, kinds, in_then):
+        f = self.num()
+        rt = self.rt
+
+        def listo():
+            rt.listo = _int(f()) & 0xFF
+        out.append(listo)
+
     def s_NEW(self, out, kinds, in_then):
         out.append(self.rt.do_new)
 
@@ -1546,6 +1626,65 @@ def _from_python(v):
     if t is float or t is str:
         return v
     raise BasicError(TYPE)
+
+
+# --- Line numbers ---------------------------------------------------------------------
+
+# The words a line number follows (ON's list of them too).
+REFERENCES = ("GOTO", "GOSUB", "THEN", "ELSE", "RESTORE")
+
+
+def line_refs(text):
+    """The line numbers a program line names, as RENUMBER changes them:
+    (start, end, number) for each written after GOTO, GOSUB (and ON's
+    lists), THEN, ELSE and RESTORE, those words joined to the number or
+    not. A GOTO to an expression (GOTO 100+X) is left alone, as a BBC's
+    RENUMBER leaves it."""
+    try:
+        toks = tokenize(text)
+    except BasicError:
+        return []
+    refs = []
+    i = 0
+    while i < len(toks):
+        kind, value, s, e = toks[i]
+        i += 1
+        if kind != "W":
+            continue
+        if value not in REFERENCES:
+            k = _keyword_prefix(value, REFERENCES)
+            if k is None:
+                continue
+            if i < len(toks) and toks[i][0] == "O" and toks[i][1] == "=":
+                continue  # a name assigned to (GOTO1 = 5)
+            toks[i:i] = tokenize(" " * (s + len(k)) + value[len(k):])
+            value = k
+        while i < len(toks) and toks[i][0] == "N" and type(toks[i][1]) is int:
+            after = toks[i + 1] if i + 1 < len(toks) else None
+            if after is not None and not (after[0] == "O" and after[1] in (",", ":")) and \
+                    not (after[0] == "W" and after[1].startswith("ELSE")):
+                break  # part of an expression
+            refs.append((toks[i][2], toks[i][3], toks[i][1]))
+            i += 1
+            if value not in ("GOTO", "GOSUB") or after is None or after[1] != ",":
+                break
+            i += 1  # ON's list goes on
+    return refs
+
+
+def renumber_line(text, new):
+    """`text` with the line numbers it names changed as `new` maps them."""
+    for s, e, n in reversed(line_refs(text)):
+        if n in new:
+            text = text[:s] + str(new[n]) + text[e:]
+    return text
+
+
+# LISTO's indentation: the keywords that open a construct and those that
+# end one; ELSE, WHEN and OTHERWISE stand out a step, as they go on one.
+OPENING = ("FOR", "REPEAT", "WHILE", "CASE", "IF THEN")
+ENDING = ("NEXT", "UNTIL", "ENDWHILE", "ENDCASE", "ENDIF")
+MIDDLE = ("ELSE", "WHEN", "OTHERWISE")
 
 
 # --- Closures -------------------------------------------------------------------------
@@ -1821,6 +1960,8 @@ class Interpreter(basic.Runtime):
         self.returning = False  # ENDPROC or = ran: the body's loop ends
         self.value = None  # what = gave
         self.escaped = None  # when a handler last caught ESC
+        self.listo = 1  # LISTO: 1 a space after the number, 2 indented constructs
+        self.oscli = None  # the host's: an OS command line, run
 
     # What the runtime asks of the dialect.
 
@@ -1884,10 +2025,13 @@ class Interpreter(basic.Runtime):
         self.out.write("%s%s\n" % (word, " at line %d" % line if line is not None else ""))
 
     def line_refs(self, text):
-        return []  # RENUMBER comes with step 3e
+        return line_refs(text)
 
     def renumber_line(self, text, new):
-        return text
+        return renumber_line(text, new)
+
+    def warn_ref(self, target, line):
+        self.out.write("Failed at %d\n" % line)  # a BBC's RENUMBER, for a line not there
 
     def num_text(self, x):
         return num_str(x)
@@ -1925,9 +2069,65 @@ class Interpreter(basic.Runtime):
         self.at = _int(v)
 
     def do_list(self, low, high):
-        for number in self.order:
+        """LIST: five columns for the number, then (LISTO 1) a space; with
+        LISTO 2, the constructs' insides indented two spaces a level."""
+        depth = 0
+        gap = " " if self.listo & 1 else ""
+        for li, number in enumerate(self.order):
+            text = self.program.lines[number]
+            here = depth
+            if self.listo & 2:
+                try:
+                    kinds = self.compiled(li)[1]
+                except BasicError:
+                    kinds = []
+                names = [k[0] if type(k) is tuple else k for k in kinds]
+                if names and names[0] in ENDING:
+                    here = depth = max(depth - 1, 0)
+                elif names and names[0] in MIDDLE:
+                    here = max(depth - 1, 0)
+                for j, k in enumerate(names):
+                    if k in OPENING:
+                        depth += 1
+                    elif k in ENDING and j > 0:
+                        depth = max(depth - 1, 0)
             if low <= number <= high:
-                self.out.write("%5d %s\n" % (number, self.program.lines[number]))
+                self.out.write("%5d%s%s%s\n" % (number, gap, "  " * here, text))
+
+    # Files and OS commands.
+
+    def bbc_load(self, name, run):
+        """LOAD (run False) or CHAIN: the program from the file, the
+        variables cleared but A% to Z%. CHAIN runs it; LOAD in a program
+        ends the program."""
+        lines = self.read_file(name, run)
+        self.replace(lines, name)
+        if run:
+            return self.do_run(None)
+        self.clear()
+        if self.li >= 0:
+            return self.halt("END")
+        return None
+
+    def do_oscli(self, line):
+        """A star command, or OSCLI's: KoraOS's command, a BBC name mapped."""
+        if self.oscli is None:
+            raise BasicError(MISTAKE)
+        line = line.strip()
+        if line.startswith("*"):
+            line = line[1:].strip()  # OSCLI "*CAT", as on a BBC
+        word = line.split(" ", 1)
+        name = word[0].upper()
+        if line.startswith("."):
+            name, rest = ".", line[1:].strip()
+        else:
+            rest = word[1].strip() if len(word) > 1 else ""
+        command = STAR_NAMES.get(name)
+        if command is not None:
+            line = command + (" " + rest if rest else "")
+        self.out.newline_if_needed()
+        self.oscli(line)
+        self.out.col = 0
 
     def eval(self, text):
         """EVAL: a numeric expression in a string, compiled when it runs."""

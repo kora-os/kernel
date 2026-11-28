@@ -28,6 +28,9 @@
 #define MICROPY_ENABLE_SOURCE_LINE (1)  // tracebacks give line numbers
 #define MICROPY_PY_BUILTINS_COMPILE (1)  // KoraCLI runs blocks as the REPL does
 #define MICROPY_PY_FUNCTION_ATTRS (1)  // fn.__name__, for @kora.cmd.register
+// input(), on MicroPython's line editor: BASIC's INPUT and KoraCLI's
+// questions read lines with it.
+#define MICROPY_PY_BUILTINS_INPUT (1)
 #define MICROPY_ALLOC_PATH_MAX (256)
 
 // sys: argv (a script's arguments), path (modules), exit.

@@ -216,7 +216,13 @@ direct("RENUM")
 direct("LIST")
 with open("CLASSIC.BAS", "w") as f:
     f.write("0 REM !KoraBasic:Classic\n10 PRINT 1\n")
-direct("LOAD CLASSIC")
+try:
+    direct("LOAD CLASSIC")
+except basic.OtherDialect as e:
+    print("other dialect:", e.dialect, e.name)
+with open("FOO.BAS", "w") as f:
+    f.write("0 REM !KoraBasic:Foo\n10 SAY foo\n")
+direct("LOAD FOO")
 direct("LOAD PROG")
 direct("LIST")
 os.chdir("/")
