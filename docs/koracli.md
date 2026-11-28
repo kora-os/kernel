@@ -277,15 +277,15 @@ for scripting: use Python mode for that.
 
 ## BASIC
 
-*Works: Classic BASIC (steps 2a to 2c); BBC BASIC (steps 3b to 3d), its
-files and star commands coming in step 3e.*
+*Works: Classic BASIC (phase 2) and BBC BASIC (phase 3).*
 
 BASIC mode uses one of two dialects at a time, Classic BASIC when KoraCLI
 starts. F4 pressed in BASIC mode switches dialect while no program is in
 memory, saying `BBC BASIC` or `Classic BASIC`; with a program in memory, it
-stays and says to `NEW` or `SAVE` first. *Planned (step 3e):* `LOAD` of a
-file saved in the other dialect asks `Switch to BBC BASIC? (y/N)` (or
-Classic), and on yes switches and loads it.
+stays and says to `NEW` or `SAVE` first. `LOAD` (or BBC BASIC's `CHAIN`)
+of a file saved in the other dialect asks `Switch to BBC BASIC? (y/N)` (or
+Classic BASIC): yes clears the program in memory, switches, and loads the
+file (and runs it, for `CHAIN`); anything else leaves things as they were.
 
 | | Classic BASIC | BBC BASIC |
 |---|---|---|
@@ -388,9 +388,8 @@ when the line runs: `?SYNTAX ERROR IN 10`.
 
 ### BBC BASIC
 
-*Works (steps 3b to 3d): the statements, the constructs over several lines,
-procedures and functions, and error handling below. Star commands, `SAVE`,
-`LOAD` and `RENUMBER` come in step 3e.*
+*Works (steps 3b to 3e): the statements, the constructs over several lines,
+procedures and functions, error handling, star commands and files below.*
 
 BBC-inspired, modelled on BBC BASIC V: what a BBC BASIC manual says
 applies, though old programs are not promised to run unchanged.
@@ -406,9 +405,14 @@ Statements:
 | Procedures and functions | `DEF PROCname(a, b$)` ... `ENDPROC`, called as `PROCname(1, "x")`; `DEF FNname(x)` ... `= value`, or `DEF FNname(x) = expression` on one line; `LOCAL a, b$`; `RETURN` before a parameter (`DEF PROCswap(RETURN a, RETURN b)`) |
 | Errors | `ON ERROR statements`, `ON ERROR LOCAL statements`, `ON ERROR OFF`; `LOCAL ERROR`, `RESTORE ERROR`; `ERROR number, "message"`; `REPORT` |
 | Data | `DATA` (to the line's end), `READ`, `RESTORE [line]` |
+| OS commands | `*command` as a line's first statement (`*CAT`), `OSCLI "command"` for one built as a string |
 | Others | `REM` |
 
-Commands: `RUN`, `LIST` (`LIST 20`, `LIST 20,50`, `LIST 20,`, `LIST ,50`),
+Commands: `SAVE "name"`, `LOAD "name"` and `CHAIN "name"` (load, then
+run; see [Files](#files)), `RENUMBER [start[,step]]` and `AUTO
+[start[,step]]` (as Classic BASIC's RENUM and AUTO), `LISTO n` (1, the
+default, a space after the line number; 2 the constructs' insides
+indented; 3 both), `RUN`, `LIST` (`LIST 20`, `LIST 20,50`, `LIST 20,`, `LIST ,50`),
 `NEW`, and `CONT`, which BBC BASIC does not have.
 
 Functions: `ABS`, `ACS`, `ASN`, `ATN`, `COS`, `DEG`, `EXP`, `INT`, `LN`,
@@ -508,9 +512,18 @@ line 20`), with its numbers; ESC stops a program with `Escape at line 20`,
   break or `STOP` left. A name starting with `PROC` or `FN` is a call.
   Parameters are variables, not arrays. A `PROC` or `FN` the program does
   not define is Python's, not a mistake.
-- Not there yet: what step 3e brings (above), the indirection operators and
-  `SYS` (phase 4), and `MODE`, `PLOT`, `VDU` and the rest of the graphics
-  and sound (phase 5).
+- Star commands are KoraOS's commands, run as OS mode runs them: `*CAT` (or
+  `*.`) is `ls`, `*DIR` `cd`, `*TYPE` `cat`, `*DELETE` `rm`, `*RENAME`
+  `mv`, `*COPY` `cp` and `*CDIR` `mkdir`; any other runs as typed (`*echo
+  hi`). As on a BBC, `*` must start the line; mid-line, use `OSCLI`.
+- Files are text, as Classic BASIC's (`.BAS`, a header line). `LOAD` in a
+  program ends it with the new one in memory; `CHAIN` runs it, keeping
+  only `A%` to `Z%`. A file's mistakes are `Bad program`, a missing file
+  `File not found` (`ERR` 214).
+- `LISTO` has KoraCLI's two options; BASIC V's others (splitting at
+  colons and the like) are not there.
+- Not there yet: the indirection operators and `SYS` (phase 4), and `MODE`,
+  `PLOT`, `VDU` and the rest of the graphics and sound (phase 5).
 
 ### Files
 
@@ -532,11 +545,12 @@ READY.
   when the name has no extension. The name is any string expression
   (`SAVE N$`), and a C64's `,8` or `,8,1` after it is accepted and ignored.
 - **The file's first line records the dialect:** `0 REM
-  !KoraBasic:Classic`, written by `SAVE` (`0 REM !KoraBasic:BBC` once BBC
-  BASIC exists). The header belongs to the file only: `LOAD` takes it
-  away, so `LIST` never shows it and a program's own line 0 stays its own.
-  A file without a header loads as Classic BASIC; one for another dialect
-  is `?UNKNOWN DIALECT ERROR` for now.
+  !KoraBasic:Classic`, written by `SAVE` (`0 REM !KoraBasic:BBC` in BBC
+  BASIC). The header belongs to the file only: `LOAD` takes it away, so
+  `LIST` never shows it and a program's own line 0 stays its own. A file
+  without a header loads in the dialect in use; one saved in the other
+  dialect asks to switch (see [BASIC](#basic)), and one naming a dialect
+  KoraCLI does not have is `?UNKNOWN DIALECT ERROR`.
 - **`LOAD` replaces the program and clears BASIC's variables,** as `NEW`
   does. In a program it chains, as on a C64: the new program runs from its
   start with the variables kept.
@@ -665,7 +679,7 @@ beepbeepbeep
 | F3 | All modes | Python mode |
 | F4 | Python and OS modes | BASIC mode |
 | F4 | BASIC mode | The other dialect, while no program is in memory |
-| F5, F6, F7, F8 | Python and BASIC modes | `RUN`, `SAVE`, `LOAD`, `LIST` (in BBC BASIC, F6 and F7 come with step 3e) |
+| F5, F6, F7, F8 | Python and BASIC modes | `RUN`, `SAVE`, `LOAD`, `LIST` |
 | ESC | While Python or BASIC runs | Interrupts it (`CONT` resumes BASIC) |
 | ESC | At the prompt | Nothing yet; may clear the line |
 | Ctrl+C | While a program runs | Stops the program in front. A program may catch it; a second Ctrl+C stops it anyway |

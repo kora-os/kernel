@@ -214,6 +214,19 @@ def converter(name):
 # only: LOAD takes it away, so a program's own line 0 stays its own.
 
 HEADER = "0 REM !KoraBasic:"
+DIALECTS = ("Classic", "BBC")
+
+
+class OtherDialect(Exception):
+    """A file saved in the other dialect: out of the interpreter to
+    KoraCLI, which asks before it switches (spec §6.3). `name` is the file's
+    as LOAD was given it, `run` whether it was CHAIN (load, then run)."""
+
+    def __init__(self, dialect):
+        super().__init__(dialect)
+        self.dialect = dialect
+        self.name = None
+        self.run = False
 
 
 def file_path(name):
@@ -237,7 +250,11 @@ def read_program(text, dialect, normalize=None):
         if first:
             first = False
             if line.upper().startswith(HEADER.upper()):
-                if line[len(HEADER):].strip().upper() != dialect.upper():
+                named = line[len(HEADER):].strip().upper()
+                if named != dialect.upper():
+                    for d in DIALECTS:
+                        if d.upper() == named:
+                            raise OtherDialect(d)
                     raise BasicError("UNKNOWN DIALECT")
                 continue
         if not ("0" <= line[0] <= "9"):
@@ -826,28 +843,53 @@ class Runtime:
         self.file = name
         return None
 
-    def do_load(self, name):
-        """LOAD: the program from the file, in place of the one in memory.
-        Typed, it clears the variables, as NEW does; in a program, the new
-        one runs from its start with the variables kept (a C64's chaining)."""
+    def read_file(self, name, run=False):
+        """A program file's lines; OtherDialect for one saved in the other
+        dialect, carrying `name` and `run` (CHAIN) for KoraCLI."""
         path = file_path(name)
-        direct = self.li < 0
-        if direct:
-            self.announce("search", name)
         try:
             with open(path) as f:
                 text = f.read()
         except OSError as e:
             raise BasicError("FILE NOT FOUND" if e.args and e.args[0] == 2 else "READ")
-        lines = read_program(text, self.DIALECT, self.normalize)
-        if direct:
-            self.announce("load", name)
+        try:
+            return read_program(text, self.DIALECT, self.normalize)
+        except OtherDialect as e:
+            e.name = name
+            e.run = run
+            raise
+
+    def replace(self, lines, name):
+        """The program in memory replaced by `lines` (from file `name`)."""
         self.program.lines = lines
         self.program.version += 1
         self.code = {}
         self.cont = None
         self.file = name
         self._sync()
+
+    def load_typed(self, name):
+        """LOAD as if typed, for KoraCLI once it has switched dialect: its
+        mistakes reported."""
+        self._sync()
+        self.li = -1
+        try:
+            self.do_load(name)
+        except BasicError as e:
+            self.report(e, None)
+
+    def do_load(self, name):
+        """LOAD: the program from the file, in place of the one in memory.
+        Typed, it clears the variables, as NEW does; in a program, the new
+        one runs from its start with the variables kept (a C64's chaining)."""
+        file_path(name)  # a missing name, before anything is said
+        direct = self.li < 0
+        if direct:
+            self.announce("search", name)
+        lines = self.read_file(name)
+        if direct:
+            self.announce("load", name)
+        self.replace(lines, name)
         if direct:
             self.clear()
             return None

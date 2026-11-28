@@ -395,6 +395,92 @@ program('10 ON ERROR IF ERR = 17 THEN PRINT "Escape caught": GOTO 20',
 direct("RUN")
 b.getkey = host.getkey
 
+# Star commands and OSCLI (step 3e): OS commands, BBC names mapped; the
+# host runs them (here a stand-in that shows the line).
+print("== star commands")
+b.oscli = lambda line: print("[os] " + line)
+direct("*CAT")
+direct("*.")
+direct("*cat sys:")
+direct("*DIR df0:")
+direct("*TYPE notes.txt")
+direct("*echo P. stays as typed")
+direct('OSCLI "DELETE old.bas"')
+direct('OSCLI "*COPY a b"')
+program("10 *RENAME a.txt b.txt", '20 PRINT "after"')
+direct("LIST")
+direct("RUN")
+direct('X=1:*CAT')
+
+# SAVE, LOAD and CHAIN, with BBC's header; LOAD in a program ends it, CHAIN
+# runs the new one with A% to Z% kept; a Classic file is KoraCLI's to ask.
+print("== files")
+import os
+DIR = "/tmp/koracli-bbc-test"
+try:
+    os.mkdir(DIR)
+except OSError:
+    pass
+os.chdir(DIR)
+for f in os.listdir():
+    os.remove(f)
+program('10 PRINT "first"; A%', '20 CHAIN "SECOND"')
+direct('SAVE "FIRST"')
+with open("FIRST.BAS") as f:
+    text = f.read()
+check(text == '0 REM !KoraBasic:BBC\n10 PRINT "first"; A%\n20 CHAIN "SECOND"\n',
+      "the file: %r" % text)
+program('10 PRINT "second"; A%', '20 LOAD "FIRST"', '30 PRINT "not here"')
+direct('SAVE "SECOND"')
+direct("NEW")
+direct('A% = 7: B = 2: LOAD "FIRST"')
+direct("PRINT B")
+direct("RUN")
+direct("LIST")
+direct('CHAIN "SECOND"')
+direct('LOAD "NOSUCH"')
+direct("SAVE")
+with open("OLD.BAS", "w") as f:
+    f.write("0 REM !KoraBasic:Classic\n10 PRINT 1\n")
+try:
+    direct('CHAIN "OLD"')
+    check(False, "a Classic file: KoraCLI asks to switch")
+except basic.OtherDialect as e:
+    print("other dialect:", e.dialect, e.name, e.run)
+with open("BAD.BAS", "w") as f:
+    f.write("PRINT\n")
+direct('LOAD "BAD"')
+os.chdir("/")
+for f in os.listdir(DIR):
+    os.remove(DIR + "/" + f)
+os.rmdir(DIR)
+
+# RENUMBER: GOTO, GOSUB, ON's lists, THEN, ELSE, RESTORE, joined or not; a
+# computed GOTO left alone; a line not there warned about. AUTO.
+print("== RENUMBER and AUTO")
+program("5 ON K% GOSUB 17, 23 ELSE PRINT", "17 IF K% THEN 23 ELSE 31",
+        "23 RESTORE 31: GOTO 17+K%", "31 DATA 1: GOSUB99 is data", "35 GOSUB99",
+        "40 IFX>1THEN5ELSE17")
+direct("RENUMBER")
+direct("LIST")
+direct("RENUMBER 100, 5")
+direct("LIST ,105")
+direct("AUTO 200, 20")
+check(b.auto_text() == "200 ", "AUTO's first number: %r" % b.auto_text())
+b.enter("200 PRINT")
+check(b.auto_text() == "220 ", "and the next: %r" % b.auto_text())
+b.enter("220")
+check(b.auto is None, "the number alone ends AUTO")
+
+# LISTO: 0 no space after the number, 2 the constructs indented.
+print("== LISTO")
+program("10 FOR I%=1 TO 2", "20 IF I%=1 THEN", '30 PRINT "one"', "40 ELSE",
+        '50 REPEAT: PRINT "x";: UNTIL TRUE', "60 ENDIF", "70 NEXT", "80 FOR J%=1 TO 2: NEXT",
+        "90 END")
+direct("LISTO 0: LIST ,20")
+direct("LISTO 3: LIST")
+direct("LISTO 1")
+
 # LIST: line numbers in five columns; LIST 20,30 a range.
 print("== LIST")
 program("10 REM one", "20 PRINT 2", "30 PRINT 3", "1000 END")

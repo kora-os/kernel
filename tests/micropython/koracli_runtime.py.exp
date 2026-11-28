@@ -40,6 +40,8 @@ toy: no line 77 (in 120)
 110 SUB 120; END
 120 SAY sub; BACK; GO 77
 > LOAD CLASSIC
+other dialect: Classic CLASSIC
+> LOAD FOO
 toy: unknown dialect
 > LOAD PROG
 > LIST

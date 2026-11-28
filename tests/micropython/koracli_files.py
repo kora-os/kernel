@@ -8,6 +8,7 @@
 
 import os
 
+import basic
 import classic
 
 failures = 0
@@ -93,7 +94,13 @@ direct('LOAD "BAD"')
 write("BIG.BAS", "64000 PRINT\n")
 direct('LOAD "BIG"')
 write("BBC.BAS", "0 REM !KoraBasic:BBC\n10 PRINT \"BBC\"\n")
-direct('LOAD "BBC"')
+try:
+    direct('LOAD "BBC"')
+    check(False, "a BBC file: KoraCLI asks to switch")
+except basic.OtherDialect as e:
+    print("other dialect:", e.dialect, e.name, e.run)
+write("FOO.BAS", "0 REM !KoraBasic:Foo\n10 PRINT\n")
+direct('LOAD "FOO"')
 direct("LIST")
 direct("SAVE")
 direct('LOAD ""')

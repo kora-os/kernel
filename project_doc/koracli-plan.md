@@ -97,7 +97,7 @@ From the spec's §17, with the PRs of phases 0 and 1:
 | 1 | The console's new parts; KoraCLI with Python mode | 1a, 1b |
 | 1b | OS commands and OS mode; the shell replaced | 1c, 1d |
 | 2 | Classic BASIC | 2a, 2b, 2c |
-| 3 | BBC BASIC | 3a to 3e |
+| 3 | BBC BASIC | 3a to 3e (done) |
 | 4 | Machine access: PEEK/POKE, indirection, `SYS`, GPIO | later |
 | 5 | Graphics and sound on a canvas screen | later |
 | 6 | Full-screen editor, help, F-key configuration, startup file | later |
@@ -401,7 +401,7 @@ Phase 3, BBC BASIC. Decided 2026-11-26 (spec §6.2, §6.3):
   Tests: listings with nested constructs of each kind, each one's
   mistakes, on the unix port (`koracli_bbc.py`); the smoke step runs a
   multi-line IF.
-- [ ] **3d. Procedures, functions and errors.** DEF PROC, ENDPROC, DEF FN,
+- [x] **3d. Procedures, functions and errors.** (#134) DEF PROC, ENDPROC, DEF FN,
   `=`, parameters, LOCAL, BASIC V's RETURN parameters, recursion; a PROC or
   FN the program does not define calls Python's function of that name
   (spec §9.1). ON ERROR, LOCAL ERROR, ERR, ERL, REPORT.
@@ -426,6 +426,29 @@ Phase 3, BBC BASIC. Decided 2026-11-26 (spec §6.2, §6.3):
 - [ ] **3e. Star commands, files and switching on LOAD.** `*` commands and
   OSCLI; SAVE, LOAD and CHAIN with the BBC header; RENUMBER, AUTO, LISTO;
   F5 to F8 in BBC BASIC; LOAD of a file in the other dialect asking first.
+  *Built:* a `*` that starts a line takes the rest as an OS command, run
+  by the host's `oscli` (KoraCLI's OS mode), with `*CAT`, `*.`, `*DIR`,
+  `*TYPE`, `*DELETE`, `*RENAME`, `*COPY` and `*CDIR` mapped to KoraOS's
+  commands; normalize leaves star lines alone. The runtime's LOAD is split
+  into `read_file` and `replace`; a header naming the other dialect raises
+  `basic.OtherDialect` (with the name and whether it was CHAIN), which
+  leaves the interpreter: KoraCLI asks, and on yes clears the program,
+  switches, and loads (`load_typed`), running it for CHAIN. In BBC BASIC,
+  LOAD in a program ends it, CHAIN runs the new one with A% to Z% kept.
+  RENUMBER follows literal line numbers after GOTO, GOSUB, ON's lists,
+  THEN, ELSE and RESTORE, leaving a computed GOTO alone, and warns `Failed
+  at n`. LISTO 1 (the default) is the space after the number, 2 indents
+  the constructs. File errors in BBC's words (`File not found`, `Bad
+  program`). The port gains `input()` (MICROPY_PY_BUILTINS_INPUT, on
+  MicroPython's line editor), which LOAD's question needs: KoraCLI's
+  `readline` for INPUT had called it since 2a, but the port's feature
+  level left it out, so INPUT failed on KoraOS (the unix port's tests
+  have it). PHASE 3 DONE.
+  Tests: star commands with a stand-in host, SAVE, LOAD, CHAIN, a Classic
+  file, RENUMBER, AUTO and LISTO (`koracli_bbc.py`); Classic's LOAD of a
+  BBC file (`koracli_files.py`); the smoke step runs a star command and
+  RENUMBER and, where a volume is writable, saves in BBC BASIC and loads
+  from Classic BASIC, switching.
 
 Indirection (`?`, `!`, `$`) and `SYS` in BBC BASIC come with phase 4, and
 MODE, PLOT and CLG with phase 5.
